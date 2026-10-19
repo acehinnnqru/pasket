@@ -51,6 +51,11 @@ struct ContentView: View {
         }
         .buttonStyle(PasketButtonStyle())
         .background {
+            WindowKeyStateObserver { isKey in
+                searchFocused = isKey && !isFilterMenuPresented && !isConfirmingClear
+            }
+        }
+        .background {
             ShortcutEventMonitor { event in
                 guard !isFilterMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
                       shortcuts.deletionShortcut?.matches(event) == true else { return false }
@@ -79,11 +84,9 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear { searchFocused = true }
         .task(id: store.selectedItem?.id) { await store.loadPreview(for: store.selectedItem) }
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
-            searchFocused = true
         }
         .onChange(of: isConfirmingClear) {
             if !isConfirmingClear { searchFocused = true }
@@ -409,6 +412,47 @@ struct ContentView: View {
     private func dismissFilterMenu() {
         isFilterMenuPresented = false
         searchFocused = true
+    }
+}
+
+private struct WindowKeyStateObserver: NSViewRepresentable {
+    var onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: ObserverView, context: Context) {
+        nsView.onChange = onChange
+    }
+
+    final class ObserverView: NSView {
+        var onChange: (Bool) -> Void = { _ in }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self)
+            guard let window else { return }
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                center.addObserver(self, selector: #selector(windowKeyStateChanged), name: name, object: window)
+            }
+            windowKeyStateChanged()
+        }
+
+        @objc private func windowKeyStateChanged() {
+            // Let AppKit finish changing the key window before SwiftUI requests the field editor.
+            DispatchQueue.main.async { [weak self, weak window = window] in
+                guard let self, let window, self.window === window else { return }
+                self.onChange(window.isKeyWindow)
+            }
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
     }
 }
 

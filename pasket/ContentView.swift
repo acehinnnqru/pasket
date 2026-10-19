@@ -16,7 +16,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
-            if store.clipboardAccessDenied {
+            if !store.isDebugMode, store.clipboardAccessDenied {
                 HStack {
                     Label("Clipboard access is denied. Allow Pasket in System Settings, then copy again.", systemImage: "hand.raised")
                         .font(.caption)
@@ -30,7 +30,7 @@ struct ContentView: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(.orange.opacity(0.1))
             }
-            if let error = store.storageError {
+            if !store.isDebugMode, let error = store.storageError {
                 HStack {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -156,7 +156,7 @@ struct ContentView: View {
                     if store.isLoading {
                         ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
                     } else if store.filteredItems.isEmpty {
-                        if store.items.isEmpty {
+                        if store.displayedItems.isEmpty {
                             ContentUnavailableView("Your basket is empty", systemImage: "basket",
                                 description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
                                 .frame(maxWidth: .infinity)
@@ -184,7 +184,7 @@ struct ContentView: View {
                         .task(id: item.id) { await store.loadThumbnail(for: item) }
                         .contextMenu {
                             Button("Delete", role: .destructive) { store.delete(item.id) }
-                                .disabled(store.isStorageBlocked)
+                                .disabled(store.isDebugMode || store.isStorageBlocked)
                         }
                     }
                 }
@@ -236,6 +236,7 @@ struct ContentView: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Button("Restore File Access…") { onRestoreFileAccess(item) }
+                                    .disabled(store.isDebugMode)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         default:
@@ -321,19 +322,33 @@ struct ContentView: View {
                     .accessibilityIdentifier("clipboardNotice")
             }
             HStack(spacing: 6) {
-            Label(store.clipboardAccessDenied ? "Access denied" : store.isPaused ? "Paused" : "\(store.items.count) items",
-                  systemImage: store.clipboardAccessDenied ? "hand.raised" : store.isPaused ? "pause.circle" : "basket")
+            Label(store.isDebugMode ? "\(store.displayedItems.count) items" : store.clipboardAccessDenied ? "Access denied" : store.isPaused ? "Paused" : "\(store.items.count) items",
+                  systemImage: store.isDebugMode ? "basket" : store.clipboardAccessDenied ? "hand.raised" : store.isPaused ? "pause.circle" : "basket")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .help("Up to 1,000 items. Text is limited to 2,000 characters; image storage to 500 MB.")
             Spacer()
+            #if DEBUG
+            Toggle("Debug mode", isOn: Binding(get: { store.isDebugMode }, set: { enabled in
+                isConfirmingClear = false
+                dismissFilterMenu()
+                store.setDebugMode(enabled)
+            }))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.system(size: 12))
+                .fixedSize()
+                .disabled(store.isLoading || store.isCopying)
+                .help("Show sample data for screenshots")
+                .accessibilityIdentifier("debugModeToggle")
+            #endif
             Button(store.isPaused ? "Resume" : "Pause", systemImage: store.isPaused ? "play" : "pause") {
                 store.setPaused(!store.isPaused)
             }
             .labelStyle(.iconOnly)
             .buttonStyle(PasketButtonStyle(isActive: store.isPaused))
             .focusable(false)
-            .disabled(store.isLoading || store.isStorageBlocked)
+            .disabled(store.isDebugMode || store.isLoading || store.isStorageBlocked)
             .help(store.isPaused ? "Resume collection" : "Pause collection")
             Button(role: .destructive) {
                 if let item = store.selectedItem { store.delete(item.id) }
@@ -345,7 +360,7 @@ struct ContentView: View {
             .font(.system(size: 12))
             .focusable(false)
             .fixedSize()
-            .disabled(store.selectedItem == nil || store.isLoading || store.isStorageBlocked)
+            .disabled(store.isDebugMode || store.selectedItem == nil || store.isLoading || store.isStorageBlocked)
             .help(shortcuts.deletionShortcut.map { "Delete the selected history entry (\($0.displayName))" }
                   ?? "Delete the selected history entry")
             .accessibilityIdentifier("deleteSelectedClipboardItem")
@@ -354,7 +369,7 @@ struct ContentView: View {
                 .font(.system(size: 12))
                 .focusable(false)
                 .fixedSize()
-                .disabled(store.items.isEmpty || store.isLoading || store.isStorageBlocked)
+                .disabled(store.isDebugMode || store.items.isEmpty || store.isLoading || store.isStorageBlocked)
                 .help("Clear all clipboard history after confirmation")
                 .accessibilityIdentifier("clearClipboardHistory")
             Button(action: onOpenSettings) {

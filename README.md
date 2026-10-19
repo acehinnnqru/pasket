@@ -22,6 +22,11 @@ Pasket lives in the menu bar and opens its history panel at launch.
   entry or the separate **Clear All…** button to clear history with confirmation.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.
+- Debug builds include a **Debug mode** toggle in the panel footer. Turn it on to show fictional
+  text, links, email, an illustration, and a file reference for screenshots. Search, filters, and
+  previews use only these samples. Collection pauses and history actions are disabled while it is
+  on. Turning it off restores your saved history and previous collection state. Samples and the
+  toggle state are never saved; Release builds do not include this control or sample data.
 
 macOS may request permission when Pasket first reads a new clipboard entry. Allow clipboard
 access for background collection. If access is denied, the panel offers to open System Settings.

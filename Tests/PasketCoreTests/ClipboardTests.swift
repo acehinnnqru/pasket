@@ -4,6 +4,74 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    #if DEBUG
+    @Test func debugModeIsolatesSamplesAndPreservesRealHistory() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        await fixture.copy("Private clipboard content")
+        let originalID = try #require(fixture.store.items.first?.id)
+        fixture.store.query = "Private"
+        fixture.store.filter = .text
+
+        fixture.store.setDebugMode(true)
+        #expect(fixture.store.query.isEmpty)
+        #expect(fixture.store.filter == .all)
+        #expect(!fixture.store.filteredItems.isEmpty)
+        #expect(!fixture.store.displayedItems.contains { $0.id == originalID || $0.content.contains("Private") })
+        #expect(fixture.store.selectedItem?.id == fixture.store.displayedItems.first?.id)
+        #expect(!fixture.store.canCopySelection)
+        #expect(await fixture.store.copySelection() == false)
+        #expect(fixture.pasteboard.string(forType: .string) == "Private clipboard content")
+
+        fixture.store.delete(originalID)
+        fixture.store.clearHistory()
+        fixture.store.setPaused(true)
+        await fixture.copy("Copied during screenshot mode")
+        #expect(fixture.store.items.map(\.id) == [originalID])
+        #expect(!fixture.store.isPaused)
+
+        fixture.store.setDebugMode(false)
+        #expect(fixture.store.selectedItem?.id == originalID)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        #expect(fixture.store.items.map(\.id) == [originalID])
+        await fixture.copy("Copied after screenshot mode")
+        #expect(fixture.store.items.count == 2)
+        await fixture.restart()
+        #expect(!fixture.store.isDebugMode)
+        #expect(fixture.store.items.map(\.content) == ["Copied after screenshot mode", "Private clipboard content"])
+        await fixture.cleanUp()
+    }
+
+    @Test func debugSamplesSupportFiltersSearchAndImagePreviews() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        fixture.store.setPaused(true)
+        fixture.store.setDebugMode(true)
+        #expect(Set(fixture.store.displayedItems.map(\.kind)) == Set(ClipboardKind.allCases))
+        fixture.store.query = "example.com"
+        #expect(!fixture.store.filteredItems.isEmpty)
+        #expect(fixture.store.filteredItems.allSatisfy { [.email, .link].contains($0.kind) })
+        fixture.store.prepareForPresentation()
+        fixture.store.filter = .images
+        fixture.store.reconcileSelection()
+        let image = try #require(fixture.store.selectedItem)
+        await fixture.store.loadThumbnail(for: image)
+        await fixture.store.loadPreview(for: image)
+        #expect(fixture.store.thumbnails[image.id] != nil)
+        #expect(fixture.store.previewImage != nil)
+        #expect(fixture.store.previewID == image.id)
+        #expect(fixture.store.unavailableItems.isEmpty)
+        fixture.store.setDebugMode(false)
+        #expect(fixture.store.previewImage == nil)
+        #expect(fixture.store.displayedItems.isEmpty)
+        #expect(fixture.store.isPaused)
+        await fixture.copy("Still paused")
+        #expect(fixture.store.items.isEmpty)
+        await fixture.cleanUp()
+    }
+    #endif
+
     @Test func classificationRequiresAnEntireLinkOrEmail() {
         #expect(ClipboardItem.classify("https://example.com/path?q=1") == .link)
         #expect(ClipboardItem.classify(" \nhttps://example.com/path\n") == .link)

@@ -21,6 +21,21 @@ final class ClipboardStore {
     private(set) var missingPreviews: Set<UUID> = []
     private(set) var unavailableItems: Set<UUID> = []
 
+    #if DEBUG
+    private(set) var isDebugMode = false
+    #else
+    var isDebugMode: Bool { false }
+    #endif
+
+    var displayedItems: [ClipboardItem] {
+        #if DEBUG
+        if isDebugMode { return ClipboardSamples.items }
+        #endif
+        return items
+    }
+
+    private var shouldPauseMonitoring: Bool { isPaused || storageBlocked || isDebugMode }
+
     @ObservationIgnored private let persistence: ClipboardPersistence
     @ObservationIgnored private let pasteboard: NSPasteboard
     @ObservationIgnored private let monitor: ClipboardMonitor
@@ -47,7 +62,7 @@ final class ClipboardStore {
 
     var filteredItems: [ClipboardItem] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return items.filter { item in
+        return displayedItems.filter { item in
             (filter == .images ? item.hasImagePreview : filter.kind == nil || filter.kind == item.kind)
                 && (search.isEmpty || [item.title, item.content, item.source.name, item.source.bundleIdentifier ?? ""].contains {
                     $0.localizedStandardContains(search)
@@ -57,7 +72,7 @@ final class ClipboardStore {
 
     var selectedItem: ClipboardItem? { filteredItems.first { $0.id == selectedID } }
     var isStorageBlocked: Bool { storageBlocked }
-    var canCopySelection: Bool { selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
+    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
     var imageStorageBytes: Int { items.reduce(0) { $0 + $1.imageByteCount } }
 
     func start() async {
@@ -65,7 +80,7 @@ final class ClipboardStore {
         hasStarted = true
         await load()
         if !stopRequested { monitor.start() }
-        monitor.setPaused(isPaused || storageBlocked)
+        monitor.setPaused(shouldPauseMonitoring)
         if !storageBlocked { persist() }
         await refreshFileAvailability()
     }
@@ -78,7 +93,7 @@ final class ClipboardStore {
     func resumeMonitoring() {
         stopRequested = false
         monitor.start()
-        monitor.setPaused(isPaused || storageBlocked)
+        monitor.setPaused(shouldPauseMonitoring)
     }
 
     private func load() async {
@@ -101,7 +116,7 @@ final class ClipboardStore {
     func retryStorage() async {
         if storageBlocked {
             await load()
-            monitor.setPaused(isPaused || storageBlocked)
+            monitor.setPaused(shouldPauseMonitoring)
         } else {
             persist()
             await saveTask?.value
@@ -109,10 +124,10 @@ final class ClipboardStore {
     }
 
     func setPaused(_ paused: Bool) {
-        guard !isLoading, !storageBlocked else { return }
+        guard !isDebugMode, !isLoading, !storageBlocked else { return }
         captureGeneration += 1
         isPaused = paused
-        monitor.setPaused(paused)
+        monitor.setPaused(shouldPauseMonitoring)
         notice = nil
         persist()
     }
@@ -120,13 +135,25 @@ final class ClipboardStore {
     func prepareForPresentation() {
         query = ""
         filter = .all
-        selectedID = items.first?.id
+        selectedID = displayedItems.first?.id
         copyError = nil
         presentationID = UUID()
         Task { await refreshFileAvailability() }
     }
 
     func invalidatePresentation() { presentationID = UUID() }
+
+    #if DEBUG
+    func setDebugMode(_ enabled: Bool) {
+        guard isDebugMode != enabled else { return }
+        captureGeneration += 1
+        isDebugMode = enabled
+        monitor.setPaused(shouldPauseMonitoring)
+        clearPreview()
+        notice = nil
+        prepareForPresentation()
+    }
+    #endif
 
     func reconcileSelection() {
         copyError = nil
@@ -144,7 +171,7 @@ final class ClipboardStore {
     }
 
     func delete(_ id: UUID) {
-        guard !storageBlocked, !isLoading, let deleted = items.first(where: { $0.id == id }) else { return }
+        guard !isDebugMode, !storageBlocked, !isLoading, let deleted = items.first(where: { $0.id == id }) else { return }
         let cutoff = Date()
         deletionCutoffs[deleted.fingerprint] = cutoff
         let pendingCapture = captureTask
@@ -165,7 +192,7 @@ final class ClipboardStore {
     }
 
     func clearHistory() {
-        guard !storageBlocked, !isLoading else { return }
+        guard !isDebugMode, !storageBlocked, !isLoading else { return }
         captureGeneration += 1
         deletionCutoffs = [:]
         monitor.checkpoint()
@@ -183,7 +210,7 @@ final class ClipboardStore {
 
     @discardableResult
     func copySelection() async -> Bool {
-        guard let item = selectedItem, !isCopying, !isLoading else { return false }
+        guard !isDebugMode, let item = selectedItem, !isCopying, !isLoading else { return false }
         isCopying = true
         defer { isCopying = false }
         let presentation = presentationID
@@ -228,7 +255,7 @@ final class ClipboardStore {
     }
 
     func restoreFileAccess(_ item: ClipboardItem) {
-        guard item.kind == .file, !storageBlocked, !isLoading else { return }
+        guard !isDebugMode, item.kind == .file, !storageBlocked, !isLoading else { return }
         var replacements: [ClipboardFile] = []
         for file in item.files {
             let panel = NSOpenPanel()
@@ -261,6 +288,12 @@ final class ClipboardStore {
     }
 
     func loadThumbnail(for item: ClipboardItem) async {
+        #if DEBUG
+        if isDebugMode {
+            if item.hasImagePreview { thumbnails[item.id] = ClipboardSamples.image }
+            return
+        }
+        #endif
         guard item.hasImagePreview, thumbnails[item.id] == nil, !thumbnailRequests.contains(item.id) else { return }
         thumbnailRequests.insert(item.id)
         defer { thumbnailRequests.remove(item.id) }
@@ -294,6 +327,16 @@ final class ClipboardStore {
     }
 
     func loadPreview(for item: ClipboardItem?) async {
+        #if DEBUG
+        if isDebugMode {
+            clearPreview()
+            if let item, item.hasImagePreview {
+                previewID = item.id
+                previewImage = ClipboardSamples.image
+            }
+            return
+        }
+        #endif
         guard let item, item.hasImagePreview else {
             clearPreview()
             return
@@ -360,6 +403,7 @@ final class ClipboardStore {
     }
 
     private func enqueue(_ capture: ClipboardCapture) {
+        guard !isDebugMode else { return }
         let previous = captureTask
         let generation = captureGeneration
         captureTask = Task { [weak self] in
@@ -448,3 +492,60 @@ final class ClipboardStore {
         "files:" + ClipboardItem.digest((try? JSONEncoder().encode(files.map(\.path))) ?? Data())
     }
 }
+
+#if DEBUG
+@MainActor
+private enum ClipboardSamples {
+    static let items: [ClipboardItem] = {
+        let date = Date()
+        var entries = [
+            ClipboardItem.text("A little space for your next big idea.\n\nCollect the things that inspire you, keep useful details close, and pick up right where you left off.",
+                               source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: date),
+            ClipboardItem.text("https://example.com/design/journal",
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-120)),
+            ClipboardItem(kind: .image, title: "Mountain afternoon", content: "Sample landscape illustration",
+                          source: ClipboardSource(name: "Preview", bundleIdentifier: "com.apple.Preview"),
+                          copiedAt: date.addingTimeInterval(-300), fingerprint: "sample:landscape",
+                          image: ClipboardImage(fileName: "sample.png", thumbnailName: "sample-thumb.png",
+                                                byteCount: 48_000, thumbnailByteCount: 4_000, width: 640, height: 400)),
+            ClipboardItem.text("hello@example.com", source: ClipboardSource(name: "Mail", bundleIdentifier: "com.apple.mail"),
+                               at: date.addingTimeInterval(-600)),
+            ClipboardItem(kind: .file, title: "Brand Guidelines.pdf", content: "/Sample/Documents/Brand Guidelines.pdf",
+                          source: ClipboardSource(name: "Finder", bundleIdentifier: "com.apple.finder"),
+                          copiedAt: date.addingTimeInterval(-900), fingerprint: "sample:document",
+                          files: [ClipboardFile(path: "/Sample/Documents/Brand Guidelines.pdf", name: "Brand Guidelines.pdf",
+                                                byteCount: 2_400_000, isSecurityScoped: true)]),
+            ClipboardItem.text("Weekend plans\nVisit the bookshop, find a sunny spot, and start a new chapter.",
+                               source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: date.addingTimeInterval(-1_200)),
+            ClipboardItem.text("Good design makes room for the things that matter.",
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-1_800)),
+            ClipboardItem.text("https://example.com/reading-list",
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-2_400))
+        ]
+        for index in entries.indices { entries[index].fingerprint = "sample:\(index)" }
+        return entries
+    }()
+
+    static let image = NSImage(size: NSSize(width: 640, height: 400), flipped: false) { bounds in
+        NSColor(calibratedRed: 0.86, green: 0.92, blue: 0.95, alpha: 1).setFill()
+        bounds.fill()
+        NSColor(calibratedRed: 0.97, green: 0.77, blue: 0.43, alpha: 1).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 450, y: 260, width: 76, height: 76)).fill()
+        for (points, color) in [
+            ([NSPoint(x: 0, y: 0), NSPoint(x: 230, y: 320), NSPoint(x: 480, y: 0)],
+             NSColor(calibratedRed: 0.42, green: 0.59, blue: 0.62, alpha: 1)),
+            ([NSPoint(x: 200, y: 0), NSPoint(x: 470, y: 245), NSPoint(x: 720, y: 0)],
+             NSColor(calibratedRed: 0.24, green: 0.43, blue: 0.45, alpha: 1))
+        ] {
+            color.setFill()
+            let mountain = NSBezierPath()
+            mountain.move(to: points[0])
+            mountain.line(to: points[1])
+            mountain.line(to: points[2])
+            mountain.close()
+            mountain.fill()
+        }
+        return true
+    }
+}
+#endif

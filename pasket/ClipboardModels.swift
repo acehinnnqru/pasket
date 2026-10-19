@@ -35,11 +35,11 @@ enum ClipboardFilter: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: "All Types"
-        case .text: "Text Only"
-        case .images: "Images Only"
-        case .files: "Files Only"
-        case .links: "Links Only"
-        case .emails: "Emails Only"
+        case .text: "Text"
+        case .images: "Images"
+        case .files: "Files"
+        case .links: "Links"
+        case .emails: "Emails"
         }
     }
     var symbol: String { kind?.symbol ?? "list.bullet" }

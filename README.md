@@ -10,6 +10,9 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - The search field receives focus whenever the panel opens. Search the complete saved content or
   source app and filter by type. Arrow keys and row clicks change the selected entry while keeping
   the search field focused, so you can continue typing immediately.
+- Selecting a specific content type shows **Back To Default** to the left of the type selector.
+  Click it to return to **All Types** while keeping your search text.
+  The selector and its menu keep the same width across all content types.
 - **Return**, double-click, or **Copy** copies the complete item, closes the panel,
   and returns to the previous application. Press **Command + V** there to paste.
 - **Escape** dismisses the panel. With the filter menu open, Escape first closes that menu.
@@ -66,7 +69,7 @@ Pasket never changes your system privacy settings.
   Its thumbnail and detail preview are generated in memory from the original while access is available;
   Pasket does not save a copy. Existing image file entries support the same previews. Once the original
   is removed or access expires, the row falls back to the default image icon and the preview is unavailable.
-  These entries appear in both Images Only and Files Only filters.
+  These entries appear in both Images and Files filters.
 - Up to 100 file references can be recorded together. Pasket retains paths and read-only
   security-scoped bookmarks when the system grants access, allowing those file references to be
   reopened after relaunch. Existing ordinary bookmarks are upgraded while accessible entries are

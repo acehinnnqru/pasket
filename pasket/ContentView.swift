@@ -10,6 +10,7 @@ struct ContentView: View {
 
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
+    @State private var filterControlFrame: CGRect = .zero
     @State private var isConfirmingClear = false
 
     var body: some View {
@@ -68,6 +69,7 @@ struct ContentView: View {
         }
         .modifier(PasketSurface())
         .frame(minWidth: 760, minHeight: 480)
+        .coordinateSpace(name: "clipboardPanel")
         .overlay(alignment: .topTrailing) {
             if isFilterMenuPresented {
                 ZStack(alignment: .topTrailing) {
@@ -75,11 +77,11 @@ struct ContentView: View {
                         .contentShape(Rectangle())
                         .onTapGesture(perform: dismissFilterMenu)
                         .accessibilityHidden(true)
-                    ClipboardFilterMenu(selection: store.filter, onSelect: { filter in
+                    ClipboardFilterMenu(selection: store.filter, width: filterControlFrame.width, onSelect: { filter in
                         store.filter = filter
                         dismissFilterMenu()
                     }, onDismiss: dismissFilterMenu)
-                    .padding(.top, 52)
+                    .padding(.top, filterControlFrame.maxY + 4)
                     .padding(.trailing, 14)
                 }
             }
@@ -122,23 +124,48 @@ struct ContentView: View {
                     return .handled
                 }
             WindowDragHandle()
+            if store.filter != .all {
+                Button {
+                    store.filter = .all
+                    dismissFilterMenu()
+                } label: {
+                    Text("Back To Default")
+                        .frame(minHeight: 18)
+                }
+                .buttonStyle(PasketButtonStyle(hasBackground: true))
+                .fixedSize()
+                .focusable(false)
+                .help("Reset the content type filter to All Types")
+                .accessibilityIdentifier("resetClipboardFilter")
+            }
             Button {
                 searchFocused = false
                 isFilterMenuPresented.toggle()
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: store.filter.symbol)
                         .foregroundStyle(.secondary)
+                        .frame(width: 16)
                     Text(store.filter.title)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isFilterMenuPresented ? 180 : 0))
+                        .frame(width: 10)
                 }
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 5)
+                .frame(width: 130)
+                .frame(minHeight: 18)
             }
             .buttonStyle(PasketButtonStyle(isActive: isFilterMenuPresented))
             .fixedSize()
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .named("clipboardPanel"))
+            } action: { frame in
+                filterControlFrame = frame
+            }
             .accessibilityLabel("Filter clipboard history")
             .accessibilityValue(store.filter.title)
             .accessibilityHint("Show content type options")
@@ -484,6 +511,7 @@ private struct WindowKeyStateObserver: NSViewRepresentable {
 
 private struct ClipboardFilterMenu: View {
     let selection: ClipboardFilter
+    let width: CGFloat
     var onSelect: (ClipboardFilter) -> Void
     var onDismiss: () -> Void
 
@@ -493,14 +521,6 @@ private struct ClipboardFilterMenu: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("CONTENT TYPE")
-                .font(.system(size: 10, weight: .medium))
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 6)
-
             ForEach(ClipboardFilter.allCases) { filter in
                 Button {
                     onSelect(filter)
@@ -508,22 +528,26 @@ private struct ClipboardFilterMenu: View {
                     HStack(spacing: 8) {
                         Image(systemName: filter.symbol)
                             .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 24)
-                            .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
+                            .foregroundStyle(selection == filter ? Color.accentColor : .secondary)
+                            .frame(width: 16)
                         Text(filter.title)
-                            .font(.system(size: 13, weight: selection == filter ? .medium : .regular))
-                        Spacer(minLength: 12)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 10)
                             .opacity(selection == filter ? 1 : 0)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(selection == filter ? Color.accentColor : .primary)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
                     .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.primary.opacity(highlightedFilter == filter ? 0.09 : selection == filter ? 0.05 : 0))
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor.opacity(selection == filter ? 0.08 : 0))
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(.primary.opacity(highlightedFilter == filter ? 0.04 : 0))
                     }
                 }
                 .buttonStyle(.plain)
@@ -538,22 +562,18 @@ private struct ClipboardFilterMenu: View {
                 .accessibilityAddTraits(selection == filter ? .isSelected : [])
             }
         }
-        .padding(8)
-        .frame(width: 204)
+        .padding(6)
+        .frame(width: width)
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.regularMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.white.opacity(colorScheme == .dark ? 0.025 : 0.16))
-                }
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.65))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.28 : 0.12), radius: 22, x: 0, y: 10)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.12), radius: 12, x: 0, y: 5)
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
@@ -646,6 +666,7 @@ private struct HistoryRow: View {
 struct PasketButtonStyle: ButtonStyle {
     var isProminent = false
     var isActive = false
+    var hasBackground = false
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
@@ -654,6 +675,11 @@ struct PasketButtonStyle: ButtonStyle {
         let isDestructive = configuration.role == .destructive
         let isInteracting = isEnabled && (isHovered || configuration.isPressed)
         let tint: Color = isDestructive ? .red : isProminent || isActive ? .accentColor : .primary
+        let backgroundOpacity: Double = isEnabled && configuration.isPressed ? (hasBackground ? 0.12 : 0.2)
+            : isInteracting ? (hasBackground ? 0.08 : 0.12)
+            : isProminent || isActive ? 0.08 : hasBackground ? 0.05 : 0
+        let borderOpacity: Double = isInteracting ? (hasBackground ? 0.12 : 0.2)
+            : isProminent || isActive ? 0.12 : hasBackground ? 0.07 : 0
 
         configuration.label
             .font(.system(size: 12))
@@ -662,13 +688,11 @@ struct PasketButtonStyle: ButtonStyle {
             .padding(.vertical, 6)
             .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(tint.opacity(isEnabled && configuration.isPressed ? 0.2
-                                       : isInteracting ? 0.12
-                                       : isProminent || isActive ? 0.08 : 0))
+                    .fill(tint.opacity(backgroundOpacity))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(tint.opacity(isInteracting ? 0.2 : isProminent || isActive ? 0.12 : 0))
+                    .strokeBorder(tint.opacity(borderOpacity))
                     .allowsHitTesting(false)
             }
             .contentShape(RoundedRectangle(cornerRadius: 7))

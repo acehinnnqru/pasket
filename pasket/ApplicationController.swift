@@ -138,6 +138,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.delegate = self
             window.contentView = NSHostingView(rootView: ShortcutSettingsView(
                 shortcuts: shortcuts,
+                store: store,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
             ))
             window.center()

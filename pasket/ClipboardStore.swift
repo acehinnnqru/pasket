@@ -20,6 +20,9 @@ final class ClipboardStore {
     private(set) var previewImage: NSImage?
     private(set) var missingPreviews: Set<UUID> = []
     private(set) var unavailableItems: Set<UUID> = []
+    private(set) var authorizedFolders: [ClipboardFile] = []
+    private(set) var folderAccessError: String?
+    private(set) var folderAccessRevision = 0
 
     #if DEBUG
     private(set) var isDebugMode = false
@@ -46,7 +49,7 @@ final class ClipboardStore {
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var stopRequested = false
     @ObservationIgnored private var thumbnailOrder: [UUID] = []
-    @ObservationIgnored private var thumbnailRequests: Set<UUID> = []
+    @ObservationIgnored private var thumbnailRequests: [UUID: UUID] = [:]
     @ObservationIgnored private var previewRequestID = UUID()
     @ObservationIgnored private var deletionCutoffs: [String: Date] = [:]
     @ObservationIgnored private var fileAvailabilityGeneration = 0
@@ -102,6 +105,7 @@ final class ClipboardStore {
             let history = try await persistence.load()
             items = history.items
             isPaused = history.isPaused
+            authorizedFolders = history.authorizedFolders
             storageBlocked = false
             storageError = nil
             enforceLimits()
@@ -223,12 +227,10 @@ final class ClipboardStore {
                 pasteboard.clearContents()
                 guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
             case .file:
-                try ClipboardFileAccess.withResolvedFiles(item.files) { urls, updatedFiles in
+                try ClipboardFileAccess.withResolvedFiles(item.files, authorizedFolders: authorizedFolders) { urls, updatedFiles in
                     pasteboard.clearContents()
                     guard pasteboard.writeObjects(urls as [NSURL]) else { throw CocoaError(.fileWriteUnknown) }
-                    if let index = items.firstIndex(where: { $0.id == item.id }) {
-                        items[index].files = updatedFiles
-                    }
+                    updateFiles(updatedFiles, for: item.id, replacing: item.files, persistChanges: false)
                 }
             default:
                 pasteboard.clearContents()
@@ -248,7 +250,7 @@ final class ClipboardStore {
             monitor.checkpoint()
             if item.kind == .file || item.kind == .image { unavailableItems.insert(item.id) }
             copyError = item.kind == .file
-                ? "A file is missing or access has expired. Restore access or delete this entry."
+                ? "A file is missing or needs permission. Authorize its folder or delete this entry."
                 : "Could not copy this item. \(error.localizedDescription)"
             return false
         }
@@ -256,35 +258,80 @@ final class ClipboardStore {
 
     func restoreFileAccess(_ item: ClipboardItem) {
         guard !isDebugMode, item.kind == .file, !storageBlocked, !isLoading else { return }
-        var replacements: [ClipboardFile] = []
-        for file in item.files {
-            let panel = NSOpenPanel()
-            panel.message = "Select \(file.name) to restore access to this history entry."
-            panel.prompt = "Restore Access"
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = true
-            panel.allowsMultipleSelection = false
+        authorizeFolder(containing: item)
+    }
+
+    func authorizeFolder(containing item: ClipboardItem? = nil) {
+        guard !isDebugMode, !storageBlocked, !isLoading else { return }
+        let panel = NSOpenPanel()
+        panel.message = "Allow read-only access to a folder and its subfolders for current and future history entries. Original files stay in place."
+        panel.prompt = "Authorize Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        if let file = item?.files.first(where: { file in
+            !authorizedFolders.contains { ClipboardFileAccess.contains($0, path: file.path) }
+        }) ?? item?.files.first {
             panel.directoryURL = URL(fileURLWithPath: file.path).deletingLastPathComponent()
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            replacements.append(ClipboardFileAccess.capture(url))
         }
-        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-        items[index].files = replacements
-        items[index].content = replacements.map(\.path).joined(separator: "\n")
-        items[index].title = Self.fileTitle(replacements)
-        items[index].fingerprint = Self.fileFingerprint(replacements)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let item, !item.files.contains(where: { ClipboardFileAccess.contains(
+            ClipboardFile(path: url.path, name: url.lastPathComponent), path: $0.path
+        ) }) {
+            folderAccessError = "Choose a folder containing the original files."
+            copyError = folderAccessError
+            return
+        }
+        Task {
+            do { try await addAuthorizedFolder(url) }
+            catch {
+                folderAccessError = "Could not save folder access. \(error.localizedDescription)"
+                copyError = folderAccessError
+            }
+        }
+    }
+
+    func addAuthorizedFolder(_ url: URL) async throws {
+        guard !isDebugMode, !storageBlocked, !isLoading else { return }
+        let folder = try ClipboardFileAccess.captureFolder(url)
+        authorizedFolders.removeAll { $0.path == folder.path }
+        authorizedFolders.append(folder)
+        await folderAccessDidChange()
+    }
+
+    func removeAuthorizedFolder(_ path: String) async {
+        guard !isDebugMode, !storageBlocked, !isLoading else { return }
+        authorizedFolders.removeAll { $0.path == path }
+        await folderAccessDidChange()
+    }
+
+    private func folderAccessDidChange() async {
+        folderAccessRevision += 1
         fileAvailabilityGeneration += 1
-        unavailableItems.remove(item.id)
-        thumbnails[item.id] = nil
-        missingPreviews.remove(item.id)
-        if previewID == item.id { clearPreview() }
+        let fileIDs = Set(items.filter { $0.kind == .file }.map(\.id))
+        thumbnails = thumbnails.filter { !fileIDs.contains($0.key) }
+        thumbnailRequests = thumbnailRequests.filter { !fileIDs.contains($0.key) }
+        thumbnailOrder.removeAll { fileIDs.contains($0) }
+        missingPreviews.subtract(fileIDs)
+        if let previewID, fileIDs.contains(previewID) { clearPreview() }
+        folderAccessError = nil
         copyError = nil
         persist()
-        let restoredItem = items[index]
-        Task {
-            await loadThumbnail(for: restoredItem)
-            if selectedID == restoredItem.id { await loadPreview(for: restoredItem) }
-        }
+        await refreshFileAvailability()
+        if let selectedItem { await loadPreview(for: selectedItem) }
+    }
+
+    @discardableResult
+    private func updateFiles(_ files: [ClipboardFile], for id: UUID, replacing original: [ClipboardFile],
+                             persistChanges: Bool = true) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].files == original,
+              files != original else { return false }
+        items[index].files = files
+        items[index].content = files.map(\.path).joined(separator: "\n")
+        items[index].title = Self.fileTitle(files)
+        items[index].fingerprint = Self.fileFingerprint(files)
+        if persistChanges { persist() }
+        return true
     }
 
     func loadThumbnail(for item: ClipboardItem) async {
@@ -294,16 +341,20 @@ final class ClipboardStore {
             return
         }
         #endif
-        guard item.hasImagePreview, thumbnails[item.id] == nil, !thumbnailRequests.contains(item.id) else { return }
-        thumbnailRequests.insert(item.id)
-        defer { thumbnailRequests.remove(item.id) }
+        guard item.hasImagePreview, thumbnails[item.id] == nil, thumbnailRequests[item.id] == nil else { return }
+        let thumbnailRequest = UUID()
+        thumbnailRequests[item.id] = thumbnailRequest
+        defer { if thumbnailRequests[item.id] == thumbnailRequest { thumbnailRequests[item.id] = nil } }
+        let accessRevision = folderAccessRevision
         do {
             let thumbnail: NSImage?
             if let image = item.image {
                 thumbnail = NSImage(data: try await persistence.imageData(image, thumbnail: true))
             } else if let file = item.imageFile {
-                let preview = try await persistence.previewImageFile(file, thumbnail: true)
-                thumbnail = NSImage(cgImage: preview, size: NSSize(width: preview.width, height: preview.height))
+                let preview = try await persistence.previewImageFile(file, thumbnail: true, authorizedFolders: authorizedFolders)
+                guard folderAccessRevision == accessRevision else { return }
+                updateFiles([preview.file], for: item.id, replacing: item.files)
+                thumbnail = NSImage(cgImage: preview.image, size: NSSize(width: preview.image.width, height: preview.image.height))
             } else {
                 return
             }
@@ -319,6 +370,7 @@ final class ClipboardStore {
                 }
             }
         } catch {
+            guard folderAccessRevision == accessRevision else { return }
             let available = await isImageAvailable(item)
             if items.contains(where: { $0.id == item.id }) {
                 if !available { unavailableItems.insert(item.id) }
@@ -351,7 +403,10 @@ final class ClipboardStore {
             if let image = item.image {
                 preview = try await persistence.previewImage(image)
             } else if let file = item.imageFile {
-                preview = try await persistence.previewImageFile(file)
+                let result = try await persistence.previewImageFile(file, authorizedFolders: authorizedFolders)
+                guard previewRequestID == requestID else { return }
+                updateFiles([result.file], for: item.id, replacing: item.files)
+                preview = result.image
             } else {
                 return
             }
@@ -368,7 +423,8 @@ final class ClipboardStore {
     private func isImageAvailable(_ item: ClipboardItem) async -> Bool {
         if let image = item.image { return await persistence.hasImage(image) }
         let files = item.files
-        return await Task.detached(priority: .utility) { ClipboardFileAccess.areAvailable(files) }.value
+        let folders = authorizedFolders
+        return await Task.detached(priority: .utility) { ClipboardFileAccess.areAvailable(files, authorizedFolders: folders) }.value
     }
 
     private func clearPreview() {
@@ -381,14 +437,24 @@ final class ClipboardStore {
         fileAvailabilityGeneration += 1
         let generation = fileAvailabilityGeneration
         let fileItems = items.filter { $0.kind == .file }
-        let availability = await Task.detached(priority: .utility) {
-            Dictionary(uniqueKeysWithValues: fileItems.map { ($0.id, ClipboardFileAccess.areAvailable($0.files)) })
+        let folders = authorizedFolders
+        let result = await Task.detached(priority: .utility) {
+            let files = Dictionary(uniqueKeysWithValues: fileItems.map { item in
+                (item.id, try? ClipboardFileAccess.withResolvedFiles(item.files, authorizedFolders: folders) { _, updated in updated })
+            })
+            return (files, ClipboardFileAccess.refreshedFolders(folders))
         }.value
         guard fileAvailabilityGeneration == generation else { return }
+        var changed = authorizedFolders != result.1
+        if changed {
+            authorizedFolders = result.1
+        }
         let currentIDs = Set(items.map(\.id))
         let imageFileIDs = Set(fileItems.filter(\.hasImagePreview).map(\.id))
-        for (id, available) in availability where currentIDs.contains(id) {
-            if available {
+        for item in fileItems where currentIDs.contains(item.id) {
+            let id = item.id
+            if let updated = result.0[id] ?? nil {
+                changed = updateFiles(updated, for: id, replacing: item.files, persistChanges: false) || changed
                 unavailableItems.remove(id)
             } else {
                 unavailableItems.insert(id)
@@ -400,6 +466,7 @@ final class ClipboardStore {
                 }
             }
         }
+        if changed { persist() }
     }
 
     private func enqueue(_ capture: ClipboardCapture) {
@@ -463,7 +530,7 @@ final class ClipboardStore {
 
     private func persist() {
         guard !storageBlocked else { return }
-        let snapshot = ClipboardHistory(isPaused: isPaused, items: items)
+        let snapshot = ClipboardHistory(isPaused: isPaused, items: items, authorizedFolders: authorizedFolders)
         let previousSave = saveTask
         saveTask = Task { [weak self, persistence] in
             await previousSave?.value

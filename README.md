@@ -66,12 +66,19 @@ Pasket never changes your system privacy settings.
   These entries appear in both Images Only and Files Only filters.
 - Up to 100 file references can be recorded together. Pasket retains paths and read-only
   security-scoped bookmarks when the system grants access, allowing those file references to be
-  reopened after relaunch. Existing ordinary bookmarks are upgraded when an accessible entry is copied.
+  reopened after relaunch. Existing ordinary bookmarks are upgraded while accessible entries are
+  checked, previewed, or copied; refreshed bookmarks are saved with history.
   The app-scoped bookmark entitlement is enabled for Debug and Release; App Sandbox and user-selected
   read-only file access remain enabled. Pasket displays original size when known and copies file URLs.
   Groups of files and other file types remain references without a backup of their contents. If an
-  original is missing or sandbox access expires, use **Restore File Access…** to select accessible
-  originals again, or delete the entry. Deleting history never deletes the original files.
+  original needs permission, use **Authorize Folder…** in its detail pane to select a containing
+  folder once. Pasket saves a read-only folder grant and reuses it for current and future entries
+  in that folder and its subfolders, including after relaunch. This does not copy the original files
+  or replace the selected history entry. Groups spanning multiple folders may need a grant for
+  each folder, or one for a shared parent. Settings → File Access lists saved folders and lets
+  users add or remove them. Removing a saved folder grant does not delete files or history, and
+  independent file grants may still provide access. Deleted originals remain unavailable; granting
+  folder access cannot restore deleted files. Deleting history never deletes the original files.
 - Keep up to **1,000 entries**, **50 MiB of text bodies**, and **500 MiB of images including thumbnails**.
   Oldest entries are evicted when a limit is reached. Saved image files are removed only after
   updated history is written successfully. Deleting, clearing, and skipping oversized entries leave
@@ -81,8 +88,10 @@ Pasket never changes your system privacy settings.
 
 History uses a versioned `history.json` and a separate `Images` directory under the app's
 Application Support/Pasket directory inside its sandbox. No third-party dependencies or network
-services are used. Writes are serialized and atomic. Quitting waits for queued writes; failed writes
-show a retry action and require a choice before quitting with unsaved changes. A damaged or
+services are used. Read-only folder bookmarks are stored in `history.json` and kept when history
+is cleared; they can be removed separately in Settings. Writes are serialized and atomic. Quitting
+waits for queued writes; failed writes show a retry action and require a choice before quitting
+with unsaved changes. A damaged or
 unsupported history file is left untouched, and collection stops until it can be loaded.
 
 ## Validation
@@ -113,6 +122,15 @@ For the desktop smoke test:
    and interact with search, filters, and footer controls; the window should stay in place. Move the
    dotted header handle less than 8 points and release; the window should stay still. Drag it farther
    to move the window. Repeat the handle and content checks in Settings.
+10. Copy two image files from one folder and a third from a nested folder. Use **Authorize Folder…**
+    in a file's detail pane and select their shared parent. Confirm all three entries can preview and
+    copy, then quit and relaunch and repeat. Copy a new image file into the same history from that
+    folder and confirm it also works without another authorization. Canceling the picker or choosing
+    an unrelated folder must leave the entry unchanged. Delete an original and confirm its preview
+    becomes unavailable even though the folder is authorized.
+11. In Settings → File Access, add a folder, reauthorize it without creating a duplicate, and remove
+    its saved grant. Confirm original files and history remain intact and the folder list persists
+    after relaunch. Check grant creation failure feedback on a folder the app cannot authorize.
 
 Core tests and a successful build do not establish that this desktop smoke test passed.
 

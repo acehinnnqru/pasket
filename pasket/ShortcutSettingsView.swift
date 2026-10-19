@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ShortcutSettingsView: View {
     @Bindable var shortcuts: GlobalShortcutManager
+    @Bindable var store: ClipboardStore
     var onClose: () -> Void = {}
 
     var body: some View {
@@ -27,6 +28,7 @@ struct ShortcutSettingsView: View {
                     }
 
                     panelControls
+                    folderAccessCard
 
                     if let error = shortcuts.errorMessage {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -198,6 +200,52 @@ struct ShortcutSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var folderAccessCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("FILE ACCESS")
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Authorize Folder…") { store.authorizeFolder() }
+                    .buttonStyle(PasketButtonStyle())
+            }
+            Text("Allow read-only access once for current and future files in a folder and its subfolders. Files stay in place; no copies are saved.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(store.authorizedFolders, id: \.path) { folder in
+                HStack(spacing: 10) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(folder.name).font(.system(size: 12, weight: .medium))
+                        Text(folder.path)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(folder.path)
+                    }
+                    Spacer()
+                    Button("Remove") { Task { await store.removeAuthorizedFolder(folder.path) } }
+                        .buttonStyle(PasketButtonStyle())
+                        .accessibilityLabel("Remove folder access for \(folder.name)")
+                }
+            }
+            if let error = store.folderAccessError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .modifier(SettingsCard())
+        .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
     }
 
     private func panelControl(keys: String, title: String) -> some View {

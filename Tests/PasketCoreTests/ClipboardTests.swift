@@ -579,6 +579,126 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
+    @Test func legacyHistoryLoadsWithoutFolderPermissions() throws {
+        let data = Data(#"{"version":1,"isPaused":false,"items":[]}"#.utf8)
+        let history = try JSONDecoder().decode(ClipboardHistory.self, from: data)
+        #expect(history.authorizedFolders.isEmpty)
+    }
+
+    @Test func folderAuthorizationCoversExistingAndFutureImageFilesAfterRestart() async throws {
+        let fixture = try Fixture()
+        let originals = fixture.directory.appendingPathComponent("Originals", isDirectory: true)
+        let nested = originals.appendingPathComponent("Nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let first = originals.appendingPathComponent("First.png")
+        let second = nested.appendingPathComponent("Second.png")
+        let imageData = try Self.smallPNG()
+        try imageData.write(to: first)
+        let file = ClipboardFile(path: first.path, name: first.lastPathComponent)
+        let item = ClipboardItem(kind: .file, title: file.name, content: file.path, source: .unknown,
+                                 copiedAt: Date(), fingerprint: "existing-folder-image", files: [file])
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [item]))
+        await fixture.start()
+        try await fixture.store.addAuthorizedFolder(originals)
+        #expect(fixture.store.items.first?.id == item.id)
+        #expect(fixture.store.authorizedFolders.count == 1)
+        await fixture.restart()
+        let folder = try #require(fixture.store.authorizedFolders.first)
+        #expect(folder.isSecurityScoped == true)
+        #expect(folder.bookmark != nil)
+        #expect(fixture.store.unavailableItems.isEmpty)
+        #expect(await fixture.store.copySelection())
+        await fixture.store.loadPreview(for: fixture.store.selectedItem)
+        #expect(fixture.store.previewImage != nil)
+
+        // A new nested file uses the same grant without adding another authorized folder.
+        try imageData.write(to: second)
+        fixture.pasteboard.clearContents()
+        #expect(fixture.pasteboard.writeObjects([second as NSURL]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        await fixture.restart()
+        let newItem = try #require(fixture.store.items.first)
+        let storedPath = try #require(newItem.files.first?.path)
+        let storedIdentity = try URL(fileURLWithPath: storedPath).resourceValues(forKeys: [.fileResourceIdentifierKey])
+            .fileResourceIdentifier as? NSObject
+        let originalIdentity = try second.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier as? NSObject
+        #expect(storedIdentity != nil && storedIdentity == originalIdentity)
+        #expect(ClipboardFileAccess.contains(folder, path: storedPath))
+        #expect(fixture.store.authorizedFolders == [folder])
+        await fixture.store.loadThumbnail(for: newItem)
+        await fixture.store.loadPreview(for: newItem)
+        #expect(fixture.store.thumbnails[newItem.id] != nil)
+        #expect(fixture.store.previewImage != nil)
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.store.imageStorageBytes == 0)
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
+
+        try FileManager.default.removeItem(at: second)
+        await fixture.store.refreshFileAvailability()
+        #expect(fixture.store.unavailableItems.contains(newItem.id))
+        #expect(fixture.store.previewImage == nil)
+        #expect(await fixture.store.copySelection() == false)
+        #expect(FileManager.default.fileExists(atPath: first.path))
+        await fixture.cleanUp()
+    }
+
+    @Test func folderGrantsCanBeReplacedAndRemovedWithoutDeletingFilesOrHistory() async throws {
+        let fixture = try Fixture()
+        let folderURL = fixture.directory.appendingPathComponent("Originals", isDirectory: true)
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        let original = folderURL.appendingPathComponent("Keep.txt")
+        try Data("Keep this file".utf8).write(to: original)
+        await fixture.start()
+        await fixture.copy("Keep this entry")
+        try await fixture.store.addAuthorizedFolder(folderURL)
+        try await fixture.store.addAuthorizedFolder(folderURL)
+        #expect(fixture.store.authorizedFolders.count == 1)
+        await fixture.restart()
+        let path = try #require(fixture.store.authorizedFolders.first?.path)
+        await fixture.store.removeAuthorizedFolder(path)
+        await fixture.restart()
+        #expect(fixture.store.authorizedFolders.isEmpty)
+        #expect(fixture.store.items.first?.content == "Keep this entry")
+        #expect(try String(contentsOf: original, encoding: .utf8) == "Keep this file")
+        await fixture.cleanUp()
+    }
+
+    @Test func folderGrantUsesDirectoryBoundariesAndResolvesChildrenWithoutChildBookmarks() async throws {
+        let fixture = try Fixture()
+        let folderURL = fixture.directory.appendingPathComponent("Images", isDirectory: true)
+        let childURL = folderURL.appendingPathComponent("Nested/Image.png")
+        try FileManager.default.createDirectory(at: childURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let imageData = try Self.smallPNG()
+        try imageData.write(to: childURL)
+        let folder = try ClipboardFileAccess.captureFolder(folderURL)
+        let child = ClipboardFile(path: childURL.path, name: childURL.lastPathComponent)
+        #expect(ClipboardFileAccess.contains(folder, path: child.path))
+        #expect(!ClipboardFileAccess.contains(folder, path: folderURL.path + "-Other/Image.png"))
+        #expect(!ClipboardFileAccess.contains(folder, path: folderURL.path + "/../Outside.png"))
+        try ClipboardFileAccess.withResolvedFiles([child], authorizedFolders: [folder]) { urls, updated in
+            let contents = try Data(contentsOf: urls[0])
+            #expect(contents == imageData)
+            #expect(updated[0].bookmark == nil)
+            #expect(updated[0].isSecurityScoped == nil)
+        }
+        let persistence = ClipboardPersistence(directory: fixture.directory.appendingPathComponent("History"))
+        let preview = try await persistence.previewImageFile(child, authorizedFolders: [folder])
+        #expect(preview.image.width == 8)
+        #expect(preview.image.height == 6)
+        await fixture.cleanUp()
+    }
+
+    @Test func authorizingAFileAsAFolderFailsWithoutRecordingAGrant() async throws {
+        let fixture = try Fixture()
+        let fileURL = fixture.directory.appendingPathComponent("File.txt")
+        try Data("Not a folder".utf8).write(to: fileURL)
+        await fixture.start()
+        await #expect(throws: (any Error).self) { try await fixture.store.addAuthorizedFolder(fileURL) }
+        #expect(fixture.store.authorizedFolders.isEmpty)
+        await fixture.cleanUp()
+    }
+
     @Test func readOnlyScopedBookmarksPersistAndResolve() async throws {
         let fixture = try Fixture()
         let url = fixture.directory.appendingPathComponent("Bookmarked.txt")

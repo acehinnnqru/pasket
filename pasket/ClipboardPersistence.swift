@@ -36,6 +36,8 @@ actor ClipboardPersistence {
         let history = try JSONDecoder().decode(ClipboardHistory.self, from: data)
         guard history.version == 1 else { throw ClipboardStorageError.unsupportedVersion }
         guard Set(history.items.map(\.id)).count == history.items.count,
+              Set(history.authorizedFolders.map(\.path)).count == history.authorizedFolders.count,
+              history.authorizedFolders.allSatisfy({ $0.isSecurityScoped == true && $0.bookmark != nil }),
               history.items.allSatisfy({ item in
                   if let image = item.image {
                       return item.kind == .image && validImageNames(image) && image.byteCount >= 0 && image.thumbnailByteCount >= 0
@@ -114,9 +116,10 @@ actor ClipboardPersistence {
         return try previewImage(at: url, maxPixelSize: 1_600)
     }
 
-    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws -> CGImage {
-        try ClipboardFileAccess.withResolvedFiles([file]) { urls, _ in
-            try previewImage(at: urls[0], maxPixelSize: thumbnail ? 480 : 1_600)
+    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false,
+                          authorizedFolders: [ClipboardFile] = []) throws -> (image: CGImage, file: ClipboardFile) {
+        try ClipboardFileAccess.withResolvedFiles([file], authorizedFolders: authorizedFolders) { urls, updated in
+            (try previewImage(at: urls[0], maxPixelSize: thumbnail ? 480 : 1_600), updated[0])
         }
     }
 

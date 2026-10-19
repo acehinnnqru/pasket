@@ -185,7 +185,7 @@ struct ContentView: View {
                         })
                         .id(item.id)
                         .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
-                        .task(id: item.id) { await store.loadThumbnail(for: item) }
+                        .task(id: store.folderAccessRevision) { await store.loadThumbnail(for: item) }
                         .contextMenu {
                             Button("Delete", role: .destructive) { store.delete(item.id) }
                                 .disabled(store.isDebugMode || store.isStorageBlocked)
@@ -233,14 +233,18 @@ struct ContentView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if store.unavailableItems.contains(item.id) {
-                                    Label("A file is missing or access has expired.", systemImage: "exclamationmark.triangle")
+                                    Label("A file is missing or its folder needs permission.", systemImage: "exclamationmark.triangle")
                                         .font(.caption).foregroundStyle(.orange)
-                                } else if item.files.contains(where: { $0.isSecurityScoped != true }) {
-                                    Text("Some files may need access restored after relaunch. Use Restore File Access… to keep access.")
+                                } else if item.files.contains(where: { file in
+                                    file.isSecurityScoped != true && !store.authorizedFolders.contains {
+                                        ClipboardFileAccess.contains($0, path: file.path)
+                                    }
+                                }) {
+                                    Text("Authorize the containing folder once to keep access to files inside it after relaunch.")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
-                                Button("Restore File Access…") { onRestoreFileAccess(item) }
-                                    .disabled(store.isDebugMode)
+                                Button("Authorize Folder…") { onRestoreFileAccess(item) }
+                                    .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         default:

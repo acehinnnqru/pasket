@@ -51,7 +51,7 @@ nonisolated struct ClipboardSource: Codable, Sendable {
     static let unknown = ClipboardSource(name: "Unknown App")
 }
 
-nonisolated struct ClipboardFile: Codable, Sendable {
+nonisolated struct ClipboardFile: Codable, Sendable, Equatable {
     var path: String
     var name: String
     var bookmark: Data?
@@ -121,6 +121,24 @@ nonisolated struct ClipboardHistory: Codable, Sendable {
     var version = 1
     var isPaused = false
     var items: [ClipboardItem] = []
+    var authorizedFolders: [ClipboardFile] = []
+
+    init(version: Int = 1, isPaused: Bool = false, items: [ClipboardItem] = [], authorizedFolders: [ClipboardFile] = []) {
+        self.version = version
+        self.isPaused = isPaused
+        self.items = items
+        self.authorizedFolders = authorizedFolders
+    }
+
+    private enum CodingKeys: String, CodingKey { case version, isPaused, items, authorizedFolders }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        isPaused = try container.decode(Bool.self, forKey: .isPaused)
+        items = try container.decode([ClipboardItem].self, forKey: .items)
+        authorizedFolders = try container.decodeIfPresent([ClipboardFile].self, forKey: .authorizedFolders) ?? []
+    }
 }
 
 nonisolated enum ClipboardLimits {

@@ -173,7 +173,7 @@ struct ContentView: View {
                             HistoryRow(item: item, isSelected: store.selectedID == item.id,
                                        thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(HistoryRowButtonStyle())
                         .focusable(false)
                         .simultaneousGesture(TapGesture(count: 2).onEnded {
                             store.selectedID = item.id
@@ -515,6 +515,13 @@ private struct ClipboardFilterMenu: View {
     }
 }
 
+private struct HistoryRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        // Selection is the row's feedback; pressing must not dim it before selection changes.
+        configuration.label
+    }
+}
+
 private struct HistoryRow: View {
     let item: ClipboardItem
     let isSelected: Bool
@@ -549,8 +556,12 @@ private struct HistoryRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(isHovered ? 0.18 : 0.12)
-                      : Color.primary.opacity(isHovered ? 0.055 : 0))
+                .fill(Color.primary.opacity(0.055))
+                .opacity(isHovered && !isSelected ? 1 : 0)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
+                .animation(nil, value: isSelected)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(isSelected ? 0.12 : 0))
         }
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -559,7 +570,6 @@ private struct HistoryRow: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { isHovered = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
     }
 }
 

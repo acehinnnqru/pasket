@@ -16,6 +16,8 @@ final class ClipboardStore {
     private(set) var clipboardAccessDenied = false
     private(set) var items: [ClipboardItem] = []
     private(set) var thumbnails: [UUID: NSImage] = [:]
+    private(set) var previewID: UUID?
+    private(set) var previewImage: NSImage?
     private(set) var missingPreviews: Set<UUID> = []
     private(set) var unavailableItems: Set<UUID> = []
 
@@ -30,6 +32,7 @@ final class ClipboardStore {
     @ObservationIgnored private var stopRequested = false
     @ObservationIgnored private var thumbnailOrder: [UUID] = []
     @ObservationIgnored private var thumbnailRequests: Set<UUID> = []
+    @ObservationIgnored private var previewRequestID = UUID()
     @ObservationIgnored private var deletionCutoffs: [String: Date] = [:]
     @ObservationIgnored private var fileAvailabilityGeneration = 0
 
@@ -45,7 +48,7 @@ final class ClipboardStore {
     var filteredItems: [ClipboardItem] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return items.filter { item in
-            (filter.kind == nil || filter.kind == item.kind)
+            (filter == .images ? item.hasImagePreview : filter.kind == nil || filter.kind == item.kind)
                 && (search.isEmpty || [item.title, item.content, item.source.name, item.source.bundleIdentifier ?? ""].contains {
                     $0.localizedStandardContains(search)
                 })
@@ -153,6 +156,7 @@ final class ClipboardStore {
         }
         items.removeAll { $0.id == id }
         thumbnails[id] = nil
+        if previewID == id { clearPreview() }
         missingPreviews.remove(id)
         thumbnailOrder.removeAll { $0 == id }
         unavailableItems.remove(id)
@@ -167,6 +171,7 @@ final class ClipboardStore {
         monitor.checkpoint()
         items = []
         thumbnails = [:]
+        clearPreview()
         missingPreviews = []
         thumbnailOrder = []
         unavailableItems = []
@@ -243,22 +248,35 @@ final class ClipboardStore {
         items[index].fingerprint = Self.fileFingerprint(replacements)
         fileAvailabilityGeneration += 1
         unavailableItems.remove(item.id)
+        thumbnails[item.id] = nil
+        missingPreviews.remove(item.id)
+        if previewID == item.id { clearPreview() }
         copyError = nil
         persist()
+        let restoredItem = items[index]
+        Task {
+            await loadThumbnail(for: restoredItem)
+            if selectedID == restoredItem.id { await loadPreview(for: restoredItem) }
+        }
     }
 
     func loadThumbnail(for item: ClipboardItem) async {
-        guard let image = item.image, thumbnails[item.id] == nil, !thumbnailRequests.contains(item.id) else { return }
+        guard item.hasImagePreview, thumbnails[item.id] == nil, !thumbnailRequests.contains(item.id) else { return }
         thumbnailRequests.insert(item.id)
         defer { thumbnailRequests.remove(item.id) }
         do {
-            let data = try await persistence.imageData(image, thumbnail: true)
-            guard items.contains(where: { $0.id == item.id }) else { return }
-            thumbnails[item.id] = NSImage(data: data)
-            if thumbnails[item.id] == nil {
-                missingPreviews.insert(item.id)
+            let thumbnail: NSImage?
+            if let image = item.image {
+                thumbnail = NSImage(data: try await persistence.imageData(image, thumbnail: true))
+            } else if let file = item.imageFile {
+                let preview = try await persistence.previewImageFile(file, thumbnail: true)
+                thumbnail = NSImage(cgImage: preview, size: NSSize(width: preview.width, height: preview.height))
             } else {
-                missingPreviews.remove(item.id)
+                return
+            }
+            guard items.contains(where: { $0.id == item.id }) else { return }
+            thumbnails[item.id] = thumbnail
+            if thumbnails[item.id] != nil {
                 thumbnailOrder.removeAll { $0 == item.id }
                 thumbnailOrder.append(item.id)
                 while thumbnailOrder.count > 32 {
@@ -268,12 +286,52 @@ final class ClipboardStore {
                 }
             }
         } catch {
-            let available = await persistence.hasImage(image)
+            let available = await isImageAvailable(item)
             if items.contains(where: { $0.id == item.id }) {
-                missingPreviews.insert(item.id)
                 if !available { unavailableItems.insert(item.id) }
             }
         }
+    }
+
+    func loadPreview(for item: ClipboardItem?) async {
+        guard let item, item.hasImagePreview else {
+            clearPreview()
+            return
+        }
+        guard previewID != item.id || previewImage == nil else { return }
+        clearPreview()
+        previewID = item.id
+        missingPreviews.remove(item.id)
+        let requestID = previewRequestID
+        do {
+            let preview: CGImage
+            if let image = item.image {
+                preview = try await persistence.previewImage(image)
+            } else if let file = item.imageFile {
+                preview = try await persistence.previewImageFile(file)
+            } else {
+                return
+            }
+            guard !Task.isCancelled, previewRequestID == requestID, selectedItem?.id == item.id else { return }
+            previewImage = NSImage(cgImage: preview, size: NSSize(width: preview.width, height: preview.height))
+        } catch {
+            let available = await isImageAvailable(item)
+            guard !Task.isCancelled, previewRequestID == requestID, selectedItem?.id == item.id else { return }
+            missingPreviews.insert(item.id)
+            if !available { unavailableItems.insert(item.id) }
+        }
+    }
+
+    private func isImageAvailable(_ item: ClipboardItem) async -> Bool {
+        if let image = item.image { return await persistence.hasImage(image) }
+        let files = item.files
+        return await Task.detached(priority: .utility) { ClipboardFileAccess.areAvailable(files) }.value
+    }
+
+    private func clearPreview() {
+        previewRequestID = UUID()
+        previewID = nil
+        previewImage = nil
     }
 
     func refreshFileAvailability() async {
@@ -285,11 +343,18 @@ final class ClipboardStore {
         }.value
         guard fileAvailabilityGeneration == generation else { return }
         let currentIDs = Set(items.map(\.id))
+        let imageFileIDs = Set(fileItems.filter(\.hasImagePreview).map(\.id))
         for (id, available) in availability where currentIDs.contains(id) {
             if available {
                 unavailableItems.remove(id)
             } else {
                 unavailableItems.insert(id)
+                if imageFileIDs.contains(id) {
+                    thumbnails[id] = nil
+                    thumbnailOrder.removeAll { $0 == id }
+                    if previewID == id { clearPreview() }
+                    missingPreviews.insert(id)
+                }
             }
         }
     }
@@ -346,6 +411,7 @@ final class ClipboardStore {
         items = Array(kept)
         let ids = Set(items.map(\.id))
         thumbnails = thumbnails.filter { ids.contains($0.key) }
+        if let previewID, !ids.contains(previewID) { clearPreview() }
         thumbnailOrder.removeAll { !ids.contains($0) }
         missingPreviews.formIntersection(ids)
         unavailableItems.formIntersection(ids)

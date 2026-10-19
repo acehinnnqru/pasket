@@ -77,6 +77,7 @@ struct ContentView: View {
             }
         }
         .onAppear { searchFocused = true }
+        .task(id: store.selectedItem?.id) { await store.loadPreview(for: store.selectedItem) }
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             searchFocused = true
@@ -203,29 +204,16 @@ struct ContentView: View {
                     Group {
                         switch item.kind {
                         case .image:
-                            VStack(spacing: 14) {
-                                if let thumbnail = store.thumbnails[item.id] {
-                                    Image(nsImage: thumbnail)
-                                        .resizable().scaledToFit().frame(maxHeight: 260)
-                                } else if store.missingPreviews.contains(item.id) {
-                                    Label(store.unavailableItems.contains(item.id) ? "Saved image unavailable" : "Preview unavailable",
-                                          systemImage: "exclamationmark.triangle")
-                                } else {
-                                    ProgressView("Loading preview…")
-                                }
-                                if let image = item.image {
-                                    Text("\(image.width) × \(image.height) · \(ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file))")
-                                        .font(.system(size: 12))
-                                }
-                            }
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 190)
-                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 22))
+                            imagePreview(for: item)
                         case .file:
                             VStack(alignment: .leading, spacing: 16) {
-                                Image(systemName: "doc.richtext")
-                                    .font(.system(size: 42, weight: .ultraLight))
-                                    .foregroundStyle(.secondary)
+                                if item.hasImagePreview {
+                                    imagePreview(for: item)
+                                } else {
+                                    Image(systemName: "doc.richtext")
+                                        .font(.system(size: 42, weight: .ultraLight))
+                                        .foregroundStyle(.secondary)
+                                }
                                 Text(item.title).font(.title3)
                                 Text(item.content)
                                     .font(.system(size: 13))
@@ -274,10 +262,34 @@ struct ContentView: View {
                 .font(.system(size: 12))
             }
             .padding(28)
-            .task(id: item.id) { await store.loadThumbnail(for: item) }
         } else {
             ContentUnavailableView("No matching items", systemImage: "magnifyingglass", description: Text("Try another search or content type."))
         }
+    }
+
+    private func imagePreview(for item: ClipboardItem) -> some View {
+        VStack(spacing: 14) {
+            if store.previewID == item.id, let image = store.previewImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 260)
+            } else if store.missingPreviews.contains(item.id) {
+                Label(store.unavailableItems.contains(item.id) ? "Image unavailable" : "Preview unavailable",
+                      systemImage: "photo")
+            } else {
+                ProgressView("Loading preview…")
+            }
+            if let image = item.image {
+                Text("\(image.width) × \(image.height) · \(ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file))")
+                    .font(.system(size: 12))
+            }
+        }
+        .padding(16)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 190)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 22))
     }
 
     private func informationRow(_ title: String, value: String, shaded: Bool = false) -> some View {
@@ -477,7 +489,7 @@ private struct HistoryRow: View {
                 if let thumbnail {
                     Image(nsImage: thumbnail).resizable().scaledToFit()
                 } else {
-                    Image(systemName: isUnavailable ? "exclamationmark.triangle" : item.kind.symbol)
+                    Image(systemName: item.hasImagePreview ? "photo" : isUnavailable ? "exclamationmark.triangle" : item.kind.symbol)
                 }
             }
                 .font(.system(size: 17))

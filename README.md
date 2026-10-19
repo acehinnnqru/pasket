@@ -39,13 +39,21 @@ Pasket never changes your system privacy settings.
   clipboard text is collected normally.
 - Images are saved as PNG with a thumbnail, with a **20 MiB** per-image limit (including the incoming
   representation) and a 40-million-pixel decode limit. Image processing happens outside the main
-  actor; in-memory thumbnails are bounded to 32. Copying restores the saved image data.
+  actor; in-memory thumbnails are bounded to 32. History rows fall back to the default image icon
+  when a thumbnail is missing or unreadable. The detail pane independently loads a preview from the
+  saved original, limited to 1,600 pixels on its longest side; only the current preview is retained.
+  Copying restores the saved image data.
+- A single copied image file, including a screenshot tool's temporary file, remains a file reference.
+  Its thumbnail and detail preview are generated in memory from the original while access is available;
+  Pasket does not save a copy. Existing image file entries support the same previews. Once the original
+  is removed or access expires, the row falls back to the default image icon and the preview is unavailable.
+  These entries appear in both Images Only and Files Only filters.
 - Up to 100 file references can be recorded together. Pasket retains paths and read-only
   security-scoped bookmarks when the system grants access, allowing those file references to be
   reopened after relaunch. Existing ordinary bookmarks are upgraded when an accessible entry is copied.
   The app-scoped bookmark entitlement is enabled for Debug and Release; App Sandbox and user-selected
   read-only file access remain enabled. Pasket displays original size when known and copies file URLs.
-  It does not back up file contents. If an
+  Groups of files and other file types remain references without a backup of their contents. If an
   original is missing or sandbox access expires, use **Restore File Access…** to select accessible
   originals again, or delete the entry. Deleting history never deletes the original files.
 - Keep up to **1,000 entries**, **50 MiB of text bodies**, and **500 MiB of images including thumbnails**.

@@ -234,6 +234,113 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
+    @Test(arguments: [false, true])
+    func screenshotFileHasPreviewsWithoutSavingACopy(hasImageRepresentation: Bool) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let png = try Self.smallPNG()
+        let screenshotURL = fixture.directory.appendingPathComponent("Temporary Screenshot.png")
+        try png.write(to: screenshotURL)
+        fixture.pasteboard.clearContents()
+        fixture.pasteboard.writeObjects([screenshotURL as NSURL])
+        if hasImageRepresentation {
+            fixture.pasteboard.setData(png, forType: .png)
+        }
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let item = try #require(fixture.store.selectedItem)
+        #expect(item.kind == .file)
+        #expect(item.files.first?.path == screenshotURL.path)
+        #expect(item.image == nil)
+        fixture.store.filter = .images
+        fixture.store.reconcileSelection()
+        #expect(fixture.store.filteredItems.map(\.id) == [item.id])
+        fixture.store.filter = .files
+        #expect(fixture.store.filteredItems.map(\.id) == [item.id])
+        await fixture.store.loadThumbnail(for: item)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.thumbnails[item.id] != nil)
+        #expect(fixture.store.previewImage != nil)
+        #expect(await fixture.store.copySelection())
+        let copied = fixture.pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        #expect(copied?.map { $0.resolvingSymlinksInPath() } == [screenshotURL.resolvingSymlinksInPath()])
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
+        try FileManager.default.removeItem(at: screenshotURL)
+        await fixture.store.refreshFileAvailability()
+        #expect(fixture.store.thumbnails[item.id] == nil)
+        #expect(fixture.store.previewImage == nil)
+        await fixture.restart()
+        let restored = try #require(fixture.store.selectedItem)
+        #expect(restored.id == item.id)
+        await fixture.store.loadThumbnail(for: restored)
+        await fixture.store.loadPreview(for: restored)
+        #expect(fixture.store.thumbnails[restored.id] == nil)
+        #expect(fixture.store.previewImage == nil)
+        #expect(fixture.store.missingPreviews.contains(restored.id))
+        #expect(!fixture.store.canCopySelection)
+        await fixture.cleanUp()
+    }
+
+    @Test func existingImageFileReferencesHavePreviewsWithoutMigration() async throws {
+        let fixture = try Fixture()
+        let url = fixture.directory.appendingPathComponent("Legacy Screenshot.png")
+        try Self.smallPNG().write(to: url)
+        let source = ClipboardSource(name: "Screenshot Tool", bundleIdentifier: "test.screenshot")
+        let item = ClipboardItem(kind: .file, title: url.lastPathComponent, content: url.path, source: source,
+                                 copiedAt: Date(), fingerprint: "legacy-image-file", files: [ClipboardFileAccess.capture(url)])
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [item]))
+        await fixture.start()
+        let restored = try #require(fixture.store.selectedItem)
+        #expect(restored.kind == .file)
+        #expect(restored.id == item.id)
+        #expect(restored.source.bundleIdentifier == source.bundleIdentifier)
+        #expect(restored.copiedAt == item.copiedAt)
+        fixture.store.filter = .images
+        #expect(fixture.store.filteredItems.map(\.id) == [item.id])
+        await fixture.restart()
+        await fixture.store.loadThumbnail(for: try #require(fixture.store.selectedItem))
+        await fixture.store.loadPreview(for: fixture.store.selectedItem)
+        #expect(fixture.store.thumbnails[item.id] != nil)
+        #expect(fixture.store.previewImage != nil)
+        #expect(await fixture.store.copySelection())
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
+        await fixture.cleanUp()
+    }
+
+    @Test func expiredLegacyScreenshotReferencesKeepAnUnavailablePreview() async throws {
+        let fixture = try Fixture()
+        let path = fixture.directory.appendingPathComponent("Expired Screenshot.png").path
+        let file = ClipboardFile(path: path, name: "Expired Screenshot.png")
+        let item = ClipboardItem(kind: .file, title: file.name, content: path, source: .unknown,
+                                 copiedAt: Date(), fingerprint: "expired-image-file", files: [file])
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [item]))
+        await fixture.start()
+        #expect(fixture.store.selectedItem?.hasImagePreview == true)
+        await fixture.store.loadThumbnail(for: item)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.thumbnails[item.id] == nil)
+        #expect(fixture.store.previewImage == nil)
+        #expect(fixture.store.missingPreviews.contains(item.id))
+        #expect(!fixture.store.canCopySelection)
+        await fixture.cleanUp()
+    }
+
+    @Test func multipleImageFilesRemainAGroupOfFileReferences() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let urls = ["First.png", "Second.png"].map { fixture.directory.appendingPathComponent($0) }
+        for url in urls { try Self.smallPNG().write(to: url) }
+        fixture.pasteboard.clearContents()
+        fixture.pasteboard.writeObjects(urls as [NSURL])
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        #expect(fixture.store.selectedItem?.kind == .file)
+        #expect(fixture.store.selectedItem?.files.count == 2)
+        #expect(fixture.store.selectedItem?.hasImagePreview == false)
+        #expect(await fixture.store.copySelection())
+        await fixture.cleanUp()
+    }
+
     @Test func imageSizeLimitDoesNotSaveOversizedPayloads() async throws {
         let fixture = try Fixture()
         await fixture.start()
@@ -246,7 +353,8 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
-    @Test func thumbnailFailureDoesNotPreventCopyingTheOriginalImage() async throws {
+    @Test(arguments: [false, true])
+    func thumbnailFailureDoesNotPreventPreviewingOrCopyingTheOriginalImage(corruptThumbnail: Bool) async throws {
         let fixture = try Fixture()
         await fixture.start()
         fixture.pasteboard.clearContents()
@@ -255,14 +363,70 @@ struct ClipboardTests {
         await fixture.store.flush()
         let item = try #require(fixture.store.items.first)
         let image = try #require(item.image)
-        try FileManager.default.removeItem(at: fixture.directory.appendingPathComponent("Images").appendingPathComponent(image.thumbnailName))
+        let thumbnailURL = fixture.directory.appendingPathComponent("Images").appendingPathComponent(image.thumbnailName)
+        if corruptThumbnail {
+            try Data("Invalid thumbnail".utf8).write(to: thumbnailURL)
+        } else {
+            try FileManager.default.removeItem(at: thumbnailURL)
+        }
         await fixture.store.loadThumbnail(for: item)
-        #expect(fixture.store.missingPreviews.contains(item.id))
+        #expect(fixture.store.thumbnails[item.id] == nil)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.previewID == item.id)
+        #expect(fixture.store.previewImage != nil)
+        #expect(!fixture.store.missingPreviews.contains(item.id))
         #expect(fixture.store.canCopySelection)
         #expect(await fixture.store.copySelection())
         try FileManager.default.removeItem(at: fixture.directory.appendingPathComponent("Images").appendingPathComponent(image.fileName))
         #expect(await fixture.store.copySelection() == false)
         #expect(fixture.store.unavailableItems.contains(item.id))
+        await fixture.cleanUp()
+    }
+
+    @Test func previewUsesTheOriginalWithBoundedResolutionAndClearsOnSelectionChange() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        fixture.pasteboard.clearContents()
+        fixture.pasteboard.setData(try Self.smallPNG(width: 2_000, height: 1_000), forType: .png)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let item = try #require(fixture.store.selectedItem)
+        await fixture.store.loadThumbnail(for: item)
+        await fixture.store.loadPreview(for: item)
+        let thumbnail = try #require(fixture.store.thumbnails[item.id])
+        let preview = try #require(fixture.store.previewImage)
+        #expect(thumbnail.size.width == 480)
+        #expect(preview.size.width == 1_600)
+        #expect(preview.size.height == 800)
+        await fixture.copy("Select text instead")
+        fixture.store.selectedID = fixture.store.items.first?.id
+        await fixture.store.loadPreview(for: fixture.store.selectedItem)
+        #expect(fixture.store.previewID == nil)
+        #expect(fixture.store.previewImage == nil)
+        fixture.store.selectedID = item.id
+        await fixture.store.loadPreview(for: item)
+        fixture.store.delete(item.id)
+        #expect(fixture.store.previewImage == nil)
+        await fixture.cleanUp()
+    }
+
+    @Test func missingOriginalReportsPreviewFailureEvenWhenThumbnailExists() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        fixture.pasteboard.clearContents()
+        fixture.pasteboard.setData(try Self.smallPNG(), forType: .png)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let item = try #require(fixture.store.selectedItem)
+        let image = try #require(item.image)
+        await fixture.store.loadThumbnail(for: item)
+        try FileManager.default.removeItem(at: fixture.directory.appendingPathComponent("Images").appendingPathComponent(image.fileName))
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.thumbnails[item.id] != nil)
+        #expect(fixture.store.previewImage == nil)
+        #expect(fixture.store.missingPreviews.contains(item.id))
+        #expect(fixture.store.unavailableItems.contains(item.id))
+        #expect(!fixture.store.canCopySelection)
         await fixture.cleanUp()
     }
 
@@ -385,13 +549,13 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
-    private static func smallPNG() throws -> Data {
-        let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 6,
+    private static func smallPNG(width: Int = 8, height: Int = 6) throws -> Data {
+        let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
                                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                                   isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        for x in 0..<8 {
-            for y in 0..<6 { bitmap.setColor(NSColor(deviceRed: 0.2, green: 0.4, blue: 0.8, alpha: 1), atX: x, y: y) }
-        }
+        let context = try #require(NSGraphicsContext(bitmapImageRep: bitmap))
+        context.cgContext.setFillColor(NSColor(deviceRed: 0.2, green: 0.4, blue: 0.8, alpha: 1).cgColor)
+        context.cgContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return try #require(bitmap.representation(using: .png, properties: [:]))
     }
 }

@@ -108,6 +108,31 @@ actor ClipboardPersistence {
         return try Data(contentsOf: url)
     }
 
+    func previewImage(_ image: ClipboardImage) throws -> CGImage {
+        guard validImageNames(image) else { throw ClipboardStorageError.invalidHistory }
+        let url = mediaDirectory.appendingPathComponent(image.fileName)
+        return try previewImage(at: url, maxPixelSize: 1_600)
+    }
+
+    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws -> CGImage {
+        try ClipboardFileAccess.withResolvedFiles([file]) { urls, _ in
+            try previewImage(at: urls[0], maxPixelSize: thumbnail ? 480 : 1_600)
+        }
+    }
+
+    private func previewImage(at url: URL, maxPixelSize: Int) throws -> CGImage {
+        guard FileManager.default.fileExists(atPath: url.path) else { throw ClipboardStorageError.missingImage }
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options as CFDictionary),
+              let preview = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { throw ClipboardStorageError.invalidImage }
+        return preview
+    }
+
     func hasImage(_ image: ClipboardImage) -> Bool {
         validImageNames(image) && FileManager.default.isReadableFile(atPath: mediaDirectory.appendingPathComponent(image.fileName).path)
     }

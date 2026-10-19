@@ -77,6 +77,7 @@ struct ShortcutSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            WindowDragHandle()
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .medium))

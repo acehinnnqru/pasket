@@ -87,7 +87,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel.hasShadow = true
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            panel.isMovableByWindowBackground = true
+            panel.isMovableByWindowBackground = false
             panel.hidesOnDeactivate = false
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: ContentView(
@@ -134,7 +134,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = true
-            window.isMovableByWindowBackground = true
+            window.isMovableByWindowBackground = false
             window.delegate = self
             window.contentView = NSHostingView(rootView: ShortcutSettingsView(
                 shortcuts: shortcuts,

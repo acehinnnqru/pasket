@@ -13,6 +13,9 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - **Return**, double-click, or **Copy** copies the complete item, closes the panel,
   and returns to the previous application. Press **Command + V** there to paste.
 - **Escape** dismisses the panel. With the filter menu open, Escape first closes that menu.
+- Move the history or Settings window using the dotted drag handle in its header. Dragging starts
+  after 8 points of movement; clicking entries, selecting text, and dragging other content do not move
+  the window.
 - Use **Settings…** to change the global shortcut. Preferences persist; registration failures are shown.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
@@ -106,6 +109,10 @@ For the desktop smoke test:
    nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,
    rejecting the global history shortcut, and clearing the binding. Relaunch to verify persistence.
 8. Quit and relaunch to verify history persistence; test pause/resume separately.
+9. Using a trackpad, click and slightly drag both selected and unselected rows, select preview text,
+   and interact with search, filters, and footer controls; the window should stay in place. Move the
+   dotted header handle less than 8 points and release; the window should stay still. Drag it farther
+   to move the window. Repeat the handle and content checks in Settings.
 
 Core tests and a successful build do not establish that this desktop smoke test passed.
 

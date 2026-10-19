@@ -11,7 +11,6 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
     @State private var isConfirmingClear = false
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,10 +50,6 @@ struct ContentView: View {
             footer
         }
         .background {
-            VisualEffectBackground()
-                .overlay(Color.white.opacity(colorScheme == .dark ? 0.025 : 0.12))
-        }
-        .background {
             ShortcutEventMonitor { event in
                 guard !isFilterMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
                       shortcuts.deletionShortcut?.matches(event) == true else { return false }
@@ -65,12 +60,7 @@ struct ContentView: View {
                 return true
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.6), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
+        .modifier(PasketSurface())
         .frame(minWidth: 820, minHeight: 540)
         .overlay(alignment: .topTrailing) {
             if isFilterMenuPresented {
@@ -550,6 +540,25 @@ private struct HistoryRow: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+struct PasketSurface: ViewModifier {
+    var cornerRadius: CGFloat = 32
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                VisualEffectBackground()
+                    .overlay(Color.white.opacity(colorScheme == .dark ? 0.025 : 0.12))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.6), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
     }
 }
 

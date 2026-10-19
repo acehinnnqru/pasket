@@ -123,16 +123,23 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     func showSettings() {
         hidePanel(restorePreviousApplication: false)
         if settingsWindow == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
-                styleMask: [.titled, .closable, .miniaturizable],
+            let window = SettingsWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 660, height: 600),
+                styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Pasket Settings"
             window.isReleasedWhenClosed = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            window.isMovableByWindowBackground = true
             window.delegate = self
-            window.contentView = NSHostingView(rootView: ShortcutSettingsView(shortcuts: shortcuts))
+            window.contentView = NSHostingView(rootView: ShortcutSettingsView(
+                shortcuts: shortcuts,
+                onClose: { [weak self] in self?.settingsWindow?.close() }
+            ))
             window.center()
             settingsWindow = window
         }
@@ -172,4 +179,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
 private final class ClipboardPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+private final class SettingsWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }

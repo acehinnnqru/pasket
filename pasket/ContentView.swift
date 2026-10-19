@@ -421,22 +421,6 @@ struct ContentView: View {
             .help(shortcuts.deletionShortcut.map { "Delete the selected history entry (\($0.displayName))" }
                   ?? "Delete the selected history entry")
             .accessibilityIdentifier("deleteSelectedClipboardItem")
-            Button("Clear All…", role: .destructive) { isConfirmingClear = true }
-                .buttonStyle(PasketButtonStyle())
-                .font(.system(size: 12))
-                .focusable(false)
-                .fixedSize()
-                .disabled(store.isDebugMode || store.items.isEmpty || store.isLoading || store.isStorageBlocked)
-                .help("Clear all clipboard history after confirmation")
-                .accessibilityIdentifier("clearClipboardHistory")
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape")
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(PasketButtonStyle())
-            .focusable(false)
-            .help("Settings")
-            .accessibilityLabel("Open settings")
             Button(action: copySelection) {
                 HStack(spacing: 8) {
                     Text("Copy")
@@ -449,6 +433,29 @@ struct ContentView: View {
             .disabled(!store.canCopySelection)
             .help("Copy the complete item and return to your previous app")
             .accessibilityIdentifier("copyClipboardItem")
+            Menu {
+                Button(action: onOpenSettings) {
+                    Label("Settings…", systemImage: "gearshape")
+                }
+                Divider()
+                Button(role: .destructive) { isConfirmingClear = true } label: {
+                    Label("Delete All Entries…", systemImage: "trash")
+                }
+                .disabled(store.isDebugMode || store.items.isEmpty || store.isLoading || store.isStorageBlocked)
+                .help("Clear all clipboard history after confirmation")
+                .accessibilityIdentifier("clearClipboardHistory")
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 16, height: 16)
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(PasketButtonStyle())
+            .focusable(false)
+            .fixedSize()
+            .help("More actions")
+            .accessibilityLabel("More actions")
+            .accessibilityIdentifier("clipboardMoreActions")
             }
         }
         .padding(.horizontal, 14)

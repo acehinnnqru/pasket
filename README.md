@@ -22,13 +22,14 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - Move the history or Settings window using the dotted drag handle in its header. Dragging starts
   after 8 points of movement; clicking entries, selecting text, and dragging other content do not move
   the window.
-- Use **Settings…** to change the global shortcut. Preferences persist; registration failures are shown.
+- Open the **…** menu after **Copy** and choose **Settings…** to change the global shortcut.
+  Preferences persist; registration failures are shown.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
   per key press. No deletion shortcut is assigned by default; use **Clear** in Settings to disable it.
   The delete shortcut and the global history shortcut must use different combinations.
 - Pause or resume collection from the panel or menu bar. Use **Delete Selected** to delete one
-  entry or the separate **Clear All…** button to clear history with confirmation.
+  entry or **… → Delete All Entries…** to clear history with confirmation.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.
 - Debug builds include a **Debug mode** toggle in the panel footer. Turn it on to show fictional
@@ -118,7 +119,8 @@ For the desktop smoke test:
    nonempty text; verify they only edit the search and never remove history. Press an arrow key
    or click a row, then verify the search caret stays visible and typing and deletion still edit
    the search. Use Delete Selected to remove one entry, and test both Cancel and Clear History
-   in the Clear All… confirmation. Confirm typing resumes after each action and Return still copies.
+   in the **… → Delete All Entries…** confirmation. Check that **… → Settings…** opens Settings.
+   Confirm typing resumes after each action and Return still copies.
 7. In Settings, record a Delete Selected Item shortcut. Verify it deletes one selected entry
    while preserving the search text and caret, does not repeatedly delete when held, and does
    nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,

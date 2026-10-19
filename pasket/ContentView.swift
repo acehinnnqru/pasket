@@ -207,76 +207,40 @@ struct ContentView: View {
     private var preview: some View {
         if let item = store.selectedItem {
             VStack(alignment: .leading, spacing: 16) {
-                Text(item.kind.title.uppercased())
-                    .font(.system(size: 11, weight: .medium))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-                ScrollView {
-                    Group {
-                        switch item.kind {
-                        case .image:
+                Group {
+                    switch item.kind {
+                    case .image:
+                        imagePreview(for: item)
+                    case .file:
+                        if item.hasImagePreview {
                             imagePreview(for: item)
-                        case .file:
-                            VStack(alignment: .leading, spacing: 12) {
-                                if item.hasImagePreview {
-                                    imagePreview(for: item)
-                                } else {
-                                    Image(systemName: "doc.richtext")
-                                        .font(.system(size: 32, weight: .light))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(item.title).font(.system(size: 15, weight: .medium))
-                                Text(item.content)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
-                                Text("File references only. Original files are kept in their current location.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if store.unavailableItems.contains(item.id) {
-                                    Label("A file is missing or its folder needs permission.", systemImage: "exclamationmark.triangle")
-                                        .font(.caption).foregroundStyle(.orange)
-                                } else if item.files.contains(where: { file in
-                                    file.isSecurityScoped != true && !store.authorizedFolders.contains {
-                                        ClipboardFileAccess.contains($0, path: file.path)
+                        } else {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array(item.files.enumerated()), id: \.offset) { _, file in
+                                        Label(file.name, systemImage: "doc")
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                            .help(file.name)
                                     }
-                                }) {
-                                    Text("Authorize the containing folder once to keep access to files inside it after relaunch.")
-                                        .font(.caption).foregroundStyle(.secondary)
                                 }
-                                Button("Authorize Folder…") { onRestoreFileAccess(item) }
-                                    .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        default:
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(item.previewText)
-                                    .font(.system(size: 14))
-                                    .lineSpacing(3)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                if item.hasTruncatedPreview {
-                                    Text("Preview shows the first 500 characters. Copy includes all \(item.content.count.formatted()) characters.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
+                                .font(.system(size: 14))
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                    }
-                    .padding(.bottom, 8)
-                }
-                VStack(spacing: 2) {
-                    informationRow("Source", value: item.source.name, shaded: true)
-                    informationRow("Type", value: item.kind.title)
-                    informationRow("Copied", value: item.copiedAt.formatted(date: .abbreviated, time: .shortened), shaded: true)
-                    if [.text, .link, .email].contains(item.kind) {
-                        informationRow("Characters", value: item.content.count.formatted())
-                    } else if item.kind == .file {
-                        informationRow("Files", value: item.files.count.formatted())
-                        informationRow("Original size", value: item.files.allSatisfy { $0.byteCount != nil }
-                            ? ByteCountFormatter.string(fromByteCount: Int64(item.files.compactMap(\.byteCount).reduce(0, +)), countStyle: .file)
-                            : "Unknown")
+                    default:
+                        ScrollView {
+                            Text(item.previewText)
+                                .font(.system(size: 14))
+                                .lineSpacing(3)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .layoutPriority(1)
+                information(for: item)
             }
             .padding(20)
         } else {
@@ -285,41 +249,98 @@ struct ContentView: View {
     }
 
     private func imagePreview(for item: ClipboardItem) -> some View {
-        VStack(spacing: 10) {
-            if store.previewID == item.id, let image = store.previewImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 220)
-            } else if store.missingPreviews.contains(item.id) {
-                Label(store.unavailableItems.contains(item.id) ? "Image unavailable" : "Preview unavailable",
-                      systemImage: "photo")
-            } else {
-                ProgressView("Loading preview…")
+        GeometryReader { geometry in
+            Group {
+                if store.previewID == item.id, let image = store.previewImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else if store.missingPreviews.contains(item.id) {
+                    Label(store.unavailableItems.contains(item.id) ? "Image unavailable" : "Preview unavailable",
+                          systemImage: "photo")
+                } else {
+                    ProgressView("Loading preview…")
+                }
             }
-            if let image = item.image {
-                Text("\(image.width) × \(image.height) · \(ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file))")
-                    .font(.system(size: 12))
-            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .padding(12)
         .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, minHeight: 150)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func information(for item: ClipboardItem) -> some View {
+        let rows = informationValues(for: item)
+        return ScrollView {
+            VStack(spacing: 2) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    informationRow(row.title, value: row.value, shaded: index.isMultiple(of: 2))
+                }
+                if item.kind == .file {
+                    HStack {
+                        Text("Access").foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        Button("Authorize Folder…") { onRestoreFileAccess(item) }
+                            .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
+                            .help("Authorize a containing folder to keep access after relaunch. Original files stay in their current location.")
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(rows.count.isMultiple(of: 2) ? Color.primary.opacity(0.035) : .clear,
+                                in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .frame(height: min(CGFloat(rows.count + (item.kind == .file ? 1 : 0)) * 30 - 2, 180))
+        .id(item.id)
+    }
+
+    private func informationValues(for item: ClipboardItem) -> [(title: String, value: String)] {
+        var rows = [(title: "Source", value: item.source.name),
+                    (title: "Type", value: item.kind.title),
+                    (title: "Copied", value: item.copiedAt.formatted(date: .abbreviated, time: .shortened))]
+        if [.text, .link, .email].contains(item.kind) {
+            rows.append(("Characters", item.content.count.formatted()))
+            if item.hasTruncatedPreview {
+                rows.append(("Preview", "First 500 characters. Copy includes all \(item.content.count.formatted()) characters."))
+            }
+        } else if item.kind == .file {
+            rows.append((item.files.count == 1 ? "Name" : "Names", item.files.map(\.name).joined(separator: ", ")))
+            rows.append((item.files.count == 1 ? "Path" : "Paths", item.files.map(\.path).joined(separator: "\n")))
+            rows.append(("Files", item.files.count.formatted()))
+            rows.append(("Original size", item.files.allSatisfy { $0.byteCount != nil }
+                ? ByteCountFormatter.string(fromByteCount: Int64(item.files.compactMap(\.byteCount).reduce(0, +)), countStyle: .file)
+                : "Unknown"))
+            if store.unavailableItems.contains(item.id) {
+                rows.append(("Status", "A file is missing or its folder needs permission."))
+            } else if item.files.contains(where: { file in
+                file.isSecurityScoped != true && !store.authorizedFolders.contains {
+                    ClipboardFileAccess.contains($0, path: file.path)
+                }
+            }) {
+                rows.append(("Status", "Authorize the containing folder once to keep access after relaunch."))
+            }
+        }
+        if let image = item.image {
+            rows.append(("Dimensions", "\(image.width) × \(image.height)"))
+            rows.append(("Size", ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file)))
+        }
+        return rows
     }
 
     private func informationRow(_ title: String, value: String, shaded: Bool = false) -> some View {
         HStack {
-            Text(title).foregroundStyle(.secondary)
-            Spacer()
+            Text(title).foregroundStyle(.secondary).fixedSize()
+            Spacer(minLength: 12)
             Text(value)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(value)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .frame(height: 28)
         .background(shaded ? Color.primary.opacity(0.035) : .clear, in: RoundedRectangle(cornerRadius: 7))
     }
 

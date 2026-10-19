@@ -13,6 +13,9 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - **Return**, double-click, or **Copy** copies the complete item, closes the panel,
   and returns to the previous application. Press **Command + V** there to paste.
 - **Escape** dismisses the panel. With the filter menu open, Escape first closes that menu.
+- The detail preview shows only content. Images fit the available space without scrolling;
+  metadata and file access controls sit in the table below, which scrolls independently when needed.
+  Long table values are truncated; hover to see the complete value.
 - Move the history or Settings window using the dotted drag handle in its header. Dragging starts
   after 8 points of movement; clicking entries, selecting text, and dragging other content do not move
   the window.

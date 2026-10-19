@@ -76,7 +76,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
         if panel == nil {
             let panel = ClipboardPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 920, height: 590),
+                contentRect: NSRect(x: 0, y: 0, width: 800, height: 520),
                 styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -124,7 +124,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         hidePanel(restorePreviousApplication: false)
         if settingsWindow == nil {
             let window = SettingsWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 660, height: 600),
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 520),
                 styleMask: [.borderless],
                 backing: .buffered,
                 defer: false

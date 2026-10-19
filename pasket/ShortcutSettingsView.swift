@@ -10,18 +10,18 @@ struct ShortcutSettingsView: View {
             header
             Divider().opacity(0.5)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 14) {
                     HStack {
                         Text("KEYBOARD SHORTCUTS")
                             .font(.system(size: 11, weight: .medium))
-                            .tracking(1.3)
+                            .tracking(0.8)
                         Spacer()
                         Text("Click a shortcut to change it")
                             .font(.system(size: 11))
                     }
                     .foregroundStyle(.secondary)
 
-                    VStack(spacing: 12) {
+                    VStack(spacing: 10) {
                         historyShortcutCard
                         deletionShortcutCard
                     }
@@ -36,7 +36,7 @@ struct ShortcutSettingsView: View {
                             .accessibilityIdentifier("shortcutSettingsError")
                     }
                 }
-                .padding(26)
+                .padding(20)
             }
             Divider().opacity(0.5)
             HStack(spacing: 7) {
@@ -47,10 +47,10 @@ struct ShortcutSettingsView: View {
             }
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 26)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
         }
-        .frame(width: 660, height: 600)
+        .frame(width: 600, height: 520)
         .modifier(PasketSurface())
         .onExitCommand(perform: onClose)
         .sheet(isPresented: Binding(
@@ -63,15 +63,15 @@ struct ShortcutSettingsView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Image(systemName: "gearshape")
-                .font(.system(size: 23, weight: .light))
+                .font(.system(size: 18, weight: .regular))
                 .foregroundStyle(.secondary)
-                .frame(width: 46, height: 46)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .frame(width: 36, height: 36)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
                 Text("Settings")
-                    .font(.system(size: 23, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                 Text("Make Pasket feel like second nature.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -80,18 +80,15 @@ struct ShortcutSettingsView: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
-                    .background(.thinMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(.white.opacity(0.2)))
+                    .frame(width: 14, height: 16)
             }
-            .buttonStyle(SettingsControlStyle())
+            .buttonStyle(PasketButtonStyle())
             .keyboardShortcut("w", modifiers: .command)
             .help("Close Settings (Esc)")
             .accessibilityLabel("Close settings")
         }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 24)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
 
     private var historyShortcutCard: some View {
@@ -109,12 +106,12 @@ struct ShortcutSettingsView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Restore Default") { shortcuts.restoreDefault() }
-                    .buttonStyle(SettingsControlStyle())
+                    .buttonStyle(PasketButtonStyle())
                     .disabled(shortcuts.shortcut == .default)
             }
             .font(.system(size: 11))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
         }
         .modifier(SettingsCard())
     }
@@ -134,12 +131,12 @@ struct ShortcutSettingsView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Clear") { shortcuts.setDeletionShortcut(nil) }
-                    .buttonStyle(SettingsControlStyle())
+                    .buttonStyle(PasketButtonStyle())
                     .disabled(shortcuts.deletionShortcut == nil)
             }
             .font(.system(size: 11))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
         }
         .modifier(SettingsCard())
     }
@@ -148,15 +145,15 @@ struct ShortcutSettingsView: View {
         title: String, description: String, symbol: String,
         shortcut: GlobalShortcut?, action: GlobalShortcutManager.RecordingAction
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 17, weight: .regular))
+                .font(.system(size: 15, weight: .regular))
                 .foregroundStyle(.secondary)
-                .frame(width: 36, height: 36)
-                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 5) {
+                .frame(width: 30, height: 30)
+                .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                 Text(description)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -173,23 +170,20 @@ struct ShortcutSettingsView: View {
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(.primary.opacity(0.04), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.primary.opacity(0.08)))
+                    .frame(height: 28)
                 }
             }
-            .buttonStyle(SettingsControlStyle())
+            .buttonStyle(PasketButtonStyle())
             .fixedSize()
             .help("Record a shortcut for \(title)")
             .accessibilityLabel("Record \(title) shortcut")
             .accessibilityValue(shortcut?.displayName ?? "Not set")
         }
-        .padding(18)
+        .padding(14)
     }
 
     private var panelControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("IN THE HISTORY PANEL")
                 .font(.system(size: 10, weight: .medium))
                 .tracking(1.1)
@@ -201,8 +195,8 @@ struct ShortcutSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
+        .padding(12)
+        .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func panelControl(keys: String, title: String) -> some View {
@@ -219,15 +213,15 @@ struct ShortcutSettingsView: View {
     }
 
     private var recordingSheet: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Image(systemName: "keyboard")
-                .font(.system(size: 28, weight: .light))
+                .font(.system(size: 24, weight: .light))
                 .foregroundStyle(.secondary)
-                .frame(width: 64, height: 64)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22))
+                .frame(width: 48, height: 48)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             VStack(spacing: 7) {
                 Text("Record a shortcut")
-                    .font(.system(size: 21, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                 Text(shortcuts.recordingAction == .deleteSelectedItem
                      ? "Delete Selected Item" : "Show Clipboard History")
                     .font(.system(size: 13))
@@ -236,10 +230,10 @@ struct ShortcutSettingsView: View {
             Text("Press your new key combination")
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
-                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.vertical, 16)
+                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(.primary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 }
             Text("Include Command, Control, or Option and another key.\nYour shortcut is saved as soon as it is accepted.")
@@ -260,21 +254,17 @@ struct ShortcutSettingsView: View {
                 .frame(height: 1)
                 .accessibilityHidden(true)
             Button { shortcuts.cancelRecording() } label: {
-                HStack(spacing: 16) {
+                HStack(spacing: 10) {
                     Text("Cancel")
                     Text("esc").foregroundStyle(.secondary)
                 }
                 .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(.thinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
             }
-            .buttonStyle(SettingsControlStyle())
+            .buttonStyle(PasketButtonStyle())
         }
-        .padding(28)
-        .frame(width: 420)
-        .modifier(PasketSurface(cornerRadius: 26))
+        .padding(24)
+        .frame(width: 380)
+        .modifier(PasketSurface())
         .interactiveDismissDisabled()
     }
 }
@@ -282,24 +272,12 @@ struct ShortcutSettingsView: View {
 private struct SettingsCard: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(.white.opacity(0.2))
                     .allowsHitTesting(false)
             }
-    }
-}
-
-private struct SettingsControlStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(isEnabled ? (configuration.isPressed ? 0.55 : 1) : 0.35)
-            .brightness(isEnabled && isHovered ? 0.08 : 0)
-            .onHover { isHovered = $0 }
     }
 }
 
@@ -315,13 +293,13 @@ private struct ShortcutKeycaps: View {
         HStack(spacing: 4) {
             ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
                 Text(key)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .frame(minWidth: 16)
-                    .padding(.horizontal, 6)
-                    .frame(height: 32)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(minWidth: 12)
+                    .padding(.horizontal, 5)
+                    .frame(height: 28)
+                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(.primary.opacity(0.08))
                     }
             }

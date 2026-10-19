@@ -7,13 +7,21 @@ Open `pasket.xcodeproj` in Xcode, select the `pasket` scheme and My Mac, and run
 Pasket lives in the menu bar and opens its history panel at launch.
 
 - **Hyper + P** (Control + Option + Shift + Command + P) toggles the panel.
-- Search the complete saved content or source app, filter by type, and select with the arrow keys.
+- The search field receives focus whenever the panel opens. Search the complete saved content or
+  source app and filter by type. Arrow keys and row clicks change the selected entry while keeping
+  the search field focused, so you can continue typing immediately.
 - **Return**, double-click, or **Copy** copies the complete item, closes the panel,
   and returns to the previous application. Press **Command + V** there to paste.
 - **Escape** dismisses the panel. With the filter menu open, Escape first closes that menu.
 - Use **Settings…** to change the global shortcut. Preferences persist; registration failures are shown.
-- Pause or resume collection from the panel or menu bar. Use the trash menu to delete the
-  selected entry or clear history with confirmation. Rows also have a Delete context menu.
+- Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
+  Option. It only works in the history panel, preserves search focus, and deletes one selected entry
+  per key press. No deletion shortcut is assigned by default; use **Clear** in Settings to disable it.
+  The delete shortcut and the global history shortcut must use different combinations.
+- Pause or resume collection from the panel or menu bar. Use **Delete Selected** to delete one
+  entry or the separate **Clear All…** button to clear history with confirmation.
+  Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
+  they never delete history entries, even when the search field is empty.
 
 macOS may request permission when Pasket first reads a new clipboard entry. Allow clipboard
 access for background collection. If access is denied, the panel offers to open System Settings.
@@ -83,7 +91,16 @@ For the desktop smoke test:
 3. Search `interaction check`, select the entry, and press Return.
 4. Confirm the panel closes and focus returns to the editor; press Command + V and check the text.
 5. Repeat with arrow-key selection, type filtering, Escape, and successive invocations.
-6. Quit and relaunch to verify persistence; test pause/resume and deletion separately.
+6. With the search field focused, test Backspace, Delete, and Fn + Backspace with both empty and
+   nonempty text; verify they only edit the search and never remove history. Press an arrow key
+   or click a row, then verify the search caret stays visible and typing and deletion still edit
+   the search. Use Delete Selected to remove one entry, and test both Cancel and Clear History
+   in the Clear All… confirmation. Confirm typing resumes after each action and Return still copies.
+7. In Settings, record a Delete Selected Item shortcut. Verify it deletes one selected entry
+   while preserving the search text and caret, does not repeatedly delete when held, and does
+   nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,
+   rejecting the global history shortcut, and clearing the binding. Relaunch to verify persistence.
+8. Quit and relaunch to verify history persistence; test pause/resume separately.
 
 Core tests and a successful build do not establish that this desktop smoke test passed.
 

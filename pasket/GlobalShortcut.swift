@@ -22,6 +22,15 @@ struct GlobalShortcut: Codable, Equatable {
         return result + keyLabel
     }
 
+    func matches(_ event: NSEvent) -> Bool {
+        guard let candidate = Self.from(event) else { return false }
+        return hasSameKeys(as: candidate)
+    }
+
+    func hasSameKeys(as other: GlobalShortcut) -> Bool {
+        keyCode == other.keyCode && modifiers == other.modifiers
+    }
+
     static func from(_ event: NSEvent) -> GlobalShortcut? {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard !flags.intersection([.command, .control, .option]).isEmpty else { return nil }
@@ -57,9 +66,16 @@ struct GlobalShortcut: Codable, Equatable {
 
 @MainActor @Observable
 final class GlobalShortcutManager {
+    enum RecordingAction {
+        case showHistory
+        case deleteSelectedItem
+    }
+
     private(set) var shortcut: GlobalShortcut
+    private(set) var deletionShortcut: GlobalShortcut?
     private(set) var errorMessage: String?
     private(set) var isRecording = false
+    private(set) var recordingAction: RecordingAction = .showHistory
     var onInvoke: (() -> Void)?
 
     @ObservationIgnored private var hotKey: EventHotKeyRef?
@@ -68,6 +84,7 @@ final class GlobalShortcutManager {
     @ObservationIgnored private var nextID: UInt32 = 1
     @ObservationIgnored private let defaults: UserDefaults
     private static let storageKey = "globalInvocationShortcut"
+    private static let deletionStorageKey = "deleteSelectedItemShortcut"
     private static let signature: OSType = 0x50534B54
 
     init(defaults: UserDefaults = .standard) {
@@ -77,6 +94,11 @@ final class GlobalShortcutManager {
             shortcut = saved
         } else {
             shortcut = .default
+        }
+        if let data = defaults.data(forKey: Self.deletionStorageKey),
+           let saved = try? JSONDecoder().decode(GlobalShortcut.self, from: data),
+           !saved.hasSameKeys(as: shortcut) {
+            deletionShortcut = saved
         }
     }
 
@@ -116,13 +138,14 @@ final class GlobalShortcutManager {
         handler = nil
     }
 
-    func beginRecording() {
+    func beginRecording(_ action: RecordingAction = .showHistory) {
         guard handler != nil else {
             errorMessage = "Global shortcuts are unavailable. Relaunch Pasket to try again."
             return
         }
         unregisterHotKey()
         errorMessage = nil
+        recordingAction = action
         isRecording = true
     }
 
@@ -136,7 +159,18 @@ final class GlobalShortcutManager {
             errorMessage = "Include Command, Control, or Option with another key."
             return
         }
-        if register(candidate, persist: true) { isRecording = false }
+        if recordingAction == .deleteSelectedItem {
+            if setDeletionShortcut(candidate) {
+                isRecording = false
+                _ = register(shortcut, persist: false)
+            }
+        } else {
+            guard deletionShortcut?.hasSameKeys(as: candidate) != true else {
+                errorMessage = "This combination is assigned to Delete Selected Item. Choose another combination."
+                return
+            }
+            if register(candidate, persist: true) { isRecording = false }
+        }
     }
 
     func cancelRecording() {
@@ -146,7 +180,27 @@ final class GlobalShortcutManager {
     }
 
     func restoreDefault() {
+        guard deletionShortcut?.hasSameKeys(as: .default) != true else {
+            errorMessage = "The default combination is assigned to Delete Selected Item. Change or clear it first."
+            return
+        }
         _ = register(.default, persist: true)
+    }
+
+    @discardableResult
+    func setDeletionShortcut(_ candidate: GlobalShortcut?) -> Bool {
+        guard candidate?.hasSameKeys(as: shortcut) != true else {
+            errorMessage = "This combination opens clipboard history. Choose another combination."
+            return false
+        }
+        deletionShortcut = candidate
+        errorMessage = nil
+        if let candidate, let data = try? JSONEncoder().encode(candidate) {
+            defaults.set(data, forKey: Self.deletionStorageKey)
+        } else {
+            defaults.removeObject(forKey: Self.deletionStorageKey)
+        }
+        return true
     }
 
     @discardableResult

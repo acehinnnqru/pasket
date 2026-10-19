@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var store: ClipboardStore
+    @Bindable var shortcuts: GlobalShortcutManager
     var onDismiss: () -> Void
     var onOpenSettings: () -> Void
     var onRestoreFileAccess: (ClipboardItem) -> Void = { _ in }
@@ -53,6 +54,17 @@ struct ContentView: View {
             VisualEffectBackground()
                 .overlay(Color.white.opacity(colorScheme == .dark ? 0.025 : 0.12))
         }
+        .background {
+            ShortcutEventMonitor { event in
+                guard !isFilterMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
+                      shortcuts.deletionShortcut?.matches(event) == true else { return false }
+                if !event.isARepeat, !store.isLoading, !store.isStorageBlocked,
+                   let item = store.selectedItem {
+                    store.delete(item.id)
+                }
+                return true
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 32, style: .continuous)
@@ -81,6 +93,9 @@ struct ContentView: View {
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             searchFocused = true
+        }
+        .onChange(of: isConfirmingClear) {
+            if !isConfirmingClear { searchFocused = true }
         }
         .onExitCommand {
             if isFilterMenuPresented { dismissFilterMenu() } else { onDismiss() }
@@ -164,13 +179,16 @@ struct ContentView: View {
                     ForEach(store.filteredItems) { item in
                         Button {
                             store.selectedID = item.id
+                            searchFocused = true
                         } label: {
                             HistoryRow(item: item, isSelected: store.selectedID == item.id,
                                        thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
                         }
                         .buttonStyle(.plain)
+                        .focusable(false)
                         .simultaneousGesture(TapGesture(count: 2).onEnded {
                             store.selectedID = item.id
+                            searchFocused = true
                             copySelection()
                         })
                         .id(item.id)
@@ -184,6 +202,7 @@ struct ContentView: View {
                 }
                 .padding(12)
             }
+            .focusable(false)
             .onChange(of: store.selectedID) {
                 if let id = store.selectedID { proxy.scrollTo(id) }
             }
@@ -320,24 +339,36 @@ struct ContentView: View {
                 store.setPaused(!store.isPaused)
             }
             .labelStyle(.iconOnly)
+            .focusable(false)
             .disabled(store.isLoading || store.isStorageBlocked)
             .help(store.isPaused ? "Resume collection" : "Pause collection")
-            Menu {
-                Button("Delete Selected Item", role: .destructive) {
-                    if let id = store.selectedID { store.delete(id) }
-                }.disabled(store.selectedItem == nil || store.isStorageBlocked)
-                Button("Clear History…", role: .destructive) { isConfirmingClear = true }
-                    .disabled(store.items.isEmpty || store.isStorageBlocked)
+            Button(role: .destructive) {
+                if let item = store.selectedItem { store.delete(item.id) }
+                searchFocused = true
             } label: {
-                Image(systemName: "trash")
+                Label("Delete Selected", systemImage: "trash")
             }
-            .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .focusable(false)
             .fixedSize()
-            .help("Manage history")
+            .disabled(store.selectedItem == nil || store.isLoading || store.isStorageBlocked)
+            .help(shortcuts.deletionShortcut.map { "Delete the selected history entry (\($0.displayName))" }
+                  ?? "Delete the selected history entry")
+            .accessibilityIdentifier("deleteSelectedClipboardItem")
+            Button("Clear All…", role: .destructive) { isConfirmingClear = true }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .focusable(false)
+                .fixedSize()
+                .disabled(store.items.isEmpty || store.isLoading || store.isStorageBlocked)
+                .help("Clear all clipboard history after confirmation")
+                .accessibilityIdentifier("clearClipboardHistory")
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape").frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("Settings")
             .accessibilityLabel("Open settings")
             Button(action: copySelection) {
@@ -352,6 +383,7 @@ struct ContentView: View {
                 .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .disabled(!store.canCopySelection)
             .help("Copy the complete item and return to your previous app")
             .accessibilityIdentifier("copyClipboardItem")
@@ -534,6 +566,6 @@ private struct VisualEffectBackground: NSViewRepresentable {
 }
 
 #Preview {
-    ContentView(store: ClipboardStore(), onDismiss: {}, onOpenSettings: {})
+    ContentView(store: ClipboardStore(), shortcuts: GlobalShortcutManager(), onDismiss: {}, onOpenSettings: {})
         .frame(width: 920, height: 590)
 }

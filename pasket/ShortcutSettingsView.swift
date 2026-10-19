@@ -7,8 +7,8 @@ struct ShortcutSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Keyboard Shortcut").font(.title2.weight(.medium))
-                Text("Open your clipboard history from any app.")
+                Text("Keyboard Shortcuts").font(.title2.weight(.medium))
+                Text("Open history from any app and manage items in the history panel.")
                     .foregroundStyle(.secondary)
             }
 
@@ -35,6 +35,28 @@ struct ShortcutSettingsView: View {
                 Button("Restore Default") { shortcuts.restoreDefault() }
             }
 
+            Divider()
+
+            HStack {
+                Text("Delete Selected Item")
+                Spacer()
+                Button {
+                    shortcuts.beginRecording(.deleteSelectedItem)
+                } label: {
+                    Text(shortcuts.deletionShortcut?.displayName ?? "Not Set")
+                        .font(.system(.body, design: .monospaced))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                }
+                .help("Record a shortcut for deleting the selected item")
+                .accessibilityLabel("Record delete shortcut, currently \(shortcuts.deletionShortcut?.displayName ?? "not set")")
+                Button("Clear") { shortcuts.setDeletionShortcut(nil) }
+                    .disabled(shortcuts.deletionShortcut == nil)
+            }
+            Text("Only active in the history panel. No shortcut is assigned by default.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             if let error = shortcuts.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -44,7 +66,7 @@ struct ShortcutSettingsView: View {
             Spacer(minLength: 0)
         }
         .padding(28)
-        .frame(width: 480, height: 300)
+        .frame(width: 540, height: 420)
         .sheet(isPresented: Binding(
             get: { shortcuts.isRecording },
             set: { if !$0 { shortcuts.cancelRecording() } }
@@ -58,7 +80,9 @@ struct ShortcutSettingsView: View {
             Image(systemName: "keyboard")
                 .font(.system(size: 32, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("Press a new shortcut").font(.title3.weight(.medium))
+            Text(shortcuts.recordingAction == .deleteSelectedItem
+                 ? "Shortcut for Delete Selected Item" : "Shortcut for Show Clipboard History")
+                .font(.title3.weight(.medium))
             Text("Use Command, Control, or Option with another key.\nPress Escape to cancel.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -70,7 +94,10 @@ struct ShortcutSettingsView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ShortcutCaptureView(onKeyDown: shortcuts.record)
+            ShortcutEventMonitor { event in
+                shortcuts.record(event)
+                return true
+            }
                 .frame(height: 1)
                 .accessibilityHidden(true)
             Button("Cancel") { shortcuts.cancelRecording() }
@@ -80,8 +107,8 @@ struct ShortcutSettingsView: View {
     }
 }
 
-private struct ShortcutCaptureView: NSViewRepresentable {
-    var onKeyDown: (NSEvent) -> Void
+struct ShortcutEventMonitor: NSViewRepresentable {
+    var onKeyDown: (NSEvent) -> Bool
 
     func makeNSView(context: Context) -> CaptureView {
         let view = CaptureView()
@@ -98,7 +125,7 @@ private struct ShortcutCaptureView: NSViewRepresentable {
     }
 
     final class CaptureView: NSView {
-        var onKeyDown: ((NSEvent) -> Void)?
+        var onKeyDown: ((NSEvent) -> Bool)?
         private var monitor: Any?
 
         override func viewDidMoveToWindow() {
@@ -106,9 +133,9 @@ private struct ShortcutCaptureView: NSViewRepresentable {
             stopMonitoring()
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, event.window === self.window else { return event }
-                self.onKeyDown?(event)
-                return nil
+                guard let self, let window = self.window, window.isKeyWindow,
+                      window.attachedSheet == nil, event.window === window else { return event }
+                return self.onKeyDown?(event) == true ? nil : event
             }
         }
 

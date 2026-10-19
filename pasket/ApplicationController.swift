@@ -92,6 +92,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel.delegate = self
             panel.contentView = NSHostingView(rootView: ContentView(
                 store: store,
+                shortcuts: shortcuts,
                 onDismiss: { [weak self] in self?.hidePanel() },
                 onOpenSettings: { [weak self] in self?.showSettings() },
                 onRestoreFileAccess: { [weak self] item in self?.restoreFileAccess(item) }
@@ -123,7 +124,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         hidePanel(restorePreviousApplication: false)
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
+                contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false

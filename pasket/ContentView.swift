@@ -80,7 +80,7 @@ struct ContentView: View {
                         dismissFilterMenu()
                     }, onDismiss: dismissFilterMenu)
                     .padding(.top, 52)
-                    .padding(.trailing, 16)
+                    .padding(.trailing, 14)
                 }
             }
         }
@@ -121,6 +121,7 @@ struct ContentView: View {
                     store.moveSelection(by: -1)
                     return .handled
                 }
+            WindowDragHandle()
             Button {
                 searchFocused = false
                 isFilterMenuPresented.toggle()
@@ -141,9 +142,9 @@ struct ContentView: View {
             .accessibilityLabel("Filter clipboard history")
             .accessibilityValue(store.filter.title)
             .accessibilityHint("Show content type options")
-            WindowDragHandle()
         }
-        .padding(.horizontal, 18)
+        .padding(.leading, 18)
+        .padding(.trailing, 14)
         .padding(.vertical, 12)
     }
 

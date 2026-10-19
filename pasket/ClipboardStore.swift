@@ -1,84 +1,6 @@
 import AppKit
 import Observation
 
-enum ClipboardKind: String, CaseIterable, Identifiable {
-    case text, image, file, link, email
-
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .text: "Text"
-        case .image: "Image"
-        case .file: "File"
-        case .link: "Link"
-        case .email: "Email"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .text: "text.alignleft"
-        case .image: "photo"
-        case .file: "doc"
-        case .link: "link"
-        case .email: "at"
-        }
-    }
-}
-
-enum ClipboardFilter: String, CaseIterable, Identifiable {
-    case all, text, images, files, links, emails
-
-    var id: Self { self }
-    var kind: ClipboardKind? {
-        switch self {
-        case .all: nil
-        case .text: .text
-        case .images: .image
-        case .files: .file
-        case .links: .link
-        case .emails: .email
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .all: "All Types"
-        case .text: "Text Only"
-        case .images: "Images Only"
-        case .files: "Files Only"
-        case .links: "Links Only"
-        case .emails: "Emails Only"
-        }
-    }
-
-    var symbol: String { kind?.symbol ?? "list.bullet" }
-}
-
-struct ClipboardItem: Identifiable {
-    let id = UUID()
-    let kind: ClipboardKind
-    let title: String
-    let content: String
-    let source: String
-    let copiedAt: Date
-    var isCode = false
-
-    var canCopy: Bool { kind != .image && kind != .file }
-
-    static var samples: [ClipboardItem] {
-        let now = Date()
-        return [
-            ClipboardItem(kind: .link, title: "https://example.com/design/pasket", content: "https://example.com/design/pasket", source: "Safari", copiedAt: now),
-            ClipboardItem(kind: .text, title: "A little basket for everything you copy.", content: "A little basket for everything you copy.\n\nFind a thought, a link, or a file — right when you need it.", source: "Notes", copiedAt: now.addingTimeInterval(-120)),
-            ClipboardItem(kind: .image, title: "Image · 1440 × 900", content: "Sample image", source: "Screenshot", copiedAt: now.addingTimeInterval(-300)),
-            ClipboardItem(kind: .file, title: "Product brief.pdf", content: "~/Documents/Product brief.pdf", source: "Finder", copiedAt: now.addingTimeInterval(-480)),
-            ClipboardItem(kind: .email, title: "hello@example.com", content: "hello@example.com", source: "Mail", copiedAt: now.addingTimeInterval(-720)),
-            ClipboardItem(kind: .text, title: "let basket = ClipboardHistory()", content: "let basket = ClipboardHistory()\nbasket.startCollecting()", source: "Xcode", copiedAt: now.addingTimeInterval(-900), isCode: true)
-        ]
-    }
-}
-
 @MainActor @Observable
 final class ClipboardStore {
     var query = ""
@@ -86,26 +8,110 @@ final class ClipboardStore {
     var selectedID: ClipboardItem.ID?
     var presentationID = UUID()
     private(set) var copyError: String?
-    private(set) var items: [ClipboardItem]
+    private(set) var storageError: String?
+    private(set) var notice: String?
+    private(set) var isLoading = true
+    private(set) var isPaused = false
+    private(set) var isCopying = false
+    private(set) var clipboardAccessDenied = false
+    private(set) var items: [ClipboardItem] = []
+    private(set) var thumbnails: [UUID: NSImage] = [:]
+    private(set) var missingPreviews: Set<UUID> = []
+    private(set) var unavailableItems: Set<UUID> = []
 
-    init(items: [ClipboardItem]? = nil) {
-        let initialItems = items ?? ClipboardItem.samples
-        self.items = initialItems
-        selectedID = initialItems.first?.id
+    @ObservationIgnored private let persistence: ClipboardPersistence
+    @ObservationIgnored private let pasteboard: NSPasteboard
+    @ObservationIgnored private let monitor: ClipboardMonitor
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var captureTask: Task<Void, Never>?
+    @ObservationIgnored private var captureGeneration = 0
+    @ObservationIgnored private var storageBlocked = false
+    @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var stopRequested = false
+    @ObservationIgnored private var thumbnailOrder: [UUID] = []
+    @ObservationIgnored private var thumbnailRequests: Set<UUID> = []
+    @ObservationIgnored private var deletionCutoffs: [String: Date] = [:]
+    @ObservationIgnored private var fileAvailabilityGeneration = 0
+
+    init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general) {
+        persistence = ClipboardPersistence(directory: directory)
+        self.pasteboard = pasteboard
+        monitor = ClipboardMonitor(pasteboard: pasteboard)
+        monitor.onCapture = { [weak self] capture in self?.enqueue(capture) }
+        monitor.onNotice = { [weak self] message in self?.notice = message }
+        monitor.onAccessChange = { [weak self] denied in self?.clipboardAccessDenied = denied }
     }
 
     var filteredItems: [ClipboardItem] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return items.filter { item in
             (filter.kind == nil || filter.kind == item.kind)
-                && (search.isEmpty || [item.title, item.content, item.source].contains {
+                && (search.isEmpty || [item.title, item.content, item.source.name, item.source.bundleIdentifier ?? ""].contains {
                     $0.localizedStandardContains(search)
                 })
         }
     }
 
-    var selectedItem: ClipboardItem? {
-        filteredItems.first { $0.id == selectedID }
+    var selectedItem: ClipboardItem? { filteredItems.first { $0.id == selectedID } }
+    var isStorageBlocked: Bool { storageBlocked }
+    var canCopySelection: Bool { selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
+    var imageStorageBytes: Int { items.reduce(0) { $0 + $1.imageByteCount } }
+
+    func start() async {
+        guard !hasStarted else { return }
+        hasStarted = true
+        await load()
+        if !stopRequested { monitor.start() }
+        monitor.setPaused(isPaused || storageBlocked)
+        if !storageBlocked { persist() }
+        await refreshFileAvailability()
+    }
+
+    func stop() {
+        stopRequested = true
+        monitor.stop()
+    }
+
+    func resumeMonitoring() {
+        stopRequested = false
+        monitor.start()
+        monitor.setPaused(isPaused || storageBlocked)
+    }
+
+    private func load() async {
+        isLoading = true
+        do {
+            let history = try await persistence.load()
+            items = history.items
+            isPaused = history.isPaused
+            storageBlocked = false
+            storageError = nil
+            enforceLimits()
+            selectedID = items.first?.id
+        } catch {
+            storageBlocked = true
+            storageError = "Could not load history. \(error.localizedDescription) Collection is stopped. Retry after checking the history file."
+        }
+        isLoading = false
+    }
+
+    func retryStorage() async {
+        if storageBlocked {
+            await load()
+            monitor.setPaused(isPaused || storageBlocked)
+        } else {
+            persist()
+            await saveTask?.value
+        }
+    }
+
+    func setPaused(_ paused: Bool) {
+        guard !isLoading, !storageBlocked else { return }
+        captureGeneration += 1
+        isPaused = paused
+        monitor.setPaused(paused)
+        notice = nil
+        persist()
     }
 
     func prepareForPresentation() {
@@ -114,7 +120,10 @@ final class ClipboardStore {
         selectedID = items.first?.id
         copyError = nil
         presentationID = UUID()
+        Task { await refreshFileAvailability() }
     }
+
+    func invalidatePresentation() { presentationID = UUID() }
 
     func reconcileSelection() {
         copyError = nil
@@ -127,20 +136,249 @@ final class ClipboardStore {
         let visibleItems = filteredItems
         guard !visibleItems.isEmpty else { return }
         let current = visibleItems.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : visibleItems.count)
-        let next = min(max(current + offset, 0), visibleItems.count - 1)
-        selectedID = visibleItems[next].id
+        selectedID = visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id
         copyError = nil
     }
 
+    func delete(_ id: UUID) {
+        guard !storageBlocked, !isLoading, let deleted = items.first(where: { $0.id == id }) else { return }
+        let cutoff = Date()
+        deletionCutoffs[deleted.fingerprint] = cutoff
+        let pendingCapture = captureTask
+        Task { [weak self] in
+            await pendingCapture?.value
+            if self?.deletionCutoffs[deleted.fingerprint] == cutoff {
+                self?.deletionCutoffs[deleted.fingerprint] = nil
+            }
+        }
+        items.removeAll { $0.id == id }
+        thumbnails[id] = nil
+        missingPreviews.remove(id)
+        thumbnailOrder.removeAll { $0 == id }
+        unavailableItems.remove(id)
+        reconcileSelection()
+        persist()
+    }
+
+    func clearHistory() {
+        guard !storageBlocked, !isLoading else { return }
+        captureGeneration += 1
+        deletionCutoffs = [:]
+        monitor.checkpoint()
+        items = []
+        thumbnails = [:]
+        missingPreviews = []
+        thumbnailOrder = []
+        unavailableItems = []
+        selectedID = nil
+        notice = nil
+        copyError = nil
+        persist()
+    }
+
     @discardableResult
-    func copySelection() -> Bool {
-        guard let item = selectedItem, item.canCopy else { return false }
-        NSPasteboard.general.clearContents()
-        guard NSPasteboard.general.setString(item.content, forType: .string) else {
-            copyError = "Could not copy this item. Try again."
+    func copySelection() async -> Bool {
+        guard let item = selectedItem, !isCopying, !isLoading else { return false }
+        isCopying = true
+        defer { isCopying = false }
+        let presentation = presentationID
+        do {
+            switch item.kind {
+            case .image:
+                guard let image = item.image else { return false }
+                let data = try await persistence.imageData(image)
+                guard presentationID == presentation, items.contains(where: { $0.id == item.id }) else { return false }
+                pasteboard.clearContents()
+                guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
+            case .file:
+                try ClipboardFileAccess.withResolvedFiles(item.files) { urls, updatedFiles in
+                    pasteboard.clearContents()
+                    guard pasteboard.writeObjects(urls as [NSURL]) else { throw CocoaError(.fileWriteUnknown) }
+                    if let index = items.firstIndex(where: { $0.id == item.id }) {
+                        items[index].files = updatedFiles
+                    }
+                }
+            default:
+                pasteboard.clearContents()
+                guard pasteboard.setString(item.content, forType: .string) else { throw CocoaError(.fileWriteUnknown) }
+            }
+            monitor.checkpoint()
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                var recent = items.remove(at: index)
+                recent.copiedAt = Date()
+                items.insert(recent, at: 0)
+                persist()
+            }
+            unavailableItems.remove(item.id)
+            copyError = nil
+            return true
+        } catch {
+            monitor.checkpoint()
+            if item.kind == .file || item.kind == .image { unavailableItems.insert(item.id) }
+            copyError = item.kind == .file
+                ? "A file is missing or access has expired. Restore access or delete this entry."
+                : "Could not copy this item. \(error.localizedDescription)"
             return false
         }
+    }
+
+    func restoreFileAccess(_ item: ClipboardItem) {
+        guard item.kind == .file, !storageBlocked, !isLoading else { return }
+        var replacements: [ClipboardFile] = []
+        for file in item.files {
+            let panel = NSOpenPanel()
+            panel.message = "Select \(file.name) to restore access to this history entry."
+            panel.prompt = "Restore Access"
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = URL(fileURLWithPath: file.path).deletingLastPathComponent()
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            replacements.append(ClipboardFileAccess.capture(url))
+        }
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[index].files = replacements
+        items[index].content = replacements.map(\.path).joined(separator: "\n")
+        items[index].title = Self.fileTitle(replacements)
+        items[index].fingerprint = Self.fileFingerprint(replacements)
+        fileAvailabilityGeneration += 1
+        unavailableItems.remove(item.id)
         copyError = nil
-        return true
+        persist()
+    }
+
+    func loadThumbnail(for item: ClipboardItem) async {
+        guard let image = item.image, thumbnails[item.id] == nil, !thumbnailRequests.contains(item.id) else { return }
+        thumbnailRequests.insert(item.id)
+        defer { thumbnailRequests.remove(item.id) }
+        do {
+            let data = try await persistence.imageData(image, thumbnail: true)
+            guard items.contains(where: { $0.id == item.id }) else { return }
+            thumbnails[item.id] = NSImage(data: data)
+            if thumbnails[item.id] == nil {
+                missingPreviews.insert(item.id)
+            } else {
+                missingPreviews.remove(item.id)
+                thumbnailOrder.removeAll { $0 == item.id }
+                thumbnailOrder.append(item.id)
+                while thumbnailOrder.count > 32 {
+                    let evictionIndex = thumbnailOrder.first == selectedID ? 1 : 0
+                    let oldest = thumbnailOrder.remove(at: evictionIndex)
+                    thumbnails[oldest] = nil
+                }
+            }
+        } catch {
+            let available = await persistence.hasImage(image)
+            if items.contains(where: { $0.id == item.id }) {
+                missingPreviews.insert(item.id)
+                if !available { unavailableItems.insert(item.id) }
+            }
+        }
+    }
+
+    func refreshFileAvailability() async {
+        fileAvailabilityGeneration += 1
+        let generation = fileAvailabilityGeneration
+        let fileItems = items.filter { $0.kind == .file }
+        let availability = await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: fileItems.map { ($0.id, ClipboardFileAccess.areAvailable($0.files)) })
+        }.value
+        guard fileAvailabilityGeneration == generation else { return }
+        let currentIDs = Set(items.map(\.id))
+        for (id, available) in availability where currentIDs.contains(id) {
+            if available {
+                unavailableItems.remove(id)
+            } else {
+                unavailableItems.insert(id)
+            }
+        }
+    }
+
+    private func enqueue(_ capture: ClipboardCapture) {
+        let previous = captureTask
+        let generation = captureGeneration
+        captureTask = Task { [weak self] in
+            await previous?.value
+            guard let self, generation == captureGeneration, !isPaused, !storageBlocked else { return }
+            do {
+                let item: ClipboardItem
+                switch capture {
+                case let .text(text, source, date):
+                    item = ClipboardItem.text(text, source: source, at: date)
+                case let .image(data, source, date):
+                    item = try await persistence.importImage(data, source: source, at: date)
+                case let .files(files, source, date):
+                    item = ClipboardItem(kind: .file, title: Self.fileTitle(files), content: files.map(\.path).joined(separator: "\n"),
+                                         source: source, copiedAt: date, fingerprint: Self.fileFingerprint(files), files: files)
+                }
+                let deletedAfterCapture = deletionCutoffs[item.fingerprint].map { item.copiedAt <= $0 } ?? false
+                guard generation == captureGeneration, !isPaused, !deletedAfterCapture else {
+                    if let image = item.image { try await persistence.discardImportedImage(image) }
+                    return
+                }
+                insert(item)
+            } catch {
+                if generation == captureGeneration { notice = error.localizedDescription }
+            }
+        }
+    }
+
+    private func insert(_ item: ClipboardItem) {
+        var recent = item
+        if let existing = items.firstIndex(where: { $0.fingerprint == item.fingerprint }) {
+            recent.id = items.remove(at: existing).id
+        }
+        items.insert(recent, at: 0)
+        notice = nil
+        enforceLimits()
+        reconcileSelection()
+        persist()
+    }
+
+    private func enforceLimits() {
+        var textBytes = 0
+        var imageBytes = 0
+        let kept = items.prefix(ClipboardLimits.items).prefix { item in
+            textBytes += item.textByteCount
+            imageBytes += item.imageByteCount
+            return textBytes <= ClipboardLimits.textBytes && imageBytes <= ClipboardLimits.totalImageBytes
+        }
+        items = Array(kept)
+        let ids = Set(items.map(\.id))
+        thumbnails = thumbnails.filter { ids.contains($0.key) }
+        thumbnailOrder.removeAll { !ids.contains($0) }
+        missingPreviews.formIntersection(ids)
+        unavailableItems.formIntersection(ids)
+    }
+
+    private func persist() {
+        guard !storageBlocked else { return }
+        let snapshot = ClipboardHistory(isPaused: isPaused, items: items)
+        let previousSave = saveTask
+        saveTask = Task { [weak self, persistence] in
+            await previousSave?.value
+            do {
+                try await persistence.save(snapshot)
+                self?.storageError = nil
+            } catch {
+                self?.storageError = "History could not be saved. Changes may be lost after quitting. \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // Used by termination and tests to wait for queued imports and atomic writes.
+    func flush() async {
+        await captureTask?.value
+        await saveTask?.value
+    }
+
+    func pollClipboard() { monitor.poll() }
+
+    private static func fileTitle(_ files: [ClipboardFile]) -> String {
+        files.count == 1 ? files[0].name : "\(files.count) files · \(files.first?.name ?? "")"
+    }
+
+    private static func fileFingerprint(_ files: [ClipboardFile]) -> String {
+        "files:" + ClipboardItem.digest((try? JSONEncoder().encode(files.map(\.path))) ?? Data())
     }
 }

@@ -14,6 +14,12 @@ struct PasketApp: App {
                 Text(error)
             }
             Divider()
+            Button(appDelegate.controller.store.isPaused ? "Resume Collection" : "Pause Collection") {
+                let store = appDelegate.controller.store
+                store.setPaused(!store.isPaused)
+            }
+            .disabled(appDelegate.controller.store.isLoading || appDelegate.controller.store.isStorageBlocked)
+            Divider()
             Button("Settings…") {
                 appDelegate.controller.showSettings()
             }

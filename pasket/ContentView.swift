@@ -5,15 +5,42 @@ struct ContentView: View {
     @Bindable var store: ClipboardStore
     var onDismiss: () -> Void
     var onOpenSettings: () -> Void
+    var onRestoreFileAccess: (ClipboardItem) -> Void = { _ in }
 
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
+    @State private var isConfirmingClear = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
+            if store.clipboardAccessDenied {
+                HStack {
+                    Label("Clipboard access is denied. Allow Pasket in System Settings, then copy again.", systemImage: "hand.raised")
+                        .font(.caption)
+                    Spacer()
+                    Button("System Settings…") {
+                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+                .padding(.horizontal, 22).padding(.vertical, 10)
+                .background(.orange.opacity(0.1))
+            }
+            if let error = store.storageError {
+                HStack {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                    Spacer()
+                    Button("Retry") { Task { await store.retryStorage() } }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 10)
+                .background(.orange.opacity(0.1))
+            }
             HStack(spacing: 0) {
                 historyList.frame(width: 350)
                 Divider().opacity(0.45)
@@ -57,6 +84,12 @@ struct ContentView: View {
         .onExitCommand {
             if isFilterMenuPresented { dismissFilterMenu() } else { onDismiss() }
         }
+        .alert("Clear Clipboard History?", isPresented: $isConfirmingClear) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear History", role: .destructive) { store.clearHistory() }
+        } message: {
+            Text("All saved history and image copies will be deleted. Your original files and current system clipboard will be kept.")
+        }
     }
 
     private var searchBar: some View {
@@ -66,6 +99,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             TextField("Search your clipboard…", text: $store.query)
                 .textFieldStyle(.plain)
+                .accessibilityIdentifier("clipboardSearch")
                 .font(.system(size: 23))
                 .focused($searchFocused)
                 .onSubmit(copySelection)
@@ -110,20 +144,28 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 5) {
-                    Text("Today")
+                    Text("History")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.bottom, 6)
-                    if store.filteredItems.isEmpty {
-                        ContentUnavailableView.search(text: store.query)
-                            .frame(maxWidth: .infinity)
+                    if store.isLoading {
+                        ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
+                    } else if store.filteredItems.isEmpty {
+                        if store.items.isEmpty {
+                            ContentUnavailableView("Your basket is empty", systemImage: "basket",
+                                description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            ContentUnavailableView.search(text: store.query).frame(maxWidth: .infinity)
+                        }
                     }
                     ForEach(store.filteredItems) { item in
                         Button {
                             store.selectedID = item.id
                         } label: {
-                            HistoryRow(item: item, isSelected: store.selectedID == item.id)
+                            HistoryRow(item: item, isSelected: store.selectedID == item.id,
+                                       thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
                         }
                         .buttonStyle(.plain)
                         .simultaneousGesture(TapGesture(count: 2).onEnded {
@@ -131,7 +173,12 @@ struct ContentView: View {
                             copySelection()
                         })
                         .id(item.id)
-                        .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source)")
+                        .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
+                        .task(id: item.id) { await store.loadThumbnail(for: item) }
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { store.delete(item.id) }
+                                .disabled(store.isStorageBlocked)
+                        }
                     }
                 }
                 .padding(12)
@@ -157,11 +204,19 @@ struct ContentView: View {
                         switch item.kind {
                         case .image:
                             VStack(spacing: 14) {
-                                Image(systemName: "photo")
-                                    .font(.system(size: 52, weight: .ultraLight))
-                                Text("Sample image")
-                                    .font(.system(size: 14, weight: .medium))
-                                Text("1440 × 900").font(.system(size: 12))
+                                if let thumbnail = store.thumbnails[item.id] {
+                                    Image(nsImage: thumbnail)
+                                        .resizable().scaledToFit().frame(maxHeight: 260)
+                                } else if store.missingPreviews.contains(item.id) {
+                                    Label(store.unavailableItems.contains(item.id) ? "Saved image unavailable" : "Preview unavailable",
+                                          systemImage: "exclamationmark.triangle")
+                                } else {
+                                    ProgressView("Loading preview…")
+                                }
+                                if let image = item.image {
+                                    Text("\(image.width) × \(image.height) · \(ByteCountFormatter.string(fromByteCount: Int64(image.byteCount), countStyle: .file))")
+                                        .font(.system(size: 12))
+                                }
                             }
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 190)
@@ -175,31 +230,51 @@ struct ContentView: View {
                                 Text(item.content)
                                     .font(.system(size: 13))
                                     .foregroundStyle(.secondary)
-                                Text("Sample file reference")
+                                Text("File references only. Original files are kept in their current location.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if store.unavailableItems.contains(item.id) {
+                                    Label("A file is missing or access has expired.", systemImage: "exclamationmark.triangle")
+                                        .font(.caption).foregroundStyle(.orange)
+                                } else if item.files.contains(where: { $0.isSecurityScoped != true }) {
+                                    Text("Some files may need access restored after relaunch. Use Restore File Access… to keep access.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Button("Restore File Access…") { onRestoreFileAccess(item) }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         default:
-                            Text(item.content)
-                                .font(.system(size: 17, design: item.isCode ? .monospaced : .default))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(item.previewText)
+                                    .font(.system(size: 17))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if item.hasTruncatedPreview {
+                                    Text("Preview shows the first 500 characters. Copy includes all \(item.content.count.formatted()) characters.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                     .padding(.bottom, 8)
                 }
                 VStack(spacing: 2) {
-                    informationRow("Source", value: item.source, shaded: true)
+                    informationRow("Source", value: item.source.name, shaded: true)
                     informationRow("Type", value: item.kind.title)
-                    informationRow("Copied", value: item.copiedAt.formatted(date: .omitted, time: .shortened), shaded: true)
-                    if item.kind == .text {
+                    informationRow("Copied", value: item.copiedAt.formatted(date: .abbreviated, time: .shortened), shaded: true)
+                    if [.text, .link, .email].contains(item.kind) {
                         informationRow("Characters", value: item.content.count.formatted())
+                    } else if item.kind == .file {
+                        informationRow("Files", value: item.files.count.formatted())
+                        informationRow("Original size", value: item.files.allSatisfy { $0.byteCount != nil }
+                            ? ByteCountFormatter.string(fromByteCount: Int64(item.files.compactMap(\.byteCount).reduce(0, +)), countStyle: .file)
+                            : "Unknown")
                     }
                 }
                 .font(.system(size: 12))
             }
             .padding(28)
+            .task(id: item.id) { await store.loadThumbnail(for: item) }
         } else {
             ContentUnavailableView("No matching items", systemImage: "magnifyingglass", description: Text("Try another search or content type."))
         }
@@ -217,15 +292,36 @@ struct ContentView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
-            Text("Sample history")
+        VStack(alignment: .leading, spacing: 8) {
+            if let message = store.copyError ?? store.notice {
+                Text(message).font(.caption).foregroundStyle(.orange)
+                    .accessibilityIdentifier("clipboardNotice")
+            }
+            HStack(spacing: 12) {
+            Label(store.clipboardAccessDenied ? "Access denied" : store.isPaused ? "Paused" : "\(store.items.count) items",
+                  systemImage: store.clipboardAccessDenied ? "hand.raised" : store.isPaused ? "pause.circle" : "basket")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-                .help("Live clipboard collection and history storage will be connected next.")
+                .help("Up to 1,000 items. Text is limited to 2,000 characters; image storage to 500 MB.")
             Spacer()
-            if let message = store.copyError {
-                Text(message).font(.caption).foregroundStyle(.secondary)
+            Button(store.isPaused ? "Resume" : "Pause", systemImage: store.isPaused ? "play" : "pause") {
+                store.setPaused(!store.isPaused)
             }
+            .labelStyle(.iconOnly)
+            .disabled(store.isLoading || store.isStorageBlocked)
+            .help(store.isPaused ? "Resume collection" : "Pause collection")
+            Menu {
+                Button("Delete Selected Item", role: .destructive) {
+                    if let id = store.selectedID { store.delete(id) }
+                }.disabled(store.selectedItem == nil || store.isStorageBlocked)
+                Button("Clear History…", role: .destructive) { isConfirmingClear = true }
+                    .disabled(store.items.isEmpty || store.isStorageBlocked)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Manage history")
             Button(action: onOpenSettings) {
                 Image(systemName: "gearshape").frame(width: 30, height: 30)
             }
@@ -244,15 +340,20 @@ struct ContentView: View {
                 .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
             }
             .buttonStyle(.plain)
-            .disabled(store.selectedItem?.canCopy != true)
-            .help(store.selectedItem?.canCopy == true ? "Copy and return to your previous app" : "This sample has no clipboard payload")
+            .disabled(!store.canCopySelection)
+            .help("Copy the complete item and return to your previous app")
+            .accessibilityIdentifier("copyClipboardItem")
+            }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 13)
     }
 
     private func copySelection() {
-        if store.copySelection() { onDismiss() }
+        let presentation = store.presentationID
+        Task {
+            if await store.copySelection(), store.presentationID == presentation { onDismiss() }
+        }
     }
 
     private func dismissFilterMenu() {
@@ -367,17 +468,25 @@ private struct ClipboardFilterMenu: View {
 private struct HistoryRow: View {
     let item: ClipboardItem
     let isSelected: Bool
+    var thumbnail: NSImage?
+    var isUnavailable = false
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: item.isCode ? "chevron.left.forwardslash.chevron.right" : item.kind.symbol)
+            Group {
+                if let thumbnail {
+                    Image(nsImage: thumbnail).resizable().scaledToFit()
+                } else {
+                    Image(systemName: isUnavailable ? "exclamationmark.triangle" : item.kind.symbol)
+                }
+            }
                 .font(.system(size: 17))
                 .foregroundStyle(.secondary)
                 .frame(width: 36, height: 36)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.system(size: 14)).lineLimit(1)
-                Text("\(item.source) · \(item.copiedAt.formatted(date: .omitted, time: .shortened))")
+                Text("\(item.source.name) · \(item.copiedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

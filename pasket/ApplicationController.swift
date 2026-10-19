@@ -15,6 +15,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         controller.shortcuts.stop()
     }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        controller.shortcuts.stop()
+        controller.store.stop()
+        Task {
+            await controller.finishPendingWork()
+            if let error = controller.store.storageError, !controller.store.isStorageBlocked {
+                let alert = NSAlert()
+                alert.messageText = "History Has Unsaved Changes"
+                alert.informativeText = error
+                alert.addButton(withTitle: "Cancel")
+                alert.addButton(withTitle: "Quit Without Saving")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    controller.store.resumeMonitoring()
+                    controller.shortcuts.start()
+                    sender.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 }
 
 @MainActor
@@ -25,10 +48,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
     private var previousApplication: NSRunningApplication?
+    private var startupTask: Task<Void, Never>?
 
     func start() {
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.start()
+        startupTask = Task { await store.start() }
         showPanel()
     }
 
@@ -68,7 +93,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel.contentView = NSHostingView(rootView: ContentView(
                 store: store,
                 onDismiss: { [weak self] in self?.hidePanel() },
-                onOpenSettings: { [weak self] in self?.showSettings() }
+                onOpenSettings: { [weak self] in self?.showSettings() },
+                onRestoreFileAccess: { [weak self] item in self?.restoreFileAccess(item) }
             ))
             self.panel = panel
         }
@@ -86,6 +112,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     func hidePanel(restorePreviousApplication: Bool = true) {
         let applicationToRestore = previousApplication
         previousApplication = nil
+        store.invalidatePresentation()
         panel?.orderOut(nil)
         if restorePreviousApplication, let applicationToRestore, !applicationToRestore.isTerminated {
             applicationToRestore.activate()
@@ -112,8 +139,24 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
+    private var isRestoringFileAccess = false
+
+    func finishPendingWork() async {
+        await startupTask?.value
+        store.stop()
+        await store.flush()
+    }
+
+    private func restoreFileAccess(_ item: ClipboardItem) {
+        isRestoringFileAccess = true
+        store.restoreFileAccess(item)
+        isRestoringFileAccess = false
+        panel?.makeKeyAndOrderFront(nil)
+    }
+
     func windowDidResignKey(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, window === panel {
+        if let window = notification.object as? NSWindow, window === panel, !isRestoringFileAccess,
+           window.attachedSheet == nil {
             hidePanel(restorePreviousApplication: false)
         }
     }

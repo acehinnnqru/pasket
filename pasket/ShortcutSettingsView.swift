@@ -189,7 +189,7 @@ struct ShortcutSettingsView: View {
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(DockIconOptionButtonStyle())
                         .help("Use \(color.title) Dock icon")
                         .accessibilityLabel("\(color.title) Dock icon")
                         .accessibilityAddTraits(dockIcon.color == color ? [.isSelected] : [])
@@ -398,6 +398,26 @@ struct ShortcutSettingsView: View {
         .frame(width: 380)
         .modifier(PasketSurface())
         .interactiveDismissDisabled()
+    }
+}
+
+private struct DockIconOptionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isInteracting = isEnabled && (isHovered || configuration.isPressed)
+        configuration.label
+            .background(alignment: .top) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.primary.opacity(isEnabled && configuration.isPressed ? 0.12 : isInteracting ? 0.06 : 0))
+                    .frame(height: 72)
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 

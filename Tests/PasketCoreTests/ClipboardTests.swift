@@ -222,7 +222,6 @@ struct ClipboardTests {
             MainActor.assumeIsolated {
                 #expect(store.selectedItem?.id == expected.id)
                 #expect(store.selectedItem?.content == expected.content)
-                #expect(store.selectedItem?.hasTruncatedPreview == true)
             }
         }
         await store.flush()
@@ -462,8 +461,7 @@ struct ClipboardTests {
         await fixture.store.flush()
         fixture.store.reconcileSelection()
         #expect(fixture.store.filteredItems.count == 1)
-        #expect(fixture.store.selectedItem?.previewText.count == 500)
-        #expect(fixture.store.selectedItem?.previewText.contains("hidden-tail") == false)
+        #expect(fixture.store.selectedItem?.content == text)
         #expect(await fixture.store.copySelection())
         #expect(fixture.pasteboard.string(forType: .string) == text)
         fixture.store.pollClipboard()

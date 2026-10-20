@@ -370,10 +370,11 @@ struct ContentView: View {
                         }
                     default:
                         ScrollView {
-                            Text(item.previewText)
+                            Text(item.content)
                                 .font(.system(size: 14))
                                 .lineSpacing(3)
                                 .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -428,9 +429,6 @@ struct ContentView: View {
                     (title: "Copied", value: item.copiedAt.formatted(date: .abbreviated, time: .shortened))]
         if [.text, .link, .email].contains(item.kind) {
             rows.append(("Characters", item.content.count.formatted()))
-            if item.hasTruncatedPreview {
-                rows.append(("Preview", "First 500 characters. Copy includes all \(item.content.count.formatted()) characters."))
-            }
         } else if item.kind == .file {
             rows.append((item.files.count == 1 ? "Name" : "Names", item.files.map(\.name).joined(separator: ", ")))
             rows.append((item.files.count == 1 ? "Path" : "Paths", item.files.map(\.path).joined(separator: "\n")))

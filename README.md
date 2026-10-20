@@ -137,8 +137,8 @@ Pasket never changes your system privacy settings.
   clipboard or replay copies made while paused. The pause state survives relaunch.
 - Text is saved verbatim, including whitespace and line breaks, up to **2,000 Unicode characters**
   (extended grapheme clusters). Longer text is skipped with a visible message, never truncated.
-  List summaries show up to 120 characters; previews show at most 500 characters. Search and
-  copying always use the complete saved text.
+  List summaries show up to 120 characters. The detail view displays the complete saved text,
+  with scrolling for longer entries. Search and copying also use the complete saved text.
 - An entire HTTP/HTTPS URL is classified as a link; an entire email address as an email.
   Surrounding whitespace is ignored only for classification. Mixed prose remains text.
 - Each entry records its latest copy time and an estimated source app name and bundle ID.

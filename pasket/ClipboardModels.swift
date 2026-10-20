@@ -83,8 +83,6 @@ nonisolated struct ClipboardItem: Identifiable, Codable, Sendable {
     var image: ClipboardImage?
     var files: [ClipboardFile] = []
 
-    var previewText: String { String(content.prefix(500)) }
-    var hasTruncatedPreview: Bool { content.count > 500 }
     var textByteCount: Int { [.text, .link, .email].contains(kind) ? content.utf8.count : 0 }
     var imageByteCount: Int { image.map { $0.byteCount + $0.thumbnailByteCount } ?? 0 }
     var imageFile: ClipboardFile? { kind == .file && files.count == 1 && files[0].isImage ? files[0] : nil }

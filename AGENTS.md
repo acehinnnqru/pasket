@@ -1,5 +1,14 @@
 # Repository Agent Instructions
 
+## Commit messages
+
+- Every commit message must follow Conventional Commits: `<type>[optional scope][!]: <description>`.
+- Use a lowercase type: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. Choose the type that describes the change; use `feat` for new functionality and `fix` for bug fixes.
+- Write the subject and any body or footers in English. Keep the description concise, use the imperative mood, and omit a trailing period from the subject.
+- Add a scope when it helps identify the affected area, such as `fix(clipboard): preserve selection after deleting a history item`.
+- Mark breaking changes with `!` before the colon or a `BREAKING CHANGE:` footer.
+- These message requirements do not waive individual commit approval or GPG signing requirements.
+
 ## Build validation
 
 - Validate app changes with an unsigned build. The user authorizes disabling app code signing for this validation command:

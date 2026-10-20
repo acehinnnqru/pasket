@@ -46,6 +46,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let shortcuts = GlobalShortcutManager()
     let pasteController = ClipboardPasteController()
     let dockIcon = DockIconPreferences()
+    let accentColor = AccentColorPreferences()
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
@@ -109,7 +110,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 onDismiss: { [weak self] in self?.hidePanel() },
                 onPasteCopiedItem: { [weak self] in self?.pasteCopiedItem() },
                 onOpenSettings: { [weak self] in self?.showSettings() }
-            ))
+            ).modifier(PasketAccentColor(preferences: accentColor)))
             self.panel = panel
         }
         store.prepareForPresentation()
@@ -170,8 +171,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 shortcuts: shortcuts,
                 store: store,
                 dockIcon: dockIcon,
+                accentColor: accentColor,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
-            ))
+            ).modifier(PasketAccentColor(preferences: accentColor)))
             settingsWindow = window
         }
         if let window = settingsWindow, let visibleFrame = screen?.visibleFrame {

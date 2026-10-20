@@ -6,6 +6,7 @@ struct ShortcutSettingsView: View {
     @Bindable var shortcuts: GlobalShortcutManager
     @Bindable var store: ClipboardStore
     @Bindable var dockIcon: DockIconPreferences
+    @Bindable var accentColor: AccentColorPreferences
     var onClose: () -> Void = {}
     @FocusState private var focusedHistoryField: HistoryLimitField?
 
@@ -26,6 +27,7 @@ struct ShortcutSettingsView: View {
                             .accessibilityIdentifier("shortcutSettingsError")
                     }
 
+                    accentColorSection
                     dockIconSection
                 }
                 .padding(.horizontal, 18)
@@ -34,7 +36,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")
-                Text("Icon and shortcuts save automatically.")
+                Text("Appearance and shortcuts save automatically.")
                 Spacer()
                 Text("Pasket")
             }
@@ -98,6 +100,57 @@ struct ShortcutSettingsView: View {
             .accessibilityLabel("Close settings")
         }
         .padding(.trailing, 14)
+    }
+
+    private var accentColorSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Accent color")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Color")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Text(accentColor.color.title)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 0) {
+                    ForEach(AccentColorOption.allCases) { color in
+                        Button { accentColor.select(color) } label: {
+                            Circle()
+                                .fill(color.tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(
+                                    AngularGradient(colors: [.blue, .purple, .pink, .red, .orange, .yellow, .green, .blue],
+                                                    center: .center)
+                                ))
+                                .frame(width: 24, height: 24)
+                                .overlay {
+                                    Circle().strokeBorder(.primary.opacity(0.12))
+                                }
+                                .padding(5)
+                                .overlay {
+                                    Circle().strokeBorder(accentColor.color == color ? Color.primary : .clear,
+                                                          lineWidth: 2)
+                                }
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(AccentColorSwatchButtonStyle(isSelected: accentColor.color == color))
+                        .help(color == .system ? "Follow the macOS accent color" : "Use \(color.title) accent color")
+                        .accessibilityLabel("\(color.title) accent color")
+                        .accessibilityAddTraits(accentColor.color == color ? [.isSelected] : [])
+                        .accessibilityIdentifier("accentColor\(color.rawValue.capitalized)")
+                        if color != AccentColorOption.allCases.last {
+                            Spacer(minLength: 12)
+                        }
+                    }
+                }
+                Text("Used for selections, buttons, and the collection indicator. System follows your macOS accent color.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .modifier(SettingsCard())
+        }
     }
 
     private var dockIconSection: some View {
@@ -345,6 +398,31 @@ struct ShortcutSettingsView: View {
         .frame(width: 380)
         .modifier(PasketSurface())
         .interactiveDismissDisabled()
+    }
+}
+
+private struct AccentColorSwatchButtonStyle: ButtonStyle {
+    let isSelected: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isInteracting = isEnabled && (isHovered || configuration.isPressed)
+        configuration.label
+            .background {
+                Circle().fill(.primary.opacity(isInteracting ? 0.08 : 0))
+            }
+            .overlay {
+                Circle()
+                    .strokeBorder(.primary.opacity(isInteracting && !isSelected ? 0.3 : 0))
+                    .allowsHitTesting(false)
+            }
+            .scaleEffect(reduceMotion ? 1 : isEnabled && configuration.isPressed ? 0.94 : isInteracting ? 1.08 : 1)
+            .contentShape(Circle())
+            .onHover { isHovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 

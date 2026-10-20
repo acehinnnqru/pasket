@@ -9,7 +9,11 @@ Its menu bar icon is a fixed monochrome basket with a P monogram. Pasket appears
 while Settings is open and returns to menu-bar-only mode when Settings closes. Settings → Dock icon
 offers Space Silver (the default), Orange, Mint, Blue, Lavender, and Graphite. Selecting a color
 updates the running app's Dock icon immediately and saves it for the next launch. The bundled
-Finder icon stays Space Silver; the menu bar glyph and interface accent color do not change.
+Finder icon stays Space Silver; the menu bar glyph stays monochrome.
+Settings → Accent color independently controls interface selections, buttons, and the collection
+indicator. Choose System (the default) to follow the macOS accent color, or Blue, Purple, Pink,
+Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
+save automatically for the next launch.
 The generated artwork's prompt set is recorded in [Design/IconPrompts.json](Design/IconPrompts.json).
 
 - **Hyper + P** (Control + Option + Shift + Command + P) toggles the panel.
@@ -194,9 +198,15 @@ real keystrokes. They cover dismissal order, held keys, permission denial and re
 app switches, clipboard changes, reopening, task cancellation, and timeout.
 Dock icon preference tests cover the default, unknown saved colors, persistence across relaunch,
 and applying a selection only after its preference has been saved.
+Accent color preference tests cover the system default, unknown saved values, every color's
+persistence across relaunch, returning to System, and independence from the Dock icon preference.
 
 For the desktop smoke test:
 
+- In Settings → Accent color, select each swatch and verify selections, buttons, the Dock icon
+  preview outline, and the history collection indicator use that color. Reopen history and Settings,
+  then relaunch to check persistence. Select System to restore the macOS accent and check light
+  and dark appearance. Changing the accent must preserve the selected Dock icon.
 - Open Settings and verify the Dock entry appears with Space Silver on a fresh installation.
   Select each of the six icon previews; the Dock icon and selected preview should update immediately.
   Close Settings with Escape, Command + W, or the close button and verify the Dock entry disappears.

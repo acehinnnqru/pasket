@@ -916,7 +916,7 @@ struct WindowDragHandle: View {
     }
 }
 
-private struct WindowDragRegion: NSViewRepresentable {
+struct WindowDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> DragView { DragView() }
     func updateNSView(_ nsView: DragView, context: Context) {}
 

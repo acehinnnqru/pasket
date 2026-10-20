@@ -66,19 +66,25 @@ struct ShortcutSettingsView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Settings")
-                    .font(.system(size: 16, weight: .medium))
-                Text("Make Pasket feel like second nature.")
-                    .font(.system(size: 12))
+            HStack(spacing: 10) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Settings")
+                        .font(.system(size: 16, weight: .medium))
+                    Text("Make Pasket feel like second nature.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
-            WindowDragHandle()
+            .padding(.leading, 18)
+            .padding(.vertical, 12)
+            .overlay { WindowDragRegion() }
+            .help("Drag the header to move Settings")
+            .accessibilityIdentifier("settingsWindowDragArea")
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .medium))
@@ -89,9 +95,7 @@ struct ShortcutSettingsView: View {
             .help("Close Settings (Esc)")
             .accessibilityLabel("Close settings")
         }
-        .padding(.leading, 18)
         .padding(.trailing, 14)
-        .padding(.vertical, 12)
     }
 
     private var historyShortcutCard: some View {

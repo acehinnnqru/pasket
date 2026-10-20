@@ -21,9 +21,9 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - The detail preview shows only content. Images fit the available space without scrolling;
   metadata and file access controls sit in the table below, which scrolls independently when needed.
   Long table values are truncated; hover to see the complete value.
-- Move the history or Settings window using the dotted drag handle in its header. Dragging starts
-  after 8 points of movement; clicking entries, selecting text, and dragging other content do not move
-  the window.
+- Move the history window using the dotted drag handle in its header. Move Settings by dragging
+  its header title or empty header space. Dragging starts after 8 points of movement; clicking
+  entries, selecting text, and dragging other content do not move the window.
 - Open the **…** menu after **Copy** and choose **Settings…** to change the global shortcut.
   Preferences persist; registration failures are shown.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
@@ -138,7 +138,8 @@ For the desktop smoke test:
 9. Using a trackpad, click and slightly drag both selected and unselected rows, select preview text,
    and interact with search, filters, and footer controls; the window should stay in place. Move the
    dotted header handle less than 8 points and release; the window should stay still. Drag it farther
-   to move the window. Repeat the handle and content checks in Settings.
+   to move the window. In Settings, repeat these checks by dragging the header title and empty
+   header space. The close button and settings controls must still work without moving the window.
 10. Copy two image files from one folder and a third from a nested folder. Use **Authorize Folder…**
     in a file's detail pane and select their shared parent. Confirm all three entries can preview and
     copy, then quit and relaunch and repeat. Copy a new image file into the same history from that

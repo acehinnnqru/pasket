@@ -74,6 +74,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let pasteController: ClipboardPasteController
     let dockIcon = DockIconPreferences()
     let accentColor = AccentColorPreferences()
+    let loginItem = LoginItemPreferences()
     let setup = AppSetup()
     private(set) var isRelaunchRequested = false
 
@@ -226,6 +227,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 store: store,
                 dockIcon: dockIcon,
                 accentColor: accentColor,
+                loginItem: loginItem,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
             ).modifier(PasketAccentColor(preferences: accentColor)))
             settingsWindow = window

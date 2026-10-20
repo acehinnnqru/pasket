@@ -7,6 +7,7 @@ struct ShortcutSettingsView: View {
     @Bindable var store: ClipboardStore
     @Bindable var dockIcon: DockIconPreferences
     @Bindable var accentColor: AccentColorPreferences
+    @Bindable var loginItem: LoginItemPreferences
     var onClose: () -> Void = {}
     @FocusState private var focusedHistoryField: HistoryLimitField?
 
@@ -16,6 +17,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    generalSection
                     keyboardShortcutsSection
                     historyPanelSection
                     HistoryRetentionSettingsView(store: store, focusedField: $focusedHistoryField)
@@ -48,6 +50,10 @@ struct ShortcutSettingsView: View {
         }
         .frame(width: 600, height: 520)
         .modifier(PasketSurface())
+        .onAppear { loginItem.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loginItem.refresh()
+        }
         .background {
             SettingsFocusDismissal { focusedHistoryField = nil }
         }
@@ -101,6 +107,49 @@ struct ShortcutSettingsView: View {
             .accessibilityLabel("Close settings")
         }
         .padding(.trailing, 14)
+    }
+
+    private var generalSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "General")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Start at Login")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 12)
+                    Toggle("Start at Login", isOn: Binding(
+                        get: { loginItem.isEnabled },
+                        set: { loginItem.setEnabled($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("startAtLogin")
+                }
+                Text("Automatically start Pasket when you log in to your Mac.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if loginItem.requiresApproval {
+                    Text("Allow Pasket in System Settings to enable Start at Login.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open System Settings…") { loginItem.openSystemSettings() }
+                        .buttonStyle(PasketButtonStyle())
+                }
+                if let error = loginItem.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("startAtLoginError")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .modifier(SettingsCard())
+        }
     }
 
     private var historyPanelSection: some View {

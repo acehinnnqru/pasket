@@ -5,6 +5,12 @@ A clipboard manager. Collect your contents into a basket.
 
 Open `pasket.xcodeproj` in Xcode, select the `pasket` scheme and My Mac, and run.
 Pasket lives in the menu bar and opens its history panel at launch.
+Its menu bar icon is a fixed monochrome basket with a P monogram. Pasket appears in the Dock
+while Settings is open and returns to menu-bar-only mode when Settings closes. Settings → Dock icon
+offers Space Silver (the default), Orange, Mint, Blue, Lavender, and Graphite. Selecting a color
+updates the running app's Dock icon immediately and saves it for the next launch. The bundled
+Finder icon stays Space Silver; the menu bar glyph and interface accent color do not change.
+The generated artwork's prompt set is recorded in [Design/IconPrompts.json](Design/IconPrompts.json).
 
 - **Hyper + P** (Control + Option + Shift + Command + P) toggles the panel.
 - The search field receives focus whenever the panel opens. Search the complete saved content or
@@ -186,8 +192,16 @@ selection while switching numeric inputs. Other windows and secure text fields r
 Paste tests inject permissions, target state, keyboard release, and event delivery; they never send
 real keystrokes. They cover dismissal order, held keys, permission denial and revocation, target exit,
 app switches, clipboard changes, reopening, task cancellation, and timeout.
+Dock icon preference tests cover the default, unknown saved colors, persistence across relaunch,
+and applying a selection only after its preference has been saved.
 
 For the desktop smoke test:
+
+- Open Settings and verify the Dock entry appears with Space Silver on a fresh installation.
+  Select each of the six icon previews; the Dock icon and selected preview should update immediately.
+  Close Settings with Escape, Command + W, or the close button and verify the Dock entry disappears.
+  Reopen Settings and relaunch the app to confirm the selected color persists. The P menu bar glyph
+  must remain monochrome in light and dark appearance, including while changing icon colors.
 
 1. Run Pasket, dismiss its panel, and copy `Pasket interaction check 2000` from a text editor.
 2. Press Hyper + P; the search field should accept typing immediately.
@@ -271,6 +285,8 @@ the updated desktop checks above have not yet been reported.
 ## Structure
 
 - `MyApp.swift`: menu bar entry and application scene.
+- `PasketMenuIcon.swift`: resolution-independent monochrome basket and P menu bar glyph.
+- `DockIconPreferences.swift`: fixed Dock icon colors and saved selection.
 - `ApplicationController.swift`: panel, settings, focus restoration, and termination handling.
 - `ContentView.swift`: search, filters, previews, and history controls.
 - `ClipboardModels.swift`: versioned records, classification, fingerprints, and limits.

@@ -5,6 +5,7 @@ import SwiftUI
 struct ShortcutSettingsView: View {
     @Bindable var shortcuts: GlobalShortcutManager
     @Bindable var store: ClipboardStore
+    @Bindable var dockIcon: DockIconPreferences
     var onClose: () -> Void = {}
     @FocusState private var focusedHistoryField: HistoryLimitField?
 
@@ -24,6 +25,8 @@ struct ShortcutSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("shortcutSettingsError")
                     }
+
+                    dockIconSection
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
@@ -31,7 +34,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")
-                Text("Shortcuts save automatically.")
+                Text("Icon and shortcuts save automatically.")
                 Spacer()
                 Text("Pasket")
             }
@@ -95,6 +98,59 @@ struct ShortcutSettingsView: View {
             .accessibilityLabel("Close settings")
         }
         .padding(.trailing, 14)
+    }
+
+    private var dockIconSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Dock icon")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Color")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Text(dockIcon.color.title)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                    ForEach(DockIconColor.allCases) { color in
+                        Button { dockIcon.select(color) } label: {
+                            VStack(spacing: 6) {
+                                Image(color.assetName)
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .scaledToFit()
+                                    .frame(width: 64, height: 64)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 4)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(dockIcon.color == color ? Color.accentColor : .clear,
+                                                          lineWidth: 2)
+                                    }
+                                Text(color.title)
+                                    .font(.system(size: 10, weight: dockIcon.color == color ? .medium : .regular))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .foregroundStyle(dockIcon.color == color ? .primary : .secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Use \(color.title) Dock icon")
+                        .accessibilityLabel("\(color.title) Dock icon")
+                        .accessibilityAddTraits(dockIcon.color == color ? [.isSelected] : [])
+                        .accessibilityIdentifier("dockIcon\(color.rawValue.capitalized)")
+                    }
+                }
+                Text("Pasket appears in the Dock while Settings is open. The menu bar icon stays monochrome.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .modifier(SettingsCard())
+        }
     }
 
     private var keyboardShortcutsSection: some View {

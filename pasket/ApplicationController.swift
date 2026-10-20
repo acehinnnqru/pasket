@@ -45,6 +45,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let store = ClipboardStore()
     let shortcuts = GlobalShortcutManager()
     let pasteController = ClipboardPasteController()
+    let dockIcon = DockIconPreferences()
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
@@ -53,7 +54,13 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private var settingsFieldEditor = SettingsFieldEditor()
     private var isHidingPanel = false
 
+    override init() {
+        super.init()
+        dockIcon.onChange = { [weak self] in self?.applyDockIcon() }
+    }
+
     func start() {
+        applyDockIcon()
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.start()
         startupTask = Task { await store.start() }
@@ -162,6 +169,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.contentView = NSHostingView(rootView: ShortcutSettingsView(
                 shortcuts: shortcuts,
                 store: store,
+                dockIcon: dockIcon,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
             ))
             settingsWindow = window
@@ -172,8 +180,15 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 y: visibleFrame.midY - window.frame.height / 2
             ))
         }
+        NSApplication.shared.setActivationPolicy(.regular)
+        applyDockIcon()
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func applyDockIcon() {
+        guard let image = NSImage(named: NSImage.Name(dockIcon.color.assetName)) else { return }
+        NSApplication.shared.applicationIconImage = image
     }
 
     func finishPendingWork() async {
@@ -201,6 +216,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         // Recreate the window next time so transient interaction state cannot survive closing.
         settingsWindow = nil
         settingsFieldEditor = SettingsFieldEditor()
+        NSApplication.shared.setActivationPolicy(.accessory)
     }
 }
 

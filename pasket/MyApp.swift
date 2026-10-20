@@ -6,7 +6,7 @@ struct PasketApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Pasket", systemImage: "basket") {
+        MenuBarExtra {
             Button("Show Clipboard History") {
                 appDelegate.controller.showPanel()
             }
@@ -30,6 +30,9 @@ struct PasketApp: App {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
+        } label: {
+            Image(nsImage: PasketMenuIcon.image)
+                .accessibilityLabel("Pasket")
         }
         .menuBarExtraStyle(.menu)
     }

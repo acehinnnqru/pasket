@@ -7,10 +7,13 @@ struct PasketApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            Button("Show Clipboard History") {
+            Button("Clipboard History") {
                 appDelegate.controller.showPanel()
             }
-            Text(appDelegate.controller.shortcuts.shortcut?.displayName ?? "No shortcut set")
+            .keyboardShortcut(appDelegate.controller.shortcuts.shortcut?.menuKeyboardShortcut)
+            if appDelegate.controller.shortcuts.shortcut == nil {
+                Text("No shortcut set")
+            }
             if let error = appDelegate.controller.shortcuts.errorMessage {
                 Text(error)
             }

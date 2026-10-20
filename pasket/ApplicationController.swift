@@ -121,8 +121,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             return
         }
         if settingsWindow?.isVisible == true {
-            NSApplication.shared.activate()
-            settingsWindow?.makeKeyAndOrderFront(nil)
+            bringSettingsToFront()
         } else {
             showPanel()
         }
@@ -221,6 +220,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.backgroundColor = .clear
             window.hasShadow = true
             window.isMovableByWindowBackground = false
+            window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             window.delegate = self
             window.contentView = NSHostingView(rootView: ShortcutSettingsView(
                 shortcuts: shortcuts,
@@ -238,8 +238,22 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 y: visibleFrame.midY - window.frame.height / 2
             ))
         }
-        NSApplication.shared.activate()
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        bringSettingsToFront()
+    }
+
+    private func bringSettingsToFront() {
+        guard let window = settingsWindow else { return }
+        // Let menu tracking finish before activating; closing the menu can restore the previous app.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.settingsWindow === window else { return }
+            let application = NSApplication.shared
+            application.unhide(nil)
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+            application.activate()
+            // Activation is a request, so also raise Settings while AppKit processes it.
+            window.orderFrontRegardless()
+        }
     }
 
     private func showSetup() {
@@ -310,16 +324,10 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         if application.activationPolicy() != policy {
             let visibleSettingsWindow = settingsWindow.flatMap { $0.isVisible ? $0 : nil }
             application.setActivationPolicy(policy)
-            if let window = visibleSettingsWindow {
+            if visibleSettingsWindow != nil {
                 // AppKit may hide the app while its Dock presence changes.
                 // Restore the existing window after the activation transition finishes.
-                DispatchQueue.main.async { [weak self, weak window] in
-                    guard let self, let window, self.settingsWindow === window,
-                          application.activationPolicy() == policy else { return }
-                    application.unhide(nil)
-                    application.activate()
-                    window.makeKeyAndOrderFront(nil)
-                }
+                bringSettingsToFront()
             }
         }
         guard let image = NSImage(named: NSImage.Name(dockIcon.color.assetName)) else { return }

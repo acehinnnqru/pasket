@@ -7,7 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
         launchTask = Task {
             let ready = await AppRelaunch.waitForPreviousInstance()
             guard !Task.isCancelled else { return }
@@ -20,6 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        controller.reopen()
+        return false
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.shortcuts.stop()
@@ -84,11 +88,11 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         self.store = store
         pasteController = ClipboardPasteController(toasts: store.toasts, systemAccess: store.systemAccess)
         super.init()
-        dockIcon.onChange = { [weak self] in self?.applyDockIcon() }
+        dockIcon.onChange = { [weak self] in self?.applyDockPreferences() }
     }
 
     func start() {
-        applyDockIcon()
+        applyDockPreferences()
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.start()
         startupTask = Task { await store.start() }
@@ -99,6 +103,15 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         if panel?.isVisible == true {
             hidePanel()
         } else if settingsWindow?.attachedSheet == nil {
+            showPanel()
+        }
+    }
+
+    func reopen() {
+        if settingsWindow?.isVisible == true {
+            NSApplication.shared.activate()
+            settingsWindow?.makeKeyAndOrderFront(nil)
+        } else {
             showPanel()
         }
     }
@@ -210,15 +223,30 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 y: visibleFrame.midY - window.frame.height / 2
             ))
         }
-        NSApplication.shared.setActivationPolicy(.regular)
-        applyDockIcon()
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func applyDockIcon() {
+    private func applyDockPreferences() {
+        let application = NSApplication.shared
+        let policy: NSApplication.ActivationPolicy = dockIcon.showInDock ? .regular : .accessory
+        if application.activationPolicy() != policy {
+            let visibleSettingsWindow = settingsWindow.flatMap { $0.isVisible ? $0 : nil }
+            application.setActivationPolicy(policy)
+            if let window = visibleSettingsWindow {
+                // AppKit may hide the app while its Dock presence changes.
+                // Restore the existing window after the activation transition finishes.
+                DispatchQueue.main.async { [weak self, weak window] in
+                    guard let self, let window, self.settingsWindow === window,
+                          application.activationPolicy() == policy else { return }
+                    application.unhide(nil)
+                    application.activate()
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
+        }
         guard let image = NSImage(named: NSImage.Name(dockIcon.color.assetName)) else { return }
-        NSApplication.shared.applicationIconImage = image
+        application.applicationIconImage = image
     }
 
     func finishPendingWork() async {
@@ -260,7 +288,6 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         // Recreate the window next time so transient interaction state cannot survive closing.
         settingsWindow = nil
         settingsFieldEditor = SettingsFieldEditor()
-        NSApplication.shared.setActivationPolicy(.accessory)
     }
 }
 

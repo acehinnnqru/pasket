@@ -5,9 +5,11 @@ A clipboard manager. Collect your contents into a basket.
 
 Open `pasket.xcodeproj` in Xcode, select the `pasket` scheme and My Mac, and run.
 Pasket lives in the menu bar and opens its history panel at launch.
-Its menu bar icon is a fixed monochrome basket with a P monogram. Pasket appears in the Dock
-while Settings is open and returns to menu-bar-only mode when Settings closes. Settings → Dock icon
-offers Space Silver (the default), Orange, Mint, Blue, Lavender, and Graphite. Selecting a color
+Its menu bar icon is a fixed monochrome basket with a P monogram. Settings → Dock icon → Show in Dock
+controls whether Pasket appears in the Dock, including while Settings is open. It is off by default,
+applies immediately, and persists across relaunch. Clicking the Dock icon opens history or brings
+an open Settings window forward. The Dock icon color options
+are Space Silver (the default), Orange, Mint, Blue, Lavender, and Graphite. Selecting a color
 updates the running app's Dock icon immediately and saves it for the next launch. The bundled
 Finder icon stays Space Silver; the menu bar glyph stays monochrome.
 Settings → Accent color independently controls interface selections, buttons, and the collection
@@ -219,8 +221,8 @@ selection while switching numeric inputs. Other windows and secure text fields r
 Paste tests inject permissions, target state, keyboard release, and event delivery; they never send
 real keystrokes. They cover dismissal order, held keys, permission denial and revocation, target exit,
 app switches, clipboard changes, reopening, task cancellation, and timeout.
-Dock icon preference tests cover the default, unknown saved colors, persistence across relaunch,
-and applying a selection only after its preference has been saved.
+Dock icon preference tests cover the defaults, unknown saved colors, persistence across relaunch,
+applying a selection only after its preference has been saved, and independent Dock visibility.
 Accent color preference tests cover the system default, unknown saved values, every color's
 persistence across relaunch, returning to System, and independence from the Dock icon preference.
 
@@ -243,10 +245,16 @@ For the desktop smoke test:
   preview outline, and the history collection indicator use that color. Reopen history and Settings,
   then relaunch to check persistence. Select System to restore the macOS accent and check light
   and dark appearance. Changing the accent must preserve the selected Dock icon.
-- Open Settings and verify the Dock entry appears with Space Silver on a fresh installation.
+- Open Settings and verify Show in Dock is off and no Dock entry appears on a fresh installation.
+  Turn it on and verify the Dock entry appears immediately with Space Silver.
   Select each of the six icon previews; the Dock icon and selected preview should update immediately.
-  Close Settings with Escape, Command + W, or the close button and verify the Dock entry disappears.
-  Reopen Settings and relaunch the app to confirm the selected color persists. The P menu bar glyph
+  Close Settings with Escape, Command + W, or the close button and verify the Dock entry remains.
+  Click the Dock icon to open history; with Settings open, clicking it should bring Settings forward.
+  Repeatedly turn Show in Dock off and on and verify the Dock entry updates immediately while
+  the same Settings window remains visible, focused, and usable without losing its scroll position
+  or unsaved history limit edits. Close Settings immediately after toggling; it must stay closed.
+  Close and reopen Settings, then relaunch with each visibility option to confirm both visibility
+  and the selected color persist. The P menu bar glyph
   must remain monochrome in light and dark appearance, including while changing icon colors.
 
 1. Run Pasket, dismiss its panel, and copy `Pasket interaction check 2000` from a text editor.
@@ -332,7 +340,7 @@ the updated desktop checks above have not yet been reported.
 
 - `MyApp.swift`: menu bar entry and application scene.
 - `PasketMenuIcon.swift`: resolution-independent monochrome basket and P menu bar glyph.
-- `DockIconPreferences.swift`: fixed Dock icon colors and saved selection.
+- `DockIconPreferences.swift`: saved Dock visibility and icon color selection.
 - `ApplicationController.swift`: panel, settings, focus restoration, and termination handling.
 - `AppRelaunch.swift`: launches the current app again and waits for the previous process to exit.
 - `ContentView.swift`: search, filters, previews, and history controls.

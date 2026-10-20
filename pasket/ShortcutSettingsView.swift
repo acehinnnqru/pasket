@@ -193,6 +193,18 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: "Dock icon")
             VStack(alignment: .leading, spacing: 12) {
+                Toggle("Show in Dock", isOn: Binding(
+                    get: { dockIcon.showInDock },
+                    set: { dockIcon.setShowInDock($0) }
+                ))
+                .toggleStyle(.switch)
+                .font(.system(size: 13, weight: .medium))
+                .accessibilityIdentifier("showInDock")
+                Text("Show Pasket in the Dock, even when Settings is closed. Changes take effect immediately.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Divider().opacity(0.35)
                 HStack {
                     Text("Color")
                         .font(.system(size: 13, weight: .medium))
@@ -232,7 +244,7 @@ struct ShortcutSettingsView: View {
                         .accessibilityIdentifier("dockIcon\(color.rawValue.capitalized)")
                     }
                 }
-                Text("Pasket appears in the Dock while Settings is open. The menu bar icon stays monochrome.")
+                Text("The selected color is used when Show in Dock is enabled. The menu bar icon stays monochrome.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

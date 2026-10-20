@@ -141,6 +141,41 @@ nonisolated struct ClipboardHistory: Codable, Sendable {
     }
 }
 
+nonisolated enum ClipboardHistoryPeriod: String, CaseIterable, Identifiable, Sendable {
+    case today = "Today"
+    case yesterday = "Yesterday"
+    case sevenDays = "7 Days"
+    case thirtyDays = "30 Days"
+    case older = "Older"
+
+    var id: Self { self }
+}
+
+nonisolated struct ClipboardHistorySection: Identifiable, Sendable {
+    var period: ClipboardHistoryPeriod
+    var items: [ClipboardItem]
+    var id: ClipboardHistoryPeriod { period }
+
+    static func grouping(_ items: [ClipboardItem], at date: Date = .now,
+                         calendar: Calendar = .current) -> [Self] {
+        let today = calendar.startOfDay(for: date)
+        let grouped = Dictionary(grouping: items) { item -> ClipboardHistoryPeriod in
+            let day = calendar.startOfDay(for: item.copiedAt)
+            let age = calendar.dateComponents([.day], from: day, to: today).day ?? 0
+            switch age {
+            case ...0: return .today
+            case 1: return .yesterday
+            case 2...7: return .sevenDays
+            case 8...30: return .thirtyDays
+            default: return .older
+            }
+        }
+        return ClipboardHistoryPeriod.allCases.compactMap { period in
+            grouped[period].map { Self(period: period, items: $0) }
+        }
+    }
+}
+
 nonisolated enum ClipboardLimits {
     static let textCharacters = 2_000
     static let items = 1_000

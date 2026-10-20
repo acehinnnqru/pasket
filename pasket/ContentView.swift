@@ -224,15 +224,16 @@ struct ContentView: View {
     }
 
     private var historyList: some View {
-        ScrollViewReader { proxy in
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            historyList(at: context.date)
+        }
+    }
+
+    private func historyList(at date: Date) -> some View {
+        let sections = ClipboardHistorySection.grouping(store.filteredItems, at: date)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
-                    Text("History")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.top, 4)
-                        .padding(.bottom, 5)
                     if store.isLoading || store.isSearching {
                         ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
                     } else if store.filteredItems.isEmpty {
@@ -244,27 +245,39 @@ struct ContentView: View {
                             ContentUnavailableView.search(text: store.query).frame(maxWidth: .infinity)
                         }
                     }
-                    ForEach(store.filteredItems) { item in
-                        Button {
-                            store.selectedID = item.id
-                            searchFocused = true
-                        } label: {
-                            HistoryRow(item: item, isSelected: store.selectedID == item.id,
-                                       thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
-                        }
-                        .buttonStyle(HistoryRowButtonStyle())
-                        .focusable(false)
-                        .simultaneousGesture(TapGesture(count: 2).onEnded {
-                            store.selectedID = item.id
-                            searchFocused = true
-                            copySelection()
-                        })
-                        .id(item.id)
-                        .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
-                        .task(id: store.folderAccessRevision) { await store.loadThumbnail(for: item) }
-                        .contextMenu {
-                            Button("Delete", role: .destructive) { store.delete(item.id) }
-                                .disabled(store.isDebugMode || store.isStorageBlocked)
+                    ForEach(sections) { section in
+                        Section {
+                            ForEach(section.items) { item in
+                                Button {
+                                    store.selectedID = item.id
+                                    searchFocused = true
+                                } label: {
+                                    HistoryRow(item: item, isSelected: store.selectedID == item.id,
+                                               thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
+                                }
+                                .buttonStyle(HistoryRowButtonStyle())
+                                .focusable(false)
+                                .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                    store.selectedID = item.id
+                                    searchFocused = true
+                                    copySelection()
+                                })
+                                .id(item.id)
+                                .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
+                                .task(id: store.folderAccessRevision) { await store.loadThumbnail(for: item) }
+                                .contextMenu {
+                                    Button("Delete", role: .destructive) { store.delete(item.id) }
+                                        .disabled(store.isDebugMode || store.isStorageBlocked)
+                                }
+                            }
+                        } header: {
+                            Text(section.period.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 9)
+                                .padding(.top, section.id == sections.first?.id ? 4 : 18)
+                                .padding(.bottom, 5)
+                                .accessibilityAddTraits(.isHeader)
                         }
                     }
                     if store.hasMoreItems {

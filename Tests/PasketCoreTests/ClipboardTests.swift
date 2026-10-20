@@ -49,6 +49,9 @@ struct ClipboardTests {
         fixture.store.setPaused(true)
         fixture.store.setDebugMode(true)
         #expect(Set(fixture.store.displayedItems.map(\.kind)) == Set(ClipboardKind.allCases))
+        let sections = ClipboardHistorySection.grouping(fixture.store.displayedItems)
+        #expect(sections.map(\.period) == ClipboardHistoryPeriod.allCases)
+        #expect(sections.allSatisfy { $0.items.count == 2 })
         fixture.store.query = "example.com"
         #expect(!fixture.store.filteredItems.isEmpty)
         #expect(fixture.store.filteredItems.allSatisfy { [.email, .link].contains($0.kind) })

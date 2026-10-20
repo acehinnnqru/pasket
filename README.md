@@ -10,6 +10,8 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - The search field receives focus whenever the panel opens. Search the complete saved content or
   source app and filter by type. Arrow keys and row clicks change the selected entry while keeping
   the search field focused, so you can continue typing immediately.
+- History is grouped by local calendar dates under **Today**, **Yesterday**, **7 Days** (2–7 days
+  ago), and **30 Days** (8–30 days ago). Earlier entries appear under **Older**; empty groups are hidden.
 - Selecting a specific content type shows **Back To Default** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.
@@ -46,7 +48,8 @@ Pasket lives in the menu bar and opens its history panel at launch.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.
 - Debug builds include a **Debug mode** toggle in the panel footer. Turn it on to show fictional
-  text, links, email, an illustration, and a file reference for screenshots. Search, filters, and
+  text, links, email, an illustration, and a file reference for screenshots. Each date group has two
+  samples, with dates refreshed whenever Debug mode is enabled. Search, filters, and
   previews use only these samples. Collection pauses and history actions are disabled while it is
   on. Turning it off restores your saved history and previous collection state. Samples and the
   toggle state are never saved; Release builds do not include this control or sample data.

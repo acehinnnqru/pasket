@@ -32,13 +32,14 @@ final class ClipboardStore {
 
     #if DEBUG
     private(set) var isDebugMode = false
+    private var debugItems: [ClipboardItem] = []
     #else
     var isDebugMode: Bool { false }
     #endif
 
     var displayedItems: [ClipboardItem] {
         #if DEBUG
-        if isDebugMode { return ClipboardSamples.items }
+        if isDebugMode { return debugItems }
         #endif
         return items
     }
@@ -166,6 +167,7 @@ final class ClipboardStore {
     func setDebugMode(_ enabled: Bool) {
         guard isDebugMode != enabled else { return }
         captureGeneration += 1
+        debugItems = enabled ? ClipboardSamples.makeItems() : []
         isDebugMode = enabled
         queryGeneration += 1
         queryTask?.cancel()
@@ -690,35 +692,43 @@ final class ClipboardStore {
 #if DEBUG
 @MainActor
 private enum ClipboardSamples {
-    static let items: [ClipboardItem] = {
+    static func makeItems() -> [ClipboardItem] {
         let date = Date()
+        let calendar = Calendar.current
+        func daysAgo(_ days: Int) -> Date {
+            calendar.date(byAdding: .day, value: -days, to: date) ?? date
+        }
         var entries = [
             ClipboardItem.text("A little space for your next big idea.\n\nCollect the things that inspire you, keep useful details close, and pick up right where you left off.",
                                source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: date),
             ClipboardItem.text("https://example.com/design/journal",
-                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-120)),
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date),
             ClipboardItem(kind: .image, title: "Mountain afternoon", content: "Sample landscape illustration",
                           source: ClipboardSource(name: "Preview", bundleIdentifier: "com.apple.Preview"),
-                          copiedAt: date.addingTimeInterval(-300), fingerprint: "sample:landscape",
+                          copiedAt: daysAgo(1), fingerprint: "sample:landscape",
                           image: ClipboardImage(fileName: "sample.png", thumbnailName: "sample-thumb.png",
                                                 byteCount: 48_000, thumbnailByteCount: 4_000, width: 640, height: 400)),
             ClipboardItem.text("hello@example.com", source: ClipboardSource(name: "Mail", bundleIdentifier: "com.apple.mail"),
-                               at: date.addingTimeInterval(-600)),
+                               at: daysAgo(1)),
             ClipboardItem(kind: .file, title: "Brand Guidelines.pdf", content: "/Sample/Documents/Brand Guidelines.pdf",
                           source: ClipboardSource(name: "Finder", bundleIdentifier: "com.apple.finder"),
-                          copiedAt: date.addingTimeInterval(-900), fingerprint: "sample:document",
+                          copiedAt: daysAgo(3), fingerprint: "sample:document",
                           files: [ClipboardFile(path: "/Sample/Documents/Brand Guidelines.pdf", name: "Brand Guidelines.pdf",
                                                 byteCount: 2_400_000, isSecurityScoped: true)]),
             ClipboardItem.text("Weekend plans\nVisit the bookshop, find a sunny spot, and start a new chapter.",
-                               source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: date.addingTimeInterval(-1_200)),
+                               source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: daysAgo(6)),
             ClipboardItem.text("Good design makes room for the things that matter.",
-                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-1_800)),
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: daysAgo(12)),
             ClipboardItem.text("https://example.com/reading-list",
-                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: date.addingTimeInterval(-2_400))
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: daysAgo(24)),
+            ClipboardItem.text("Project notes\nKeep the first version focused on the essentials.",
+                               source: ClipboardSource(name: "Notes", bundleIdentifier: "com.apple.Notes"), at: daysAgo(45)),
+            ClipboardItem.text("https://example.com/archive/inspiration",
+                               source: ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari"), at: daysAgo(60))
         ]
         for index in entries.indices { entries[index].fingerprint = "sample:\(index)" }
         return entries
-    }()
+    }
 
     static let image = NSImage(size: NSSize(width: 640, height: 400), flipped: false) { bounds in
         NSColor(calibratedRed: 0.86, green: 0.92, blue: 0.95, alpha: 1).setFill()

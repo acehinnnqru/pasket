@@ -147,6 +147,10 @@ For the desktop smoke test:
    Press Escape in Settings with different controls focused and after reopening the window;
    it must close Settings. While recording a shortcut or choosing a folder, Escape must cancel
    only that operation and leave Settings open.
+   Close Settings with its × button, move the pointer away, and reopen it with Command + comma.
+   The close button must not flash or retain its previous hover highlight. Repeat by hovering
+   another button and closing with Escape or Command + W; only the control currently under the
+   pointer should highlight after reopening, and saved shortcuts and folder grants must remain.
    With multiple displays, open history on each display and invoke Settings with both its shortcut
    and the **…** menu. Settings must follow history even if it was previously opened on another
    display. With history hidden, open Settings from the menu bar and check the pointer's display.

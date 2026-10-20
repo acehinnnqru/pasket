@@ -179,9 +179,11 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, window === settingsWindow, shortcuts.isRecording {
-            shortcuts.cancelRecording()
-        }
+        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        if shortcuts.isRecording { shortcuts.cancelRecording() }
+        // Closing under the pointer may not send a hover exit to the hosted controls.
+        // Recreate the window next time so transient interaction state cannot survive closing.
+        settingsWindow = nil
     }
 }
 

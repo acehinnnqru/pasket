@@ -49,6 +49,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private var settingsWindow: NSWindow?
     private var previousApplication: NSRunningApplication?
     private var startupTask: Task<Void, Never>?
+    private var settingsFieldEditor = SettingsFieldEditor()
 
     func start() {
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
@@ -178,12 +179,18 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
     }
 
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        guard sender === settingsWindow else { return nil }
+        return settingsFieldEditor.editor(for: client)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
         if shortcuts.isRecording { shortcuts.cancelRecording() }
         // Closing under the pointer may not send a hover exit to the hosted controls.
         // Recreate the window next time so transient interaction state cannot survive closing.
         settingsWindow = nil
+        settingsFieldEditor = SettingsFieldEditor()
     }
 }
 

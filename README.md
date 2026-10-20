@@ -171,6 +171,9 @@ of unloaded bodies, Unicode matching, and stable identities when repeating an un
 Retention coverage includes category-specific eviction, overlapping limits, unlimited settings,
 confirmation previews, changed victims with identical counts and sizes, expiry during confirmation,
 copy renewal, upgrade review, paused maintenance, and rollback that preserves settings and images.
+Settings input tests repeatedly switch and edit four fields in an isolated hidden window. Settings
+uses its own shared TextKit 1 field editor to avoid a main-thread hang observed in TextKit 2 mouse
+selection while switching numeric inputs. Other windows and secure text fields retain their normal editors.
 
 For the desktop smoke test:
 
@@ -237,6 +240,8 @@ For the desktop smoke test:
     focus without applying changes. Restore Defaults remains a draft until Apply is clicked.
     Verify that numbers line up across all four inputs despite their different units. Clicking a
     unit label or input padding must focus that row's input; disabled Unlimited inputs stay inactive.
+    Repeatedly switch directly between the four inputs, select and drag over digits, and click their
+    unit labels and padding. Editing and selection must remain responsive without a spinning cursor.
 
 Core tests and a successful build do not establish that this desktop smoke test passed.
 

@@ -477,7 +477,7 @@ private struct HistoryRetentionSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(spacing: 6) {
                 TextField("", text: value.number)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -485,23 +485,33 @@ private struct HistoryRetentionSettingsView: View {
                     .focused(focusedField, equals: field)
                     .onSubmit { focusedField.wrappedValue = nil }
                     .accessibilityLabel(title)
-                Text(unit)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .leading)
+                Button { focusedField.wrappedValue = field } label: {
+                    Text(unit)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 38, alignment: .leading)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityLabel("Edit \(title.lowercased())")
             }
             .padding(.horizontal, 10)
             .frame(width: 118, height: 34)
-            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+            .background {
+                Button { focusedField.wrappedValue = field } label: {
+                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(0.035))
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityHidden(true)
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(isFocused ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.1))
                     .allowsHitTesting(false)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 7))
-            .simultaneousGesture(TapGesture().onEnded {
-                if !value.wrappedValue.unlimited { focusedField.wrappedValue = field }
-            })
             .opacity(value.wrappedValue.unlimited ? 0.35 : 1)
             .disabled(value.wrappedValue.unlimited)
             Toggle("Unlimited", isOn: value.unlimited)
@@ -623,9 +633,6 @@ private struct SettingsFocusDismissal: NSViewRepresentable {
                     hit = view.superview
                 }
                 self.onDismiss?()
-                if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor {
-                    window.makeFirstResponder(nil)
-                }
                 return event
             }
         }

@@ -86,7 +86,7 @@ struct ShortcutSettingsView: View {
             }
             .padding(.leading, 18)
             .padding(.vertical, 12)
-            .overlay { WindowDragRegion() }
+            .overlay { SettingsWindowDragRegion() }
             .help("Drag the header to move Settings")
             .accessibilityIdentifier("settingsWindowDragArea")
             Button(action: onClose) {
@@ -822,6 +822,40 @@ private struct ShortcutKeycaps: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(shortcut.displayName)
+    }
+}
+
+private struct SettingsWindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ nsView: DragView, context: Context) {}
+
+    final class DragView: NSView {
+        private var mouseDownEvent: NSEvent?
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .openHand)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            mouseDownEvent = event
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start = mouseDownEvent, let window else { return }
+            let distance = hypot(event.locationInWindow.x - start.locationInWindow.x,
+                                 event.locationInWindow.y - start.locationInWindow.y)
+            guard distance >= 8 else { return }
+            // AppKit needs the original mouse-down event and may consume mouse-up.
+            mouseDownEvent = nil
+            window.performDrag(with: start)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            mouseDownEvent = nil
+        }
     }
 }
 

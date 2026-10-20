@@ -204,7 +204,6 @@ struct ContentView: View {
                     store.moveSelection(by: -1)
                     return .handled
                 }
-            WindowDragHandle()
             if store.filter != .all {
                 Button {
                     store.filter = .all
@@ -945,54 +944,6 @@ struct PasketSurface: ViewModifier {
                     .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.6), lineWidth: 1)
                     .allowsHitTesting(false)
             }
-    }
-}
-
-struct WindowDragHandle: View {
-    var body: some View {
-        Image(systemName: "circle.grid.2x3.fill")
-            .font(.system(size: 12))
-            .foregroundStyle(.tertiary)
-            .frame(width: 28, height: 28)
-            .overlay { WindowDragRegion() }
-            .help("Drag to move window")
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Move window")
-            .accessibilityIdentifier("windowDragHandle")
-    }
-}
-
-struct WindowDragRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> DragView { DragView() }
-    func updateNSView(_ nsView: DragView, context: Context) {}
-
-    final class DragView: NSView {
-        private var mouseDownEvent: NSEvent?
-
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-        override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .openHand)
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            mouseDownEvent = event
-        }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let start = mouseDownEvent, let window else { return }
-            let distance = hypot(event.locationInWindow.x - start.locationInWindow.x,
-                                 event.locationInWindow.y - start.locationInWindow.y)
-            guard distance >= 8 else { return }
-            // AppKit needs the original mouse-down event and may consume mouse-up.
-            mouseDownEvent = nil
-            window.performDrag(with: start)
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            mouseDownEvent = nil
-        }
     }
 }
 

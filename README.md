@@ -40,9 +40,9 @@ save automatically for the next launch.
 - The detail preview shows only content. Images fit the available space without scrolling;
   metadata and file access controls sit in the table below, which scrolls independently when needed.
   Long table values are truncated; hover to see the complete value.
-- Move the history window using the dotted drag handle in its header. Move Settings by dragging
-  its header title or empty header space. Dragging starts after 8 points of movement; clicking
-  entries, selecting text, and dragging other content do not move the window.
+- Move Settings by dragging its header title or empty header space. Dragging starts after
+  8 points of movement; clicking entries, selecting text, and dragging other content do not
+  move the window.
 - Open the **…** menu after **Paste** and choose **Settings…** to change the global shortcut.
   Preferences persist; registration failures are shown.
   Settings opens centered on the history panel's display each time, including when reusing an
@@ -252,10 +252,10 @@ For the desktop smoke test:
    display. With history hidden, open Settings from the menu bar and check the pointer's display.
 8. Quit and relaunch to verify history persistence; test pause/resume separately.
 9. Using a trackpad, click and slightly drag both selected and unselected rows, select preview text,
-   and interact with search, filters, and footer controls; the window should stay in place. Move the
-   dotted header handle less than 8 points and release; the window should stay still. Drag it farther
-   to move the window. In Settings, repeat these checks by dragging the header title and empty
-   header space. The close button and settings controls must still work without moving the window.
+   and interact with search, filters, and footer controls; the window should stay in place.
+   In Settings, drag the header title and empty header space less than 8 points and release;
+   the window should stay still. Drag farther to move Settings. The close button and settings
+   controls must still work without moving the window.
 10. Copy image files from different folders, preview and copy them, then quit and relaunch and repeat
     while access remains available. Confirm Settings and the file detail pane have no folder
     authorization or restore-access controls. Delete an original and confirm its preview becomes

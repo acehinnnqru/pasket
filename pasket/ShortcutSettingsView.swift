@@ -17,6 +17,7 @@ struct ShortcutSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     keyboardShortcutsSection
+                    historyPanelSection
                     HistoryRetentionSettingsView(store: store, focusedField: $focusedHistoryField)
 
                     if let error = shortcuts.errorMessage {
@@ -36,7 +37,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")
-                Text("Appearance and shortcuts save automatically.")
+                Text("Panel, appearance, and shortcut settings save automatically.")
                 Spacer()
                 Text("Pasket")
             }
@@ -100,6 +101,41 @@ struct ShortcutSettingsView: View {
             .accessibilityLabel("Close settings")
         }
         .padding(.trailing, 14)
+    }
+
+    private var historyPanelSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "History panel")
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Remember type filter")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 12)
+                    Picker("Remember type filter", selection: Binding<ClipboardFilterMemory>(
+                        get: { store.filterPreferences.memory },
+                        set: { store.filterPreferences.select($0) }
+                    )) {
+                        ForEach(ClipboardFilterMemory.allCases) { memory in
+                            Text(memory.title).tag(memory)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .accessibilityIdentifier("clipboardFilterMemory")
+                }
+                Text(store.filterPreferences.memory.explanation)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Default: 1 minute. Search text clears on each open. The type filter resets when Pasket quits.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .modifier(SettingsCard())
+        }
     }
 
     private var accentColorSection: some View {

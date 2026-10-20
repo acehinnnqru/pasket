@@ -4,6 +4,66 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func filterMemoryStartsOnDismissalAndExpiresOnReopening() async throws {
+        let suite = "PasketFilterTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let fixture = try Fixture(filterPreferences: ClipboardFilterPreferences(defaults: defaults))
+        await fixture.start()
+        await fixture.copy("https://example.com")
+        await fixture.copy("Some text")
+        let openedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.store.prepareForPresentation(at: openedAt)
+        fixture.store.filter = .links
+        fixture.store.query = "no matching entry"
+        await fixture.store.flush()
+
+        let closedAt = openedAt.addingTimeInterval(600)
+        fixture.store.invalidatePresentation(at: closedAt)
+        fixture.store.prepareForPresentation(at: closedAt.addingTimeInterval(59.999))
+        await fixture.store.flush()
+        #expect(fixture.store.filter == .links)
+        #expect(fixture.store.query.isEmpty)
+        #expect(fixture.store.filteredItems.map(\.content) == ["https://example.com"])
+        #expect(fixture.store.selectedItem?.kind == .link)
+
+        let nextClose = closedAt.addingTimeInterval(100)
+        fixture.store.invalidatePresentation(at: nextClose)
+        fixture.store.invalidatePresentation(at: nextClose.addingTimeInterval(30))
+        fixture.store.prepareForPresentation(at: nextClose.addingTimeInterval(60))
+        await fixture.store.flush()
+        #expect(fixture.store.filter == .all)
+        #expect(fixture.store.filteredItems.count == 2)
+        await fixture.cleanUp()
+    }
+
+    @Test func filterMemoryChangesApplyOnNextOpenAndActiveFilterDoesNotSurviveRelaunch() async throws {
+        let suite = "PasketFilterTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ClipboardFilterPreferences(defaults: defaults)
+        let fixture = try Fixture(filterPreferences: preferences)
+        await fixture.start()
+        let closedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        fixture.store.prepareForPresentation(at: closedAt.addingTimeInterval(-10))
+        fixture.store.filter = .images
+        fixture.store.invalidatePresentation(at: closedAt)
+        preferences.select(.never)
+        fixture.store.prepareForPresentation(at: closedAt.addingTimeInterval(1))
+        #expect(fixture.store.filter == .all)
+
+        preferences.select(.untilQuit)
+        fixture.store.filter = .files
+        fixture.store.invalidatePresentation(at: closedAt.addingTimeInterval(2))
+        fixture.store.prepareForPresentation(at: closedAt.addingTimeInterval(86_400))
+        #expect(fixture.store.filter == .files)
+        await fixture.restart()
+        fixture.store.prepareForPresentation()
+        #expect(fixture.store.filterPreferences.memory == .untilQuit)
+        #expect(fixture.store.filter == .all)
+        await fixture.cleanUp()
+    }
+
     #if DEBUG
     @Test func debugModeIsolatesSamplesAndPreservesRealHistory() async throws {
         let fixture = try Fixture()
@@ -952,11 +1012,11 @@ private final class Fixture {
     let pasteboard = NSPasteboard.withUniqueName()
     var store: ClipboardStore
 
-    init() throws {
+    init(filterPreferences: ClipboardFilterPreferences? = nil) throws {
         let root = ProcessInfo.processInfo.environment["PASKET_TEST_DIRECTORY"] ?? NSTemporaryDirectory()
         directory = URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent("pasket-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = ClipboardStore(directory: directory, pasteboard: pasteboard)
+        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: filterPreferences)
     }
 
     func start() async {
@@ -978,7 +1038,7 @@ private final class Fixture {
     func restart() async {
         store.stop()
         await store.flush()
-        store = ClipboardStore(directory: directory, pasteboard: pasteboard)
+        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: store.filterPreferences)
         await start()
     }
 

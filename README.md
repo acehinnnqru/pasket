@@ -21,9 +21,14 @@ save automatically for the next launch.
   the search field focused, so you can continue typing immediately.
 - History is grouped by local calendar dates under **Today**, **Yesterday**, **7 Days** (2–7 days
   ago), and **30 Days** (8–30 days ago). Earlier entries appear under **Older**; empty groups are hidden.
-- Selecting a specific content type shows **Back To Default** to the left of the type selector.
+- Selecting a specific content type shows a return arrow and **Reset** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.
+- Settings → History panel → Remember type filter controls how long a type filter is kept
+  after the panel closes: Never, 30 seconds, 1 minute (the default), 5 minutes, or Until Pasket quits.
+  Reopening before the interval expires keeps the filter; reopening at or after expiry returns to
+  All Types. The filter never resets while the panel is open. This preference saves automatically,
+  but the active filter resets when Pasket quits. Search text clears on every open.
 - The history panel borrows keyboard focus without activating Pasket, preserving the previous
   application's input focus and caret when it closes.
 - **Return**, double-click, or **Paste** copies the complete item, closes the panel,

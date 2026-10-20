@@ -3,6 +3,7 @@ import Observation
 
 @MainActor @Observable
 final class ClipboardStore {
+    let filterPreferences: ClipboardFilterPreferences
     var query = "" { didSet { if query != oldValue { scheduleReload() } } }
     var filter: ClipboardFilter = .all { didSet { if filter != oldValue { scheduleReload() } } }
     var selectedID: ClipboardItem.ID? { didSet { if selectedID != oldValue { selectedDetail = nil } } }
@@ -70,9 +71,13 @@ final class ClipboardStore {
     @ObservationIgnored private var advanceAfterLoading: UUID?
     @ObservationIgnored private var retentionTimer: Timer?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var isPresented = false
+    @ObservationIgnored private var lastDismissedAt: Date?
     private let pageSize = 50
 
-    init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general) {
+    init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general,
+         filterPreferences: ClipboardFilterPreferences? = nil) {
+        self.filterPreferences = filterPreferences ?? ClipboardFilterPreferences()
         persistence = ClipboardPersistence(directory: directory)
         self.pasteboard = pasteboard
         monitor = ClipboardMonitor(pasteboard: pasteboard)
@@ -212,17 +217,27 @@ final class ClipboardStore {
         }
     }
 
-    func prepareForPresentation() {
+    func prepareForPresentation(at date: Date = .now) {
         query = ""
-        filter = .all
-        selectedID = displayedItems.first?.id
+        if !filterPreferences.memory.retainsFilter(closedAt: lastDismissedAt, reopeningAt: date) {
+            filter = .all
+        }
+        lastDismissedAt = nil
+        isPresented = true
+        selectedID = filteredItems.first?.id
         copyError = nil
         presentationID = UUID()
         if !isDebugMode { scheduleReload() }
         Task { await refreshFileAvailability() }
     }
 
-    func invalidatePresentation() { presentationID = UUID() }
+    func invalidatePresentation(at date: Date = .now) {
+        if isPresented {
+            lastDismissedAt = date
+            isPresented = false
+        }
+        presentationID = UUID()
+    }
 
     #if DEBUG
     func setDebugMode(_ enabled: Bool) {

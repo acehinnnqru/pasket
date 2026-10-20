@@ -209,13 +209,14 @@ struct ContentView: View {
                     store.filter = .all
                     dismissFilterMenu()
                 } label: {
-                    Text("Back To Default")
+                    Label("Reset", systemImage: "arrow.uturn.backward")
                         .frame(minHeight: 18)
                 }
                 .buttonStyle(PasketButtonStyle(hasBackground: true))
                 .fixedSize()
                 .focusable(false)
                 .help("Reset the content type filter to All Types")
+                .accessibilityLabel("Reset content type filter")
                 .accessibilityIdentifier("resetClipboardFilter")
             }
             Button {

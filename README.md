@@ -28,7 +28,12 @@ Pasket lives in the menu bar and opens its history panel at launch.
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
   per key press. No deletion shortcut is assigned by default; use **Clear** in Settings to disable it.
   The delete shortcut and the global history shortcut must use different combinations.
-- Pause or resume collection from the panel or menu bar. Use **Delete Selected** to delete one
+- Click the status light in the panel footer to pause or resume collection, or use the menu bar.
+  While collecting, a small dot in the app's accent color gently brightens and dims every 2.8 seconds,
+  with the Soft glow treatment: a matching halo strengthens and softens in sync. The icon does not move.
+  Pausing turns the light gray and stops the animation. The separate item count and basket icon stay still.
+  The animation respects Reduce Motion, and hovering over the light shows **Pause** or
+  **Resume**. Use **Delete Selected** to delete one
   entry or **… → Delete All Entries…** to clear history with confirmation.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.

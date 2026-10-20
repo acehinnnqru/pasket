@@ -8,6 +8,7 @@ struct ContentView: View {
     var onOpenSettings: () -> Void
     var onRestoreFileAccess: (ClipboardItem) -> Void = { _ in }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
     @State private var filterControlFrame: CGRect = .zero
@@ -372,6 +373,38 @@ struct ContentView: View {
         .background(shaded ? Color.primary.opacity(0.035) : .clear, in: RoundedRectangle(cornerRadius: 7))
     }
 
+    private var collectionControl: some View {
+        let isCollecting = !store.isPaused && !store.isDebugMode && !store.isLoading
+            && !store.isStorageBlocked && !store.clipboardAccessDenied
+
+        return Button {
+            store.setPaused(!store.isPaused)
+            searchFocused = true
+        } label: {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isCollecting || reduceMotion)) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
+                let intensity = reduceMotion ? 1 : (1 - cos(phase * 2 * .pi)) / 2
+
+                Circle()
+                    .fill(isCollecting ? Color.accentColor : Color.secondary)
+                    .opacity(isCollecting ? 0.4 + 0.6 * intensity : 0.6)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: isCollecting ? Color.accentColor.opacity(0.08 + 0.47 * intensity) : .clear,
+                            radius: 2 + 4 * intensity)
+            }
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+        }
+        .buttonStyle(PasketButtonStyle())
+        .focusable(false)
+        .fixedSize()
+        .disabled(store.isDebugMode || store.isLoading || store.isStorageBlocked)
+        .help(store.isPaused ? "Resume" : "Pause")
+        .accessibilityLabel("Clipboard collection")
+        .accessibilityValue(isCollecting ? "Collecting" : store.isPaused ? "Paused" : "Inactive")
+        .accessibilityIdentifier("clipboardCollectionToggle")
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let message = store.copyError ?? store.notice {
@@ -379,9 +412,10 @@ struct ContentView: View {
                     .accessibilityIdentifier("clipboardNotice")
             }
             HStack(spacing: 6) {
-            Label(store.isDebugMode ? "\(store.displayedItems.count) items" : store.clipboardAccessDenied ? "Access denied" : store.isPaused ? "Paused" : "\(store.items.count) items",
-                  systemImage: store.isDebugMode ? "basket" : store.clipboardAccessDenied ? "hand.raised" : store.isPaused ? "pause.circle" : "basket")
+            collectionControl
+            Label("\(store.isDebugMode ? store.displayedItems.count : store.items.count) items", systemImage: "basket")
                 .font(.system(size: 12))
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .help("Up to 1,000 items. Text is limited to 2,000 characters; image storage to 500 MB.")
             Spacer()
@@ -399,14 +433,6 @@ struct ContentView: View {
                 .help("Show sample data for screenshots")
                 .accessibilityIdentifier("debugModeToggle")
             #endif
-            Button(store.isPaused ? "Resume" : "Pause", systemImage: store.isPaused ? "play" : "pause") {
-                store.setPaused(!store.isPaused)
-            }
-            .labelStyle(.iconOnly)
-            .buttonStyle(PasketButtonStyle(isActive: store.isPaused))
-            .focusable(false)
-            .disabled(store.isDebugMode || store.isLoading || store.isStorageBlocked)
-            .help(store.isPaused ? "Resume collection" : "Pause collection")
             Button(role: .destructive) {
                 if let item = store.selectedItem { store.delete(item.id) }
                 searchFocused = true

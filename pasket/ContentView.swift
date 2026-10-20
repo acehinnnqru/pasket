@@ -87,11 +87,7 @@ struct ContentView: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(.orange.opacity(0.1))
             }
-            HStack(spacing: 0) {
-                historyList.frame(width: 292)
-                Divider().opacity(0.45)
-                preview.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            contentArea
             Divider().opacity(0.5)
             footer
         }
@@ -181,6 +177,8 @@ struct ContentView: View {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
         }
+        .onChange(of: store.query) { store.reconcileSelection() }
+        .onChange(of: store.filter) { store.reconcileSelection() }
         .onChange(of: isConfirmingClear) {
             if !isConfirmingClear { searchFocused = true }
         }
@@ -276,6 +274,34 @@ struct ContentView: View {
         .padding(.vertical, 12)
     }
 
+    private var contentArea: some View {
+        Group {
+            if store.isLoading {
+                ProgressView("Loading history…")
+            } else if store.filteredItems.isEmpty {
+                emptyState
+            } else {
+                HStack(spacing: 0) {
+                    historyList.frame(width: 292)
+                    Divider().opacity(0.45)
+                    preview.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if store.isDebugMode ? store.displayedItems.isEmpty : store.totalCount == 0 {
+            ContentUnavailableView("Your basket is empty", systemImage: "basket",
+                description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
+        } else {
+            ContentUnavailableView("No matching items", systemImage: "magnifyingglass",
+                description: Text("Try another search or content type."))
+        }
+    }
+
     private var historyList: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             historyList(at: context.date)
@@ -287,17 +313,6 @@ struct ContentView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
-                    if store.isLoading {
-                        ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
-                    } else if store.filteredItems.isEmpty && !store.isSearching {
-                        if store.isDebugMode ? store.displayedItems.isEmpty : store.totalCount == 0 {
-                            ContentUnavailableView("Your basket is empty", systemImage: "basket",
-                                description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            ContentUnavailableView.search(text: store.query).frame(maxWidth: .infinity)
-                        }
-                    }
                     ForEach(sections) { section in
                         Section {
                             ForEach(section.items) { item in
@@ -348,8 +363,6 @@ struct ContentView: View {
         }
         // Reset scrolling even when reopening keeps the same selected item.
         .id(store.presentationID)
-        .onChange(of: store.query) { store.reconcileSelection() }
-        .onChange(of: store.filter) { store.reconcileSelection() }
     }
 
     @ViewBuilder
@@ -392,8 +405,6 @@ struct ContentView: View {
                 information(for: item)
             }
             .padding(20)
-        } else {
-            ContentUnavailableView("No matching items", systemImage: "magnifyingglass", description: Text("Try another search or content type."))
         }
     }
 

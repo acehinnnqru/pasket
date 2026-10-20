@@ -14,7 +14,6 @@ Settings → Accent color independently controls interface selections, buttons, 
 indicator. Choose System (the default) to follow the macOS accent color, or Blue, Purple, Pink,
 Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
 save automatically for the next launch.
-The generated artwork's prompt set is recorded in [Design/IconPrompts.json](Design/IconPrompts.json).
 
 - **Hyper + P** (Control + Option + Shift + Command + P) toggles the panel.
 - The search field receives focus whenever the panel opens. Search the complete saved content or

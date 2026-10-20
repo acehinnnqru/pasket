@@ -8,16 +8,25 @@ Pasket lives in the menu bar. At launch, it checks clipboard collection and auto
 permissions before opening history. Missing access is explained in a setup window; use its
 permission button to open System Settings. Clipboard collection needs Always Allow for
 Paste from Other Apps, and automatic paste needs Accessibility access. The window rechecks
-permissions and advances after access is granted. Collection starts after setup finishes.
+permissions in place as access is granted. Collection starts after setup finishes.
 The setup window uses the same borderless material, cards, and buttons as Settings; drag its
 header to move it. Clipboard instructions use two short steps and retain a Check Again action.
+The window follows the height of the visible sections, keeping its top edge in place as content
+changes. Scrolling is enabled only when the guide content exceeds the available body height.
 Accessibility instructions show three steps: open System Settings, enable Pasket, and use the
 always-visible Quit & Reopen Pasket button to apply access and continue setup. The Accessibility
 page has no Check Again action or collapsed restart instructions. Open System Settings appears
 to the right of step 1, and Quit & Reopen Pasket appears to the right of step 3. Both actions
-are vertically centered in their rows and share the same right edge; the footer only offers Quit Pasket.
-After permissions are ready, users without a saved history shortcut choose their own combination
-in a recording dialog, or choose Use Menu Bar Instead. This choice persists across relaunches.
+are vertically centered in their rows and share the same right edge.
+Permissions and shortcut guidance share one setup page. Each missing permission section appears
+independently and disappears once access is detected. The shortcut guidance remains on that page;
+after permissions are ready, Set Shortcut opens a recording dialog for preview and confirmation.
+Saving or cancelling returns to the guide. Continue finishes setup, including when no shortcut
+is assigned and the user prefers the menu bar. Never ask again is unchecked by default and only
+suppresses future shortcut reminders when confirmed with Continue. Skipping without checking it
+only dismisses the current launch; the next launch offers setup again if no shortcut is saved.
+Every relaunch rechecks both permissions and the saved shortcut. Opting out never suppresses
+missing permission sections, and existing saved shortcuts skip unnecessary shortcut guidance.
 Its menu bar icon is a fixed monochrome basket with a P monogram. Settings → Dock icon → Show in Dock
 controls whether Pasket appears in the Dock, including while Settings is open. It is off by default,
 applies immediately, and persists across relaunch. Clicking the Dock icon opens history or brings
@@ -277,8 +286,11 @@ For the desktop smoke test:
 
 1. On a fresh installation, verify missing clipboard access appears before missing Accessibility
    access, and already granted permissions are skipped. Deny access or return from System Settings
-   without enabling it: setup must remain on that permission. Grant access and verify setup advances
-   to shortcut recording. No clipboard collection should occur before setup finishes.
+   without enabling it: the corresponding permission section must remain visible. Missing permission
+   sections must be independent, and the shortcut guide must stay on the same page. Allow access
+   and reopen: verify permissions and the saved shortcut are checked again, granted permission
+   sections disappear, and shortcut setup is offered when no binding is saved and reminders are
+   enabled. No clipboard collection should occur before setup finishes.
    Check the setup window in light and dark appearance: it must have no system title bar, use the
    same material and button styling as Settings, and move only when its header is dragged.
    Accessibility must show the reopen step and button without expanding anything, with no
@@ -286,8 +298,11 @@ For the desktop smoke test:
    permission help and verify all instructions and recovery controls fit without clipping.
    Record a combination and verify its keycaps stay visible without saving. Record another to replace
    the draft, then click Save Shortcut. Test registration conflicts and recovery without losing the
-   draft. Alternatively, choose Use Menu Bar Instead and confirm no shortcut is assigned and the
-   recording prompt does not repeat after relaunch. Existing saved shortcuts must be preserved.
+   draft. Saving or cancelling recording must return to the same guide without completing it.
+   Continue without a shortcut and without checking Never ask again: confirm no binding is saved,
+   and the guide returns after relaunch. Check Never ask again and Continue: confirm shortcut
+   reminders stop after relaunch, while revoked permissions still show their sections.
+   Existing saved shortcuts must be preserved and skip unnecessary shortcut guidance.
    Dismiss history and copy `Pasket interaction check 2000` from a text editor.
 2. Use your configured history shortcut or the menu bar; the search field should accept typing immediately.
 3. Search `interaction check`, select the entry, and press Return.

@@ -243,7 +243,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private func showSetup() {
         if setupWindow == nil {
             let window = SettingsWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 580),
                 styleMask: [.borderless], backing: .buffered, defer: false
             )
             window.title = "Welcome to Pasket"
@@ -255,15 +255,18 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.contentView = NSHostingView(rootView: PasketSetupView(
                 setup: setup,
                 shortcuts: shortcuts,
-                onRequestPermission: { [weak self] in self?.requestSetupPermission() },
-                onShortcutReady: { [weak self] in
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, self.setupWindow != nil, self.setup.step == .shortcut else { return }
-                        self.showSetup()
-                    }
-                },
+                onRequestPermission: { [weak self] permission in self?.requestSetupPermission(permission) },
                 onFinish: { [weak self] in self?.finishSetup() },
-                onRelaunch: { [weak self] in self?.requestRelaunch() }
+                onRelaunch: { [weak self] in self?.requestRelaunch() },
+                onResize: { [weak self] height in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let window = self?.setupWindow, abs(window.frame.height - height) > 0.5 else { return }
+                        var frame = window.frame
+                        frame.origin.y = frame.maxY - height
+                        frame.size.height = height
+                        window.setFrame(frame, display: true)
+                    }
+                }
             ).modifier(PasketAccentColor(preferences: accentColor)))
             window.center()
             setupWindow = window
@@ -272,8 +275,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         setupWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private func requestSetupPermission() {
-        switch setup.step {
+    private func requestSetupPermission(_ permission: SystemAccessController.Permission) {
+        switch permission {
         case .clipboard:
             // Trigger the system request so Pasket can appear in clipboard privacy settings.
             if NSPasteboard.general.accessBehavior == .default || NSPasteboard.general.accessBehavior == .ask {
@@ -284,8 +287,6 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             }
         case .accessibility:
             pasteController.openAccessibilitySettings()
-        case .shortcut, .complete:
-            break
         }
     }
 

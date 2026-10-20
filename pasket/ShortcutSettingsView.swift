@@ -380,13 +380,18 @@ struct ShortcutSettingsView: View {
 struct PasketSetupView: View {
     @Bindable var setup: AppSetup
     @Bindable var shortcuts: GlobalShortcutManager
-    var onRequestPermission: () -> Void
-    var onShortcutReady: () -> Void
+    var onRequestPermission: (SystemAccessController.Permission) -> Void
     var onFinish: () -> Void
     var onRelaunch: () -> Void
+    var onResize: (CGFloat) -> Void = { _ in }
     @State private var showsPermissionHelp = false
+    @State private var neverAskAgain = false
+    @State private var hasRecordedShortcut = false
+    @State private var guideContentHeight: CGFloat = 460
 
-    private var isClipboardStep: Bool { setup.step == .clipboard }
+    private var showsShortcutGuide: Bool {
+        !setup.neverAskForShortcut && (shortcuts.shortcut == nil || hasRecordedShortcut)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -403,7 +408,7 @@ struct PasketSetupView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(setup.step == .shortcut ? "Shortcut" : "Permissions")
+                Text("Setup")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -416,36 +421,66 @@ struct PasketSetupView: View {
             .help("Drag the header to move setup")
             .accessibilityIdentifier("setupWindowDragArea")
             Divider().opacity(0.5)
-            if setup.step == .shortcut {
-                ShortcutRecordingView(
-                    shortcuts: shortcuts,
-                    cancelTitle: "Use Menu Bar Instead",
-                    isSetup: true,
-                    onSave: finishShortcutSetup,
-                    onCancel: finishShortcutSetup
-                )
-            } else {
-                permissionContent
-                permissionFooter
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if setup.needsClipboardAccess {
+                        permissionContent(for: .clipboard)
+                    }
+                    if setup.needsPasteAccess {
+                        permissionContent(for: .accessibility)
+                    }
+                    if showsShortcutGuide {
+                        shortcutGuidance
+                    } else if setup.canContinue {
+                        Label("You're ready to use Pasket.", systemImage: "checkmark.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.size.height
+                } action: { height in
+                    guideContentHeight = height
+                }
             }
+            .frame(height: min(guideContentHeight, 460))
+            .scrollDisabled(guideContentHeight <= 460)
+            guideFooter
         }
-        .frame(width: 480)
+        .frame(width: 560)
         .modifier(PasketSurface())
-        .onAppear { synchronizeStep() }
-        .onChange(of: setup.step) {
-            showsPermissionHelp = false
-            synchronizeStep()
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.height
+        } action: { height in
+            onResize(height)
+        }
+        .sheet(isPresented: Binding(
+            get: { shortcuts.isRecording },
+            set: { if !$0 { shortcuts.cancelRecording() } }
+        )) {
+            ShortcutRecordingView(shortcuts: shortcuts, onSave: {
+                hasRecordedShortcut = true
+                refresh()
+            })
+            .presentationBackground(.clear)
+        }
+        .onAppear { neverAskAgain = setup.neverAskForShortcut }
+        .onChange(of: setup.canContinue) {
+            if !setup.canContinue, shortcuts.isRecording { shortcuts.cancelRecording() }
         }
         .task {
-            while !Task.isCancelled, setup.step != .complete {
+            while !Task.isCancelled {
                 do { try await Task.sleep(for: .milliseconds(750)) } catch { return }
                 refresh()
             }
         }
     }
 
-    private var permissionContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private func permissionContent(for permission: SystemAccessController.Permission) -> some View {
+        let isClipboardStep = permission == .clipboard
+        return VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(isClipboardStep ? "Keep what you copy" : "Paste back into your apps")
                     .font(.system(size: 18, weight: .medium))
@@ -463,7 +498,7 @@ struct PasketSetupView: View {
                     detail: isClipboardStep ? "Privacy & Security → Paste from Other Apps"
                         : "Privacy & Security → Accessibility",
                     actionTitle: "Open System Settings…",
-                    action: onRequestPermission
+                    action: { onRequestPermission(permission) }
                 )
                 Divider().opacity(0.35).padding(.leading, 46)
                 permissionInstruction(
@@ -504,7 +539,57 @@ struct PasketSetupView: View {
                 .disclosureGroupStyle(.automatic)
             }
         }
-        .padding(20)
+    }
+
+    private var shortcutGuidance: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Choose your shortcut")
+                    .font(.system(size: 18, weight: .medium))
+                Text("Open clipboard history from any app with a combination that feels familiar. You can also use the menu bar without a shortcut.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 10) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Show Clipboard History")
+                        .font(.system(size: 12, weight: .medium))
+                    if let shortcut = shortcuts.shortcut {
+                        ShortcutKeycaps(shortcut: shortcut)
+                    } else {
+                        Text("No shortcut set")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Button(shortcuts.shortcut == nil ? "Set Shortcut…" : "Change Shortcut…") {
+                    shortcuts.beginRecording(.showHistory)
+                }
+                .buttonStyle(PasketButtonStyle(isProminent: true))
+                .disabled(!setup.canContinue)
+                .fixedSize()
+            }
+            .padding(14)
+            .modifier(SettingsCard())
+            if !setup.canContinue {
+                Text("Allow access above, then choose your shortcut.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Toggle("Never ask again", isOn: $neverAskAgain)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+                .help("Stop shortcut reminders at launch. Missing permissions will still be shown.")
+                .accessibilityIdentifier("neverAskForInvocationShortcut")
+            Text("You can always add or change a shortcut in Settings.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func permissionInstruction(
@@ -535,7 +620,7 @@ struct PasketSetupView: View {
         .padding(14)
     }
 
-    private var permissionFooter: some View {
+    private var guideFooter: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.5)
             HStack {
@@ -543,6 +628,13 @@ struct PasketSetupView: View {
                     .buttonStyle(PasketButtonStyle())
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button("Continue") {
+                    if setup.finishShortcutSetup(hasShortcut: shortcuts.shortcut != nil, neverAskAgain: neverAskAgain) {
+                        onFinish()
+                    }
+                }
+                .buttonStyle(PasketButtonStyle(isProminent: true))
+                .disabled(!setup.canContinue || shortcuts.isRecording)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -553,27 +645,10 @@ struct PasketSetupView: View {
         setup.refresh(hasShortcut: shortcuts.shortcut != nil)
     }
 
-    private func synchronizeStep() {
-        if setup.step == .shortcut {
-            if !shortcuts.isRecording {
-                shortcuts.beginRecording(.showHistory)
-                onShortcutReady()
-            }
-        } else {
-            if shortcuts.isRecording { shortcuts.cancelRecording() }
-            if setup.step == .complete { onFinish() }
-        }
-    }
-
-    private func finishShortcutSetup() {
-        setup.finishShortcutSetup(hasShortcut: shortcuts.shortcut != nil)
-    }
 }
 
 struct ShortcutRecordingView: View {
     @Bindable var shortcuts: GlobalShortcutManager
-    var cancelTitle = "Cancel"
-    var isSetup = false
     var onSave: () -> Void = {}
     var onCancel: () -> Void = {}
 
@@ -586,47 +661,31 @@ struct ShortcutRecordingView: View {
     }
 
     var body: some View {
-        if isSetup {
-            content.frame(width: 480)
-        } else {
-            content
-                .frame(width: 440)
-                .modifier(PasketSurface())
-                .interactiveDismissDisabled()
-        }
+        content
+            .frame(width: 440)
+            .modifier(PasketSurface())
+            .interactiveDismissDisabled()
     }
 
     private var content: some View {
         VStack(spacing: 0) {
-            if !isSetup {
-                HStack(spacing: 10) {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: 16))
+            HStack(spacing: 10) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Record a shortcut")
+                        .font(.system(size: 16, weight: .medium))
+                    Text(shortcuts.recordingAction.title)
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .frame(width: 20)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Record a shortcut")
-                            .font(.system(size: 16, weight: .medium))
-                        Text(shortcuts.recordingAction.title)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
                 }
-                .padding(18)
-                Divider().opacity(0.5)
+                Spacer()
             }
+            .padding(18)
+            Divider().opacity(0.5)
             VStack(alignment: .leading, spacing: 14) {
-                if isSetup {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Choose your shortcut")
-                            .font(.system(size: 18, weight: .medium))
-                        Text("Open clipboard history from any app with a combination that feels familiar.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
                 Group {
                     if let pending = shortcuts.pendingShortcut {
                         ShortcutKeycaps(shortcut: pending)
@@ -690,8 +749,8 @@ struct ShortcutRecordingView: View {
                     onCancel()
                 } label: {
                     HStack(spacing: 8) {
-                        Text(cancelTitle)
-                        if !isSetup { Text("esc").foregroundStyle(.secondary) }
+                        Text("Cancel")
+                        Text("esc").foregroundStyle(.secondary)
                     }
                     .font(.system(size: 12, weight: .medium))
                 }

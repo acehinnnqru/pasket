@@ -15,9 +15,15 @@ struct PasketApp: App {
                 Text(error)
             }
             Divider()
-            Button(appDelegate.controller.store.isPaused ? "Resume Collection" : "Pause Collection") {
+            Button(appDelegate.controller.store.clipboardAccessDenied ? "Allow Clipboard Access…"
+                   : appDelegate.controller.store.isPaused ? "Resume Collection" : "Pause Collection") {
                 let store = appDelegate.controller.store
-                store.setPaused(!store.isPaused)
+                if store.clipboardAccessDenied {
+                    appDelegate.controller.showPanel()
+                    store.setPaused(false)
+                } else {
+                    store.setPaused(!store.isPaused)
+                }
             }
             .disabled(appDelegate.controller.store.isLoading || appDelegate.controller.store.isStorageBlocked)
             Divider()

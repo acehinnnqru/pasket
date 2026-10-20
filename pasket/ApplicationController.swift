@@ -4,10 +4,19 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = ApplicationController()
+    private var launchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        controller.start()
+        launchTask = Task {
+            let ready = await AppRelaunch.waitForPreviousInstance()
+            guard !Task.isCancelled else { return }
+            guard ready else {
+                NSApplication.shared.terminate(nil)
+                return
+            }
+            controller.start()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -17,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        launchTask?.cancel()
         controller.shortcuts.stop()
         controller.store.stop()
         Task {
@@ -28,8 +38,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 alert.addButton(withTitle: "Cancel")
                 alert.addButton(withTitle: "Quit Without Saving")
                 if alert.runModal() == .alertFirstButtonReturn {
-                    controller.store.resumeMonitoring()
-                    controller.shortcuts.start()
+                    controller.resumeAfterCancelledTermination()
+                    sender.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+            }
+            if controller.isRelaunchRequested {
+                do {
+                    try await AppRelaunch.launchReplacement()
+                } catch {
+                    let alert = NSAlert()
+                    alert.messageText = "Could Not Reopen Pasket"
+                    alert.informativeText = "Pasket will stay open. Try quitting and reopening it manually. \(error.localizedDescription)"
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    controller.resumeAfterCancelledTermination()
                     sender.reply(toApplicationShouldTerminate: false)
                     return
                 }
@@ -42,11 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 final class ApplicationController: NSObject, NSWindowDelegate {
-    let store = ClipboardStore()
+    let store: ClipboardStore
     let shortcuts = GlobalShortcutManager()
-    let pasteController = ClipboardPasteController()
+    let pasteController: ClipboardPasteController
     let dockIcon = DockIconPreferences()
     let accentColor = AccentColorPreferences()
+    private(set) var isRelaunchRequested = false
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
@@ -56,6 +80,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private var isHidingPanel = false
 
     override init() {
+        let store = ClipboardStore()
+        self.store = store
+        pasteController = ClipboardPasteController(toasts: store.toasts, systemAccess: store.systemAccess)
         super.init()
         dockIcon.onChange = { [weak self] in self?.applyDockIcon() }
     }
@@ -109,7 +136,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 pasteController: pasteController,
                 onDismiss: { [weak self] in self?.hidePanel() },
                 onPasteCopiedItem: { [weak self] in self?.pasteCopiedItem() },
-                onOpenSettings: { [weak self] in self?.showSettings() }
+                onOpenSettings: { [weak self] in self?.showSettings() },
+                onRelaunch: { [weak self] in self?.requestRelaunch() }
             ).modifier(PasketAccentColor(preferences: accentColor)))
             self.panel = panel
         }
@@ -197,6 +225,20 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         await startupTask?.value
         store.stop()
         await store.flush()
+    }
+
+    private func requestRelaunch() {
+        guard !isRelaunchRequested else { return }
+        isRelaunchRequested = true
+        pasteController.cancel()
+        store.systemAccess.dismiss()
+        NSApplication.shared.terminate(nil)
+    }
+
+    func resumeAfterCancelledTermination() {
+        isRelaunchRequested = false
+        store.resumeMonitoring()
+        shortcuts.start()
     }
 
     func windowDidResignKey(_ notification: Notification) {

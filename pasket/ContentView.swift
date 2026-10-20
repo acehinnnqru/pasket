@@ -8,6 +8,7 @@ struct ContentView: View {
     var onDismiss: () -> Void
     var onPasteCopiedItem: () -> Void
     var onOpenSettings: () -> Void
+    var onRelaunch: () -> Void = {}
 
     private struct PreviewIdentity: Equatable {
         let id: UUID
@@ -28,6 +29,7 @@ struct ContentView: View {
     @State private var showsSearchProgress = false
 
     private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
+    private var isDialogPresented: Bool { isConfirmingClear || store.systemAccess.request != nil }
 
     private var canClearHistory: Bool {
         !store.isDebugMode && store.totalCount > 0 && !store.isLoading && !store.isStorageBlocked
@@ -38,56 +40,6 @@ struct ContentView: View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
-            if let error = pasteController.errorMessage {
-                HStack {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                    Spacer()
-                    if pasteController.needsPermission {
-                        Button("System Settings…") {
-                            onDismiss()
-                            pasteController.openAccessibilitySettings()
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(.orange.opacity(0.1))
-            }
-            if !store.isDebugMode, store.clipboardAccessDenied {
-                HStack {
-                    Label("Clipboard access is denied. Allow Pasket in System Settings, then copy again.", systemImage: "hand.raised")
-                        .font(.caption)
-                    Spacer()
-                    Button("System Settings…") {
-                        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(.orange.opacity(0.1))
-            }
-            if !store.isDebugMode, let error = store.storageError {
-                HStack {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                    Spacer()
-                    Button("Retry") { Task { await store.retryStorage() } }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.orange.opacity(0.1))
-            }
-            if !store.isDebugMode, store.needsRetentionReview {
-                HStack {
-                    Label("Review history limits to enable automatic cleanup. Existing history has been kept.", systemImage: "info.circle")
-                        .font(.caption)
-                    Spacer()
-                    Button("Review Settings…", action: onOpenSettings)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(.orange.opacity(0.1))
-            }
             contentArea
             Divider().opacity(0.5)
             footer
@@ -95,12 +47,12 @@ struct ContentView: View {
         .buttonStyle(PasketButtonStyle())
         .background {
             WindowKeyStateObserver { isKey in
-                searchFocused = isKey && !isMenuPresented && !isConfirmingClear
+                searchFocused = isKey && !isMenuPresented && !isDialogPresented
             }
         }
         .background {
             ShortcutEventMonitor { event in
-                guard !isConfirmingClear, !shortcuts.isRecording else { return false }
+                guard !isDialogPresented, !shortcuts.isRecording else { return false }
                 if shortcuts.settingsShortcut?.matches(event) == true {
                     if !event.isARepeat {
                         dismissMenus()
@@ -120,6 +72,10 @@ struct ContentView: View {
         .modifier(PasketSurface())
         .frame(minWidth: 760, minHeight: 480)
         .coordinateSpace(name: "clipboardPanel")
+        .overlay(alignment: .bottom) {
+            PasketToastOverlay(center: store.toasts, onAction: handleToastAction)
+                .padding(.bottom, 56)
+        }
         .overlay(alignment: .topTrailing) {
             if isFilterMenuPresented {
                 ZStack(alignment: .topTrailing) {
@@ -185,6 +141,10 @@ struct ContentView: View {
         .onChange(of: isConfirmingClear) {
             if !isConfirmingClear { searchFocused = true }
         }
+        .onChange(of: store.systemAccess.request?.id) {
+            if store.systemAccess.request != nil { dismissMenus() }
+            searchFocused = !isDialogPresented
+        }
         .onExitCommand {
             if isMenuPresented { dismissMenus() } else { onDismiss() }
         }
@@ -193,6 +153,21 @@ struct ContentView: View {
             Button("Clear History", role: .destructive) { store.clearHistory() }
         } message: {
             Text("Delete all \(store.totalCount.formatted()) saved items and their image copies? This cannot be undone. Your original files and current system clipboard will be kept.")
+        }
+        .alert(store.systemAccess.request?.title ?? "System Access", isPresented: Binding(
+            get: { store.systemAccess.request != nil },
+            set: { if !$0 { store.systemAccess.dismiss() } }
+        ), presenting: store.systemAccess.request) { request in
+            Button("Cancel", role: .cancel) { store.systemAccess.dismiss() }
+            Button("Open System Settings…") { openSystemSettings(for: request.permission) }
+            if request.permission == .accessibility {
+                Button("Quit & Reopen Pasket") {
+                    store.systemAccess.dismiss()
+                    onRelaunch()
+                }
+            }
+        } message: { request in
+            Text(request.message)
         }
     }
 
@@ -494,7 +469,7 @@ struct ContentView: View {
             && !store.isStorageBlocked && !store.clipboardAccessDenied
 
         return Button {
-            store.setPaused(!store.isPaused)
+            store.setPaused(store.clipboardAccessDenied ? false : !store.isPaused)
             searchFocused = true
         } label: {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isCollecting || reduceMotion)) { context in
@@ -515,19 +490,14 @@ struct ContentView: View {
         .focusable(false)
         .fixedSize()
         .disabled(store.isDebugMode || store.isLoading || store.isStorageBlocked)
-        .help(store.isPaused ? "Resume" : "Pause")
+        .help(store.clipboardAccessDenied ? "Allow Clipboard Access…" : store.isPaused ? "Resume" : "Pause")
         .accessibilityLabel("Clipboard collection")
-        .accessibilityValue(isCollecting ? "Collecting" : store.isPaused ? "Paused" : "Inactive")
+        .accessibilityValue(store.clipboardAccessDenied ? "Clipboard access needed" : isCollecting ? "Collecting" : store.isPaused ? "Paused" : "Inactive")
         .accessibilityIdentifier("clipboardCollectionToggle")
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let message = store.copyError ?? store.notice {
-                Text(message).font(.caption).foregroundStyle(.orange)
-                    .accessibilityIdentifier("clipboardNotice")
-            }
-            HStack(spacing: 6) {
+        HStack(spacing: 6) {
             collectionControl
             Label("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items", systemImage: "basket")
                 .font(.system(size: 12))
@@ -594,10 +564,31 @@ struct ContentView: View {
             .help("More actions")
             .accessibilityLabel("More actions")
             .accessibilityIdentifier("clipboardMoreActions")
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
+    }
+
+    private func handleToastAction(_ action: PasketToast.Action) {
+        switch action {
+        case .retryStorage:
+            Task { await store.retryStorage() }
+        case .reviewHistory:
+            onOpenSettings()
+        }
+    }
+
+    private func openSystemSettings(for permission: SystemAccessController.Permission) {
+        store.systemAccess.dismiss()
+        onDismiss()
+        switch permission {
+        case .accessibility:
+            pasteController.openAccessibilitySettings()
+        case .clipboard:
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.systempreferences") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     private func copySelection() {

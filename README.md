@@ -34,14 +34,29 @@ save automatically for the next launch.
 - **Return**, double-click, or **Paste** copies the complete item, closes the panel,
   and sends **Command + V** to the original application. Automatic paste requires event-posting
   permission, shown in **System Settings → Privacy & Security → Accessibility**. If permission
-  is missing, the item is still copied and the panel shows a **System Settings…** button;
+  is missing, the item is still copied and a native permission dialog offers **Open System Settings…**;
   press **Escape**, then **Command + V** to paste manually. After granting permission, reopen
   history from the intended input and select the item again; permission changes never replay a paste.
+  If access is already allowed but the permission dialog persists, choose **Quit & Reopen Pasket**
+  in that dialog to refresh the running app. Pending history writes finish before quitting;
+  failed writes still require a choice before quitting without saving. The replacement waits
+  for the previous process to exit before loading history or registering shortcuts. If macOS
+  cannot launch the replacement, Pasket stays open and displays an error.
   If you switch apps, reopen history, or change the clipboard before delivery, the pending paste is
   cancelled. Holding Return or shortcut modifiers delays delivery for up to one second.
 - **Escape** dismisses the panel. With the filter or **…** menu open, Escape first closes that menu
   and restores search focus. Both menus use the same custom appearance and support arrow keys and Return;
   clicking outside also closes them. The **…** menu opens above its button.
+- Notices appear as floating toast cards above the footer without moving the history list.
+  Cleanup confirmations disappear after four seconds; other transient messages after eight seconds.
+  Hovering or focusing a toast with accessibility tools pauses its timer. Each card has a dismiss button.
+  Storage and history-limit problems retain their recovery action until dismissed or
+  resolved. New messages appear first; dismissing one reveals any previous unresolved message.
+  Reopening history restores unresolved storage and history-limit reminders.
+- Permission dialogs appear only when an operation needs access: automatic paste requires
+  Accessibility, and resuming collection while clipboard access is denied offers to open System Settings.
+  Opening history and background permission checks do not display permission dialogs or toasts.
+  Cancelling keeps saved history available; granting permission never replays a previous paste.
 - The detail preview shows only content. Images fit the available space without scrolling;
   metadata and file access controls sit in the table below, which scrolls independently when needed.
   Long table values are truncated; hover to see the complete value.
@@ -82,7 +97,8 @@ save automatically for the next launch.
   toggle state are never saved; Release builds do not include this control or sample data.
 
 macOS may request permission when Pasket first reads a new clipboard entry. Allow clipboard
-access for background collection. If access is denied, the panel offers to open System Settings.
+access for background collection. If access is denied, use the collection control or
+**Allow Clipboard Access…** in the menu bar to open the permission dialog and System Settings.
 Pasket never changes your system privacy settings.
 
 ## Collection and limits
@@ -210,6 +226,19 @@ persistence across relaunch, returning to System, and independence from the Dock
 
 For the desktop smoke test:
 
+- Choose **… → Delete Unavailable Files** and verify a green cleanup toast appears above
+  the footer without moving the list or covering its controls. Repeat after it disappears, and
+  while it is still visible, to check that the notification restarts. Verify hover pauses dismissal,
+  the close button works, and light/dark appearance and Reduce Motion remain readable.
+  Without paste permission, verify attempting to paste displays a native permission dialog with
+  **Cancel** and **Open System Settings…**, and the latter opens Accessibility settings.
+  Cancel and reopen history: no permission dialog or toast should appear until another paste attempt.
+  Choose **Quit & Reopen Pasket** and verify the app returns with saved history intact and a single
+  working global shortcut. If history cannot be saved, Cancel must keep the app running without
+  launching a replacement. Granting access and relaunching must not replay the previous paste.
+  With clipboard collection denied, verify opening history remains quiet and the collection control
+  or **Allow Clipboard Access…** menu action opens the permission dialog. Background polling must
+  not reopen it after Cancel. Retry a failed history save and confirm its toast clears when storage recovers.
 - In Settings → Accent color, select each swatch and verify selections, buttons, the Dock icon
   preview outline, and the history collection indicator use that color. Reopen history and Settings,
   then relaunch to check persistence. Select System to restore the macOS accent and check light
@@ -226,7 +255,7 @@ For the desktop smoke test:
 4. With event-posting permission granted, confirm the panel closes, the item is pasted exactly once
    at the original caret or selection, and continued typing stays in that input without clicking.
    Repeat with double-click and **Paste**. Without permission, confirm the permission message appears,
-   **System Settings…** opens Accessibility settings, and Escape followed by Command + V still works.
+   **Open System Settings…** opens Accessibility settings, and Cancel followed by Escape and Command + V still works.
    Grant permission and reopen history from the editor to retry; no delayed paste should occur.
 5. Repeat with arrow-key selection, type filtering, Escape, and successive invocations. Escape and
    shortcut dismissal must restore the original input without pasting. Repeat in a browser input,
@@ -305,7 +334,10 @@ the updated desktop checks above have not yet been reported.
 - `PasketMenuIcon.swift`: resolution-independent monochrome basket and P menu bar glyph.
 - `DockIconPreferences.swift`: fixed Dock icon colors and saved selection.
 - `ApplicationController.swift`: panel, settings, focus restoration, and termination handling.
+- `AppRelaunch.swift`: launches the current app again and waits for the previous process to exit.
 - `ContentView.swift`: search, filters, previews, and history controls.
+- `PasketToast.swift` and `PasketToastView.swift`: shared notifications, recovery actions, and floating toast presentation.
+- `SystemAccessController.swift`: permission dialogs requested by blocked user operations.
 - `ClipboardModels.swift`: versioned records, classification, fingerprints, and limits.
 - `ClipboardMonitor.swift`: polling, sensitive-type exclusions, and source estimation.
 - `ClipboardFileAccess.swift`: file bookmarks, availability checks, and scoped access lifecycle.

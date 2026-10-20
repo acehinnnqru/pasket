@@ -4,25 +4,37 @@ import Observation
 @MainActor @Observable
 final class ClipboardStore {
     let filterPreferences: ClipboardFilterPreferences
+    let toasts = PasketToastCenter()
+    let systemAccess = SystemAccessController()
     var query = "" { didSet { if query != oldValue { scheduleReload() } } }
     var filter: ClipboardFilter = .all { didSet { if filter != oldValue { scheduleReload() } } }
     var selectedID: ClipboardItem.ID? { didSet { if selectedID != oldValue { selectedDetail = nil } } }
     var presentationID = UUID()
-    private(set) var copyError: String?
-    private(set) var storageError: String?
+    private(set) var copyError: String? {
+        didSet { toasts.show(copyError, source: .copy, title: "Could Not Copy", style: .error) }
+    }
+    private(set) var storageError: String? {
+        didSet { updateStorageToast() }
+    }
     private(set) var notice: String?
     private(set) var isLoading = true
     private(set) var isPaused = false
     private(set) var isCopying = false
     private(set) var isDeletingUnavailableFiles = false
-    private(set) var clipboardAccessDenied = false
+    private(set) var clipboardAccessDenied = false {
+        didSet {
+            if !clipboardAccessDenied { systemAccess.dismiss(.clipboard) }
+        }
+    }
     private(set) var items: [ClipboardItem] = []
     private(set) var totalCount = 0
     private(set) var matchingCount = 0
     private(set) var imageStorageBytes = 0
     private(set) var textStorageBytes = 0
     private(set) var retentionSettings = ClipboardRetention.default
-    private(set) var needsRetentionReview = false
+    private(set) var needsRetentionReview = false {
+        didSet { updateRetentionToast() }
+    }
     private(set) var retentionError: String?
     private(set) var isApplyingRetention = false
     private(set) var isSearching = false
@@ -83,7 +95,7 @@ final class ClipboardStore {
         self.pasteboard = pasteboard
         monitor = ClipboardMonitor(pasteboard: pasteboard)
         monitor.onCapture = { [weak self] capture in self?.enqueue(capture) }
-        monitor.onNotice = { [weak self] message in self?.notice = message }
+        monitor.onNotice = { [weak self] message in self?.setNotice(message) }
         monitor.onAccessChange = { [weak self] denied in self?.clipboardAccessDenied = denied }
     }
 
@@ -170,8 +182,15 @@ final class ClipboardStore {
         captureGeneration += 1
         isPaused = paused
         monitor.setPaused(shouldPauseMonitoring)
-        notice = nil
+        setNotice(nil)
         persist([.settings(isPaused: isPaused)])
+        if !paused { requestClipboardAccessIfNeeded() }
+    }
+
+    func requestClipboardAccessIfNeeded() {
+        guard !isDebugMode, !isLoading, !storageBlocked else { return }
+        clipboardAccessDenied = pasteboard.accessBehavior == .alwaysDeny
+        if clipboardAccessDenied { systemAccess.present(.clipboard) }
     }
 
     func applyRetention(_ settings: ClipboardRetention,
@@ -227,6 +246,10 @@ final class ClipboardStore {
         isPresented = true
         selectedID = filteredItems.first?.id
         copyError = nil
+        if !isDebugMode {
+            updateRetentionToast()
+            updateStorageToast()
+        }
         presentationID = UUID()
         if !isDebugMode { scheduleReload() }
         Task { await refreshFileAvailability() }
@@ -238,6 +261,8 @@ final class ClipboardStore {
             isPresented = false
         }
         presentationID = UUID()
+        toasts.dismissTransient()
+        systemAccess.dismiss()
     }
 
     #if DEBUG
@@ -251,7 +276,9 @@ final class ClipboardStore {
         isSearching = false
         monitor.setPaused(shouldPauseMonitoring)
         clearPreview()
-        notice = nil
+        setNotice(nil)
+        toasts.dismissAll()
+        systemAccess.dismiss()
         prepareForPresentation()
     }
     #endif
@@ -314,7 +341,7 @@ final class ClipboardStore {
         await saveTask?.value
         guard storageError == nil else { return }
         await refreshFileAvailability()
-        notice = "Unavailable file entries removed."
+        setNotice("Unavailable file entries removed.", style: .success)
     }
 
     func clearHistory() {
@@ -333,7 +360,7 @@ final class ClipboardStore {
         thumbnailOrder = []
         unavailableItems = []
         selectedID = nil
-        notice = nil
+        setNotice(nil)
         copyError = nil
         persist([.clear])
     }
@@ -573,12 +600,12 @@ final class ClipboardStore {
                 if item.image != nil, !needsRetentionReview,
                    let budget = retentionSettings.maximumImageBytes, item.imageByteCount > budget {
                     try await persistence.discardImportedImage(item)
-                    notice = ClipboardStorageError.imageBudget.localizedDescription
+                    setNotice(ClipboardStorageError.imageBudget.localizedDescription)
                     return
                 }
                 insert(item)
             } catch {
-                if generation == captureGeneration { notice = error.localizedDescription }
+                if generation == captureGeneration { setNotice(error.localizedDescription) }
             }
         }
     }
@@ -598,7 +625,7 @@ final class ClipboardStore {
             if previewID == recent.id { clearPreview() }
         }
         items.insert(recent, at: 0)
-        notice = nil
+        setNotice(nil)
         reconcileSelection()
         persist([.upsert(recent)] + (item.image == nil ? [] : [.completeImageImport(item.id)]))
     }
@@ -610,6 +637,24 @@ final class ClipboardStore {
         thumbnailOrder.removeAll { !ids.contains($0) }
         missingPreviews.formIntersection(ids)
         unavailableItems.formIntersection(ids)
+    }
+
+    private func setNotice(_ message: String?, style: PasketToast.Style = .warning) {
+        notice = message
+        toasts.show(message, source: .notice,
+                    title: style == .success ? "Cleanup Complete" : "Clipboard Notice", style: style)
+    }
+
+    private func updateStorageToast() {
+        toasts.show(storageError, source: .storage, title: "History Storage Needs Attention",
+                    style: .error, action: .retryStorage)
+    }
+
+    private func updateRetentionToast() {
+        toasts.show(needsRetentionReview
+                    ? "Review history limits to enable automatic cleanup. Your existing history has been kept." : nil,
+                    source: .retention, title: "Review History Limits",
+                    style: .information, action: .reviewHistory)
     }
 
     private func persist(_ mutations: [ClipboardMutation]) {

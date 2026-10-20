@@ -23,8 +23,15 @@ final class ClipboardPasteController {
         }
     }
 
-    private(set) var errorMessage: String?
+    private(set) var errorMessage: String? {
+        didSet {
+            toasts.show(needsPermission ? nil : errorMessage, source: .paste,
+                        title: "Item Copied", style: .information)
+        }
+    }
     private(set) var needsPermission = false
+    let toasts: PasketToastCenter
+    let systemAccess: SystemAccessController
     @ObservationIgnored private var requestID = UUID()
     @ObservationIgnored private let hasAccess: () -> Bool
     @ObservationIgnored private let inputReleased: () -> Bool
@@ -32,11 +39,15 @@ final class ClipboardPasteController {
     @ObservationIgnored private let postPaste: (pid_t) -> Bool
     @ObservationIgnored private let wait: () async throws -> Void
 
-    init(hasAccess: @escaping () -> Bool = { CGPreflightPostEventAccess() },
+    init(toasts: PasketToastCenter? = nil,
+         systemAccess: SystemAccessController? = nil,
+         hasAccess: @escaping () -> Bool = { CGPreflightPostEventAccess() },
          inputReleased: @escaping () -> Bool = ClipboardPasteController.inputIsReleased,
          clipboardChangeCount: @escaping () -> Int = { NSPasteboard.general.changeCount },
          postPaste: @escaping (pid_t) -> Bool = ClipboardPasteController.postPasteEvent,
          wait: @escaping () async throws -> Void = { try await Task.sleep(for: .milliseconds(20)) }) {
+        self.toasts = toasts ?? PasketToastCenter()
+        self.systemAccess = systemAccess ?? SystemAccessController()
         self.hasAccess = hasAccess
         self.inputReleased = inputReleased
         self.clipboardChangeCount = clipboardChangeCount
@@ -50,6 +61,7 @@ final class ClipboardPasteController {
         cancel()
         errorMessage = nil
         needsPermission = false
+        systemAccess.dismiss(.accessibility)
     }
 
     @discardableResult
@@ -63,6 +75,7 @@ final class ClipboardPasteController {
         guard hasAccess() else {
             needsPermission = true
             errorMessage = "Item copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically. You can also press Escape, then Command + V."
+            systemAccess.present(.accessibility)
             return false
         }
 

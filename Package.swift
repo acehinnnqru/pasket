@@ -9,7 +9,7 @@ let package = Package(
             name: "PasketCore",
             path: "pasket",
             exclude: ["ApplicationController.swift", "ContentView.swift", "MyApp.swift",
-                      "ShortcutSettingsView.swift", "Assets.xcassets", "pasket.entitlements"],
+                      "ShortcutSettingsView.swift", "PasketToastView.swift", "Assets.xcassets", "pasket.entitlements"],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
         .testTarget(name: "PasketCoreTests", dependencies: ["PasketCore"],

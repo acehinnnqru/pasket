@@ -27,6 +27,42 @@ struct ClipboardPasteTests {
         #expect(fixture.events.isEmpty)
         #expect(fixture.controller.needsPermission)
         #expect(fixture.controller.errorMessage?.contains("Command + V") == true)
+        #expect(fixture.controller.toasts.current == nil)
+        #expect(fixture.controller.systemAccess.request?.permission == .accessibility)
+        fixture.controller.prepareForPresentation()
+        #expect(fixture.controller.toasts.current == nil)
+        #expect(fixture.controller.systemAccess.request == nil)
+    }
+
+    @Test func openingHistoryWithoutPastingDoesNotRequestPermission() {
+        let fixture = Fixture()
+        fixture.allowed = false
+        fixture.controller.prepareForPresentation()
+        #expect(fixture.controller.systemAccess.request == nil)
+        #expect(fixture.events.isEmpty)
+    }
+
+    @Test func cancelledPermissionDialogOnlyReturnsOnAnotherPasteAttempt() async {
+        let fixture = Fixture()
+        fixture.allowed = false
+        #expect(await fixture.paste() == false)
+        fixture.controller.systemAccess.dismiss()
+        #expect(fixture.controller.systemAccess.request == nil)
+        #expect(fixture.events.isEmpty)
+        #expect(await fixture.paste() == false)
+        #expect(fixture.controller.systemAccess.request?.permission == .accessibility)
+        #expect(fixture.events.isEmpty)
+    }
+
+    @Test func allowingAccessDoesNotReplayAPasteWithoutANewAttempt() async {
+        let fixture = Fixture()
+        fixture.allowed = false
+        #expect(await fixture.paste() == false)
+        fixture.controller.systemAccess.dismiss()
+        fixture.allowed = true
+        #expect(fixture.events.isEmpty)
+        #expect(await fixture.paste())
+        #expect(fixture.controller.systemAccess.request == nil)
     }
 
     @Test func missingOrTerminatedTargetNeverPastes() async {
@@ -36,6 +72,7 @@ struct ClipboardPasteTests {
         #expect(await fixture.paste() == false)
         #expect(fixture.events.isEmpty)
         #expect(fixture.controller.errorMessage != nil)
+        #expect(fixture.controller.systemAccess.request == nil)
     }
 
     @Test func switchingAppsCancelsThePendingPaste() async {

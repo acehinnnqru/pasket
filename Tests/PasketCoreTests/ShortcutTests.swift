@@ -25,7 +25,7 @@ struct ShortcutTests {
         #expect(manager.setDeletionShortcut(shortcut))
         let restored = GlobalShortcutManager(defaults: defaults)
         #expect(restored.deletionShortcut == shortcut)
-        #expect(restored.shortcut == .default)
+        #expect(restored.shortcut == nil)
         #expect(restored.setDeletionShortcut(nil))
         #expect(GlobalShortcutManager(defaults: defaults).deletionShortcut == nil)
     }
@@ -34,10 +34,12 @@ struct ShortcutTests {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let history = GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | optionKey), keyLabel: "P")
+        defaults.set(try JSONEncoder().encode(history), forKey: "globalInvocationShortcut")
         let manager = GlobalShortcutManager(defaults: defaults)
         let shortcut = GlobalShortcut(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey), keyLabel: "D")
         #expect(manager.setDeletionShortcut(shortcut))
-        let conflict = GlobalShortcut(keyCode: manager.shortcut.keyCode, modifiers: manager.shortcut.modifiers, keyLabel: "Different Label")
+        let conflict = GlobalShortcut(keyCode: history.keyCode, modifiers: history.modifiers, keyLabel: "Different Label")
         #expect(!manager.setDeletionShortcut(conflict))
         #expect(manager.errorMessage != nil)
         #expect(manager.deletionShortcut == shortcut)
@@ -67,8 +69,10 @@ struct ShortcutTests {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let history = GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | optionKey), keyLabel: "P")
+        defaults.set(try JSONEncoder().encode(history), forKey: "globalInvocationShortcut")
         let manager = GlobalShortcutManager(defaults: defaults)
-        #expect(!manager.setSettingsShortcut(manager.shortcut))
+        #expect(!manager.setSettingsShortcut(history))
         #expect(!manager.setDeletionShortcut(.defaultSettings))
         #expect(manager.deletionShortcut == nil)
         let deletion = GlobalShortcut(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey | optionKey), keyLabel: "⌫")
@@ -98,6 +102,106 @@ struct ShortcutTests {
         let restored = GlobalShortcutManager(defaults: defaults)
         #expect(restored.shortcut == .defaultSettings)
         #expect(restored.settingsShortcut == nil)
+    }
+
+    @Test func historyStartsUnassignedAndRecordingDoesNotSaveIt() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        #expect(manager.shortcut == nil)
+        manager.beginRecording()
+        #expect(!manager.canSaveRecording)
+        manager.record(try keyEvent(code: kVK_ANSI_V, modifiers: [.command, .option], characters: "v"))
+        #expect(manager.pendingShortcut?.displayName == "⌥⌘V")
+        #expect(manager.canSaveRecording)
+        #expect(manager.isRecording)
+        #expect(manager.shortcut == nil)
+        #expect(defaults.object(forKey: "globalInvocationShortcut") == nil)
+        manager.cancelRecording()
+        #expect(manager.pendingShortcut == nil)
+        #expect(!manager.isRecording)
+        #expect(GlobalShortcutManager(defaults: defaults).shortcut == nil)
+    }
+
+    @Test func settingsRecordingCanBeReplacedAndOnlySavesOnConfirmation() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        manager.beginRecording(.openSettings)
+        manager.record(try keyEvent(code: kVK_ANSI_S, modifiers: [.command, .option], characters: "s"))
+        manager.record(try keyEvent(code: kVK_ANSI_D, modifiers: [.command, .option], characters: "d"))
+        #expect(manager.pendingShortcut?.displayName == "⌥⌘D")
+        #expect(GlobalShortcutManager(defaults: defaults).settingsShortcut == .defaultSettings)
+        #expect(manager.saveRecording())
+        #expect(!manager.isRecording)
+        #expect(GlobalShortcutManager(defaults: defaults).settingsShortcut?.displayName == "⌥⌘D")
+    }
+
+    @Test func clearingHistoryRequiresConfirmationAndCancellationPreservesSavedKeys() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let history = GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | optionKey), keyLabel: "P")
+        defaults.set(try JSONEncoder().encode(history), forKey: "globalInvocationShortcut")
+        let manager = GlobalShortcutManager(defaults: defaults)
+        manager.beginRecording()
+        manager.stageShortcut(nil)
+        #expect(manager.isClearingShortcut)
+        #expect(GlobalShortcutManager(defaults: defaults).shortcut == history)
+        manager.cancelRecording()
+        #expect(manager.shortcut == history)
+        #expect(GlobalShortcutManager(defaults: defaults).shortcut == history)
+        manager.beginRecording()
+        manager.stageShortcut(nil)
+        #expect(manager.saveRecording())
+        #expect(manager.shortcut == nil)
+        #expect(GlobalShortcutManager(defaults: defaults).shortcut == nil)
+    }
+
+    @Test func conflictingDraftStaysVisibleAndPreservesBindingsUntilCorrected() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        manager.beginRecording(.deleteSelectedItem)
+        manager.stageShortcut(.defaultSettings)
+        #expect(!manager.saveRecording())
+        #expect(manager.isRecording)
+        #expect(manager.pendingShortcut == .defaultSettings)
+        #expect(manager.errorMessage != nil)
+        #expect(GlobalShortcutManager(defaults: defaults).deletionShortcut == nil)
+        manager.record(try keyEvent(code: kVK_Delete, modifiers: [.command, .option], characters: "\u{7f}"))
+        #expect(manager.saveRecording())
+        #expect(GlobalShortcutManager(defaults: defaults).deletionShortcut?.displayName == "⌥⌘⌫")
+    }
+
+    @Test func failedHistoryRegistrationDoesNotSaveOrCloseRecording() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        manager.beginRecording()
+        manager.record(try keyEvent(code: kVK_ANSI_V, modifiers: [.command, .option], characters: "v"))
+        #expect(!manager.saveRecording())
+        #expect(manager.isRecording)
+        #expect(manager.pendingShortcut?.displayName == "⌥⌘V")
+        #expect(manager.errorMessage != nil)
+        #expect(GlobalShortcutManager(defaults: defaults).shortcut == nil)
+    }
+
+    @Test func invalidKeysCannotConfirmAPreviouslyRecordedCombination() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        manager.beginRecording(.openSettings)
+        manager.record(try keyEvent(code: kVK_ANSI_S, modifiers: .command, characters: "s"))
+        manager.record(try keyEvent(code: kVK_ANSI_D, modifiers: [], characters: "d"))
+        #expect(!manager.canSaveRecording)
+        #expect(!manager.saveRecording())
+        #expect(manager.settingsShortcut == .defaultSettings)
     }
 
     private func keyEvent(code: Int, modifiers: NSEvent.ModifierFlags, characters: String) throws -> NSEvent {

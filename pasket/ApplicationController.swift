@@ -74,10 +74,13 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let pasteController: ClipboardPasteController
     let dockIcon = DockIconPreferences()
     let accentColor = AccentColorPreferences()
+    let setup = AppSetup()
     private(set) var isRelaunchRequested = false
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
+    private var setupWindow: NSWindow?
+    private var hasStartedHistory = false
     private var previousApplication: NSRunningApplication?
     private var startupTask: Task<Void, Never>?
     private var settingsFieldEditor = SettingsFieldEditor()
@@ -95,8 +98,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         applyDockPreferences()
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.start()
-        startupTask = Task { await store.start() }
-        showPanel()
+        setup.refresh(hasShortcut: shortcuts.shortcut != nil)
+        if setup.step == .complete {
+            finishSetup()
+        } else {
+            showSetup()
+        }
     }
 
     func togglePanel() {
@@ -108,6 +115,10 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func reopen() {
+        if setupWindow != nil {
+            showSetup()
+            return
+        }
         if settingsWindow?.isVisible == true {
             NSApplication.shared.activate()
             settingsWindow?.makeKeyAndOrderFront(nil)
@@ -117,6 +128,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func showPanel() {
+        guard setupWindow == nil else { showSetup(); return }
         pasteController.prepareForPresentation()
         if panel?.isVisible == true {
             panel?.makeKeyAndOrderFront(nil)
@@ -190,6 +202,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func showSettings() {
+        guard setupWindow == nil else { showSetup(); return }
         let screen = (panel?.isVisible == true ? panel?.screen : nil)
             ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
             ?? NSScreen.main
@@ -225,6 +238,67 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func showSetup() {
+        if setupWindow == nil {
+            let window = SettingsWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                styleMask: [.borderless], backing: .buffered, defer: false
+            )
+            window.title = "Welcome to Pasket"
+            window.isReleasedWhenClosed = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            window.isMovableByWindowBackground = false
+            window.contentView = NSHostingView(rootView: PasketSetupView(
+                setup: setup,
+                shortcuts: shortcuts,
+                onRequestPermission: { [weak self] in self?.requestSetupPermission() },
+                onShortcutReady: { [weak self] in
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.setupWindow != nil, self.setup.step == .shortcut else { return }
+                        self.showSetup()
+                    }
+                },
+                onFinish: { [weak self] in self?.finishSetup() },
+                onRelaunch: { [weak self] in self?.requestRelaunch() }
+            ).modifier(PasketAccentColor(preferences: accentColor)))
+            window.center()
+            setupWindow = window
+        }
+        NSApplication.shared.activate()
+        setupWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    private func requestSetupPermission() {
+        switch setup.step {
+        case .clipboard:
+            // Trigger the system request so Pasket can appear in clipboard privacy settings.
+            if NSPasteboard.general.accessBehavior == .default || NSPasteboard.general.accessBehavior == .ask {
+                _ = NSPasteboard.general.string(forType: .string)
+            }
+            if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Pasteboard") {
+                NSWorkspace.shared.open(url)
+            }
+        case .accessibility:
+            pasteController.openAccessibilitySettings()
+        case .shortcut, .complete:
+            break
+        }
+    }
+
+    private func finishSetup() {
+        guard setup.step == .complete else { return }
+        if shortcuts.isRecording { shortcuts.cancelRecording() }
+        setupWindow?.close()
+        setupWindow = nil
+        if !hasStartedHistory {
+            hasStartedHistory = true
+            startupTask = Task { await store.start() }
+        }
+        showPanel()
     }
 
     private func applyDockPreferences() {
@@ -265,7 +339,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
 
     func resumeAfterCancelledTermination() {
         isRelaunchRequested = false
-        store.resumeMonitoring()
+        if hasStartedHistory { store.resumeMonitoring() }
         shortcuts.start()
     }
 

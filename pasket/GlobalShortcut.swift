@@ -7,12 +7,6 @@ struct GlobalShortcut: Codable, Equatable {
     let modifiers: UInt32
     let keyLabel: String
 
-    static let `default` = GlobalShortcut(
-        keyCode: UInt32(kVK_ANSI_P),
-        modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey),
-        keyLabel: "P"
-    )
-
     static let defaultSettings = GlobalShortcut(
         keyCode: UInt32(kVK_ANSI_Comma),
         modifiers: UInt32(cmdKey),
@@ -86,12 +80,15 @@ final class GlobalShortcutManager {
         }
     }
 
-    private(set) var shortcut: GlobalShortcut
+    private(set) var shortcut: GlobalShortcut?
     private(set) var deletionShortcut: GlobalShortcut?
     private(set) var settingsShortcut: GlobalShortcut?
     private(set) var errorMessage: String?
     private(set) var isRecording = false
     private(set) var recordingAction: RecordingAction = .showHistory
+    private(set) var pendingShortcut: GlobalShortcut?
+    private(set) var isClearingShortcut = false
+    var canSaveRecording: Bool { pendingShortcut != nil || isClearingShortcut }
     var onInvoke: (() -> Void)?
 
     @ObservationIgnored private var hotKey: EventHotKeyRef?
@@ -109,12 +106,10 @@ final class GlobalShortcutManager {
         if let data = defaults.data(forKey: Self.storageKey),
            let saved = try? JSONDecoder().decode(GlobalShortcut.self, from: data) {
             shortcut = saved
-        } else {
-            shortcut = .default
         }
         if let data = defaults.data(forKey: Self.deletionStorageKey),
            let saved = try? JSONDecoder().decode(GlobalShortcut.self, from: data),
-           !saved.hasSameKeys(as: shortcut) {
+           shortcut?.hasSameKeys(as: saved) != true {
             deletionShortcut = saved
         }
         let candidate: GlobalShortcut?
@@ -126,7 +121,7 @@ final class GlobalShortcutManager {
             candidate = .defaultSettings
         }
         // Preserve existing history and deletion bindings when introducing the settings shortcut.
-        if let candidate, !candidate.hasSameKeys(as: shortcut),
+        if let candidate, shortcut?.hasSameKeys(as: candidate) != true,
            deletionShortcut?.hasSameKeys(as: candidate) != true {
             settingsShortcut = candidate
         }
@@ -159,7 +154,7 @@ final class GlobalShortcutManager {
             errorMessage = "Could not start global shortcuts (status \(status)). Relaunch Pasket to try again."
             return
         }
-        _ = register(shortcut, persist: false)
+        restoreRegistration()
     }
 
     func stop() {
@@ -169,12 +164,10 @@ final class GlobalShortcutManager {
     }
 
     func beginRecording(_ action: RecordingAction = .showHistory) {
-        guard handler != nil else {
-            errorMessage = "Global shortcuts are unavailable. Relaunch Pasket to try again."
-            return
-        }
         unregisterHotKey()
         errorMessage = nil
+        pendingShortcut = nil
+        isClearingShortcut = false
         recordingAction = action
         isRecording = true
     }
@@ -186,46 +179,66 @@ final class GlobalShortcutManager {
             return
         }
         guard let candidate = GlobalShortcut.from(event) else {
+            pendingShortcut = nil
+            isClearingShortcut = false
             errorMessage = "Include Command, Control, or Option with another key."
             return
         }
+        stageShortcut(candidate)
+    }
+
+    func stageShortcut(_ candidate: GlobalShortcut?) {
+        guard isRecording else { return }
+        pendingShortcut = candidate
+        isClearingShortcut = candidate == nil
+        errorMessage = nil
+    }
+
+    @discardableResult
+    func saveRecording() -> Bool {
+        guard isRecording, canSaveRecording else { return false }
         switch recordingAction {
         case .deleteSelectedItem, .openSettings:
             let accepted = recordingAction == .openSettings
-                ? setSettingsShortcut(candidate) : setDeletionShortcut(candidate)
-            if accepted {
-                isRecording = false
-                _ = register(shortcut, persist: false)
-            }
+                ? setSettingsShortcut(pendingShortcut) : setDeletionShortcut(pendingShortcut)
+            guard accepted else { return false }
         case .showHistory:
+            guard let candidate = pendingShortcut else {
+                unregisterHotKey()
+                shortcut = nil
+                defaults.removeObject(forKey: Self.storageKey)
+                finishRecording()
+                return true
+            }
             guard settingsShortcut?.hasSameKeys(as: candidate) != true else {
                 errorMessage = "This combination is assigned to Open Settings. Choose another combination."
-                return
+                return false
             }
             guard deletionShortcut?.hasSameKeys(as: candidate) != true else {
                 errorMessage = "This combination is assigned to Delete Selected Item. Choose another combination."
-                return
+                return false
             }
-            if register(candidate, persist: true) { isRecording = false }
+            guard register(candidate, persist: true) else { return false }
         }
+        finishRecording()
+        return true
     }
 
     func cancelRecording() {
         guard isRecording else { return }
-        isRecording = false
-        _ = register(shortcut, persist: false)
+        finishRecording()
     }
 
-    func restoreDefault() {
-        guard settingsShortcut?.hasSameKeys(as: .default) != true else {
-            errorMessage = "The default combination is assigned to Open Settings. Change or clear it first."
-            return
-        }
-        guard deletionShortcut?.hasSameKeys(as: .default) != true else {
-            errorMessage = "The default combination is assigned to Delete Selected Item. Change or clear it first."
-            return
-        }
-        _ = register(.default, persist: true)
+    private func finishRecording() {
+        isRecording = false
+        pendingShortcut = nil
+        isClearingShortcut = false
+        errorMessage = nil
+        restoreRegistration()
+    }
+
+    private func restoreRegistration() {
+        if handler != nil, let shortcut { _ = register(shortcut, persist: false) }
     }
 
     @discardableResult
@@ -234,7 +247,7 @@ final class GlobalShortcutManager {
             errorMessage = "This combination is assigned to Open Settings. Choose another combination."
             return false
         }
-        guard candidate?.hasSameKeys(as: shortcut) != true else {
+        if let candidate, shortcut?.hasSameKeys(as: candidate) == true {
             errorMessage = "This combination opens clipboard history. Choose another combination."
             return false
         }
@@ -251,7 +264,7 @@ final class GlobalShortcutManager {
     @discardableResult
     func setSettingsShortcut(_ candidate: GlobalShortcut?) -> Bool {
         if let candidate {
-            guard !candidate.hasSameKeys(as: shortcut) else {
+            guard shortcut?.hasSameKeys(as: candidate) != true else {
                 errorMessage = "This combination opens clipboard history. Choose another combination."
                 return false
             }

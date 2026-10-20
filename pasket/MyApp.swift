@@ -10,7 +10,7 @@ struct PasketApp: App {
             Button("Show Clipboard History") {
                 appDelegate.controller.showPanel()
             }
-            Text(appDelegate.controller.shortcuts.shortcut.displayName)
+            Text(appDelegate.controller.shortcuts.shortcut?.displayName ?? "No shortcut set")
             if let error = appDelegate.controller.shortcuts.errorMessage {
                 Text(error)
             }

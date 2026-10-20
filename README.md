@@ -4,7 +4,20 @@ A clipboard manager. Collect your contents into a basket.
 ## Run
 
 Open `pasket.xcodeproj` in Xcode, select the `pasket` scheme and My Mac, and run.
-Pasket lives in the menu bar and opens its history panel at launch.
+Pasket lives in the menu bar. At launch, it checks clipboard collection and automatic-paste
+permissions before opening history. Missing access is explained in a setup window; use its
+permission button to open System Settings. Clipboard collection needs Always Allow for
+Paste from Other Apps, and automatic paste needs Accessibility access. The window rechecks
+permissions and advances after access is granted. Collection starts after setup finishes.
+The setup window uses the same borderless material, cards, and buttons as Settings; drag its
+header to move it. Clipboard instructions use two short steps and retain a Check Again action.
+Accessibility instructions show three steps: open System Settings, enable Pasket, and use the
+always-visible Quit & Reopen Pasket button to apply access and continue setup. The Accessibility
+page has no Check Again action or collapsed restart instructions. Open System Settings appears
+to the right of step 1, and Quit & Reopen Pasket appears to the right of step 3. Both actions
+are vertically centered in their rows and share the same right edge; the footer only offers Quit Pasket.
+After permissions are ready, users without a saved history shortcut choose their own combination
+in a recording dialog, or choose Use Menu Bar Instead. This choice persists across relaunches.
 Its menu bar icon is a fixed monochrome basket with a P monogram. Settings → Dock icon → Show in Dock
 controls whether Pasket appears in the Dock, including while Settings is open. It is off by default,
 applies immediately, and persists across relaunch. Clicking the Dock icon opens history or brings
@@ -17,7 +30,11 @@ indicator. Choose System (the default) to follow the macOS accent color, or Blue
 Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
 save automatically for the next launch.
 
-- **Hyper + P** (Control + Option + Shift + Command + P) toggles the panel.
+- No global history shortcut is assigned by default. Use **Show Clipboard History** in the menu
+  bar or configure **Show Clipboard History** in Settings. Existing saved shortcuts are preserved.
+  Recorded combinations remain visible as drafts until **Save Shortcut** is clicked. Recording
+  another combination replaces the draft; Cancel or Escape keeps the saved binding unchanged.
+  Registration failures leave the dialog open without saving the candidate.
 - The search field receives focus whenever the panel opens. Search the complete saved content or
   source app and filter by type. Arrow keys and row clicks change the selected entry while keeping
   the search field focused, so you can continue typing immediately.
@@ -55,9 +72,10 @@ save automatically for the next launch.
   Storage and history-limit problems retain their recovery action until dismissed or
   resolved. New messages appear first; dismissing one reveals any previous unresolved message.
   Reopening history restores unresolved storage and history-limit reminders.
-- Permission dialogs appear only when an operation needs access: automatic paste requires
-  Accessibility, and resuming collection while clipboard access is denied offers to open System Settings.
-  Opening history and background permission checks do not display permission dialogs or toasts.
+- Startup checks guide users through missing clipboard and Accessibility permissions before
+  shortcut setup. Later, automatic paste requests Accessibility if access was revoked, and
+  resuming collection while clipboard access is denied offers to open System Settings.
+  Opening history and background checks after setup do not display permission dialogs or toasts.
   Cancelling keeps saved history available; granting permission never replays a previous paste.
 - The detail preview shows only content. Images fit the available space without scrolling;
   metadata and file access controls sit in the table below, which scrolls independently when needed.
@@ -70,15 +88,15 @@ save automatically for the next launch.
   Settings opens centered on the history panel's display each time, including when reusing an
   existing settings window. When history is hidden, it uses the display under the pointer.
 - **Command + ,** opens Settings from the history panel. Change **Open Settings** in Settings,
-  use the reset icon to return to Command + comma, or **Clear Shortcut** in the recording dialog
-  to disable it. The menu bar
+  use the reset icon to preview Command + comma, or **Clear Shortcut** in the recording dialog
+  to preview disabling it, then confirm with **Save Shortcut**. The menu bar
   uses the same binding. Settings, history, and deletion shortcuts must use different combinations.
   Existing history or deletion bindings take priority if they already use Command + comma.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
   per key press. No deletion shortcut is assigned by default; use **Clear Shortcut** in the recording
-  dialog to disable it. Clearing saves immediately and closes the dialog. The global history shortcut
-  always remains assigned and has no clear action.
+  dialog and **Save Shortcut** to disable it. Clearing any shortcut requires confirmation;
+  the global history shortcut can also be cleared to use the menu bar instead.
   The delete shortcut must differ from the history and settings shortcuts.
 - Click the status light in the panel footer to pause or resume collection, or use the menu bar.
   While collecting, a small dot in the app's accent color gently brightens and dims every 2.8 seconds,
@@ -257,8 +275,21 @@ For the desktop smoke test:
   and the selected color persist. The P menu bar glyph
   must remain monochrome in light and dark appearance, including while changing icon colors.
 
-1. Run Pasket, dismiss its panel, and copy `Pasket interaction check 2000` from a text editor.
-2. Press Hyper + P; the search field should accept typing immediately.
+1. On a fresh installation, verify missing clipboard access appears before missing Accessibility
+   access, and already granted permissions are skipped. Deny access or return from System Settings
+   without enabling it: setup must remain on that permission. Grant access and verify setup advances
+   to shortcut recording. No clipboard collection should occur before setup finishes.
+   Check the setup window in light and dark appearance: it must have no system title bar, use the
+   same material and button styling as Settings, and move only when its header is dragged.
+   Accessibility must show the reopen step and button without expanding anything, with no
+   Check Again action. Enable access, reopen, and verify setup continues. Expand the clipboard
+   permission help and verify all instructions and recovery controls fit without clipping.
+   Record a combination and verify its keycaps stay visible without saving. Record another to replace
+   the draft, then click Save Shortcut. Test registration conflicts and recovery without losing the
+   draft. Alternatively, choose Use Menu Bar Instead and confirm no shortcut is assigned and the
+   recording prompt does not repeat after relaunch. Existing saved shortcuts must be preserved.
+   Dismiss history and copy `Pasket interaction check 2000` from a text editor.
+2. Use your configured history shortcut or the menu bar; the search field should accept typing immediately.
 3. Search `interaction check`, select the entry, and press Return.
 4. With event-posting permission granted, confirm the panel closes, the item is pasted exactly once
    at the original caret or selection, and continued typing stays in that input without clicking.
@@ -280,7 +311,9 @@ For the desktop smoke test:
 7. In Settings, record a Delete Selected Item shortcut. Verify it deletes one selected entry
    while preserving the search text and caret, does not repeatedly delete when held, and does
    nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,
-   rejecting the global history shortcut, and clearing the binding. Relaunch to verify persistence.
+   rejecting the global history shortcut, and clearing the binding. Every recording, clearing, and
+   settings-default restoration must wait for Save Shortcut; Cancel must retain the previous binding.
+   Clear the history shortcut and verify menu bar access still works. Relaunch to verify persistence.
    Press Command + comma in the history search field to open Settings. Change Open Settings,
    verify the new binding works and the previous one stops working, then test clearing, restoring
    the default, conflict rejection, and persistence after relaunch. Recording and confirmation
@@ -339,6 +372,7 @@ the updated desktop checks above have not yet been reported.
 ## Structure
 
 - `MyApp.swift`: menu bar entry and application scene.
+- `AppSetup.swift`: permission ordering and persisted shortcut setup completion.
 - `PasketMenuIcon.swift`: resolution-independent monochrome basket and P menu bar glyph.
 - `DockIconPreferences.swift`: saved Dock visibility and icon color selection.
 - `ApplicationController.swift`: panel, settings, focus restoration, and termination handling.

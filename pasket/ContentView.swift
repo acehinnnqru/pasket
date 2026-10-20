@@ -12,7 +12,15 @@ struct ContentView: View {
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
     @State private var filterControlFrame: CGRect = .zero
+    @State private var isMoreMenuPresented = false
+    @State private var moreControlFrame: CGRect = .zero
     @State private var isConfirmingClear = false
+
+    private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
+
+    private var canClearHistory: Bool {
+        !store.isDebugMode && !store.items.isEmpty && !store.isLoading && !store.isStorageBlocked
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,12 +62,12 @@ struct ContentView: View {
         .buttonStyle(PasketButtonStyle())
         .background {
             WindowKeyStateObserver { isKey in
-                searchFocused = isKey && !isFilterMenuPresented && !isConfirmingClear
+                searchFocused = isKey && !isMenuPresented && !isConfirmingClear
             }
         }
         .background {
             ShortcutEventMonitor { event in
-                guard !isFilterMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
+                guard !isMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
                       shortcuts.deletionShortcut?.matches(event) == true else { return false }
                 if !event.isARepeat, !store.isLoading, !store.isStorageBlocked,
                    let item = store.selectedItem {
@@ -87,15 +95,41 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if isMoreMenuPresented {
+                GeometryReader { geometry in
+                    ZStack(alignment: .bottomTrailing) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: dismissMenus)
+                            .accessibilityHidden(true)
+                        ClipboardMoreActionsMenu(canClearHistory: canClearHistory, onSelect: { action in
+                            dismissMenus()
+                            switch action {
+                            case .settings:
+                                searchFocused = false
+                                onOpenSettings()
+                            case .clearHistory:
+                                searchFocused = false
+                                isConfirmingClear = true
+                            }
+                        }, onDismiss: dismissMenus)
+                        .padding(.bottom, geometry.size.height - moreControlFrame.minY + 4)
+                        .padding(.trailing, geometry.size.width - moreControlFrame.maxX)
+                    }
+                }
+            }
+        }
         .task(id: store.selectedItem?.id) { await store.loadPreview(for: store.selectedItem) }
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
+            isMoreMenuPresented = false
         }
         .onChange(of: isConfirmingClear) {
             if !isConfirmingClear { searchFocused = true }
         }
         .onExitCommand {
-            if isFilterMenuPresented { dismissFilterMenu() } else { onDismiss() }
+            if isMenuPresented { dismissMenus() } else { onDismiss() }
         }
         .alert("Clear Clipboard History?", isPresented: $isConfirmingClear) {
             Button("Cancel", role: .cancel) {}
@@ -140,8 +174,10 @@ struct ContentView: View {
                 .accessibilityIdentifier("resetClipboardFilter")
             }
             Button {
+                isMoreMenuPresented = false
                 searchFocused = false
                 isFilterMenuPresented.toggle()
+                if !isFilterMenuPresented { searchFocused = true }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: store.filter.symbol)
@@ -422,7 +458,7 @@ struct ContentView: View {
             #if DEBUG
             Toggle("Debug mode", isOn: Binding(get: { store.isDebugMode }, set: { enabled in
                 isConfirmingClear = false
-                dismissFilterMenu()
+                dismissMenus()
                 store.setDebugMode(enabled)
             }))
                 .toggleStyle(.switch)
@@ -459,26 +495,22 @@ struct ContentView: View {
             .disabled(!store.canCopySelection)
             .help("Copy the complete item and return to your previous app")
             .accessibilityIdentifier("copyClipboardItem")
-            Menu {
-                Button(role: .destructive) { isConfirmingClear = true } label: {
-                    Label("Delete All Entries…", systemImage: "trash")
-                }
-                .disabled(store.isDebugMode || store.items.isEmpty || store.isLoading || store.isStorageBlocked)
-                .help("Clear all clipboard history after confirmation")
-                .accessibilityIdentifier("clearClipboardHistory")
-                Divider()
-                Button(action: onOpenSettings) {
-                    Label("Settings…", systemImage: "gearshape")
-                }
+            Button {
+                isFilterMenuPresented = false
+                isMoreMenuPresented.toggle()
+                searchFocused = !isMoreMenuPresented
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 16, height: 16)
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(PasketButtonStyle())
+            .buttonStyle(PasketButtonStyle(isActive: isMoreMenuPresented))
             .focusable(false)
             .fixedSize()
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .named("clipboardPanel"))
+            } action: { frame in
+                moreControlFrame = frame
+            }
             .help("More actions")
             .accessibilityLabel("More actions")
             .accessibilityIdentifier("clipboardMoreActions")
@@ -497,6 +529,12 @@ struct ContentView: View {
 
     private func dismissFilterMenu() {
         isFilterMenuPresented = false
+        searchFocused = true
+    }
+
+    private func dismissMenus() {
+        isFilterMenuPresented = false
+        isMoreMenuPresented = false
         searchFocused = true
     }
 }
@@ -550,7 +588,6 @@ private struct ClipboardFilterMenu: View {
 
     @State private var highlightedFilter: ClipboardFilter?
     @FocusState private var isFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -597,16 +634,7 @@ private struct ClipboardFilterMenu: View {
         }
         .padding(6)
         .frame(width: width)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
-                .allowsHitTesting(false)
-        }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.12), radius: 12, x: 0, y: 5)
+        .modifier(ClipboardMenuSurface())
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
@@ -635,6 +663,125 @@ private struct ClipboardFilterMenu: View {
         let filters = ClipboardFilter.allCases
         let current = filters.firstIndex(of: highlightedFilter ?? selection) ?? 0
         highlightedFilter = filters[(current + offset + filters.count) % filters.count]
+    }
+}
+
+private struct ClipboardMenuSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.regularMaterial)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                    .allowsHitTesting(false)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.12), radius: 12, x: 0, y: 5)
+    }
+}
+
+private struct ClipboardMoreActionsMenu: View {
+    enum Action: CaseIterable {
+        case clearHistory, settings
+
+        var title: String { self == .settings ? "Settings…" : "Delete All Entries…" }
+        var symbol: String { self == .settings ? "gearshape" : "trash" }
+    }
+
+    let canClearHistory: Bool
+    var onSelect: (Action) -> Void
+    var onDismiss: () -> Void
+
+    @State private var highlightedAction: Action? = .settings
+    @FocusState private var isFocused: Bool
+
+    private var enabledActions: [Action] { canClearHistory ? Action.allCases : [.settings] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Action.allCases, id: \.self) { action in
+                if action == .settings {
+                    Divider().padding(.horizontal, 8).padding(.vertical, 4)
+                }
+                Button(role: action == .clearHistory ? .destructive : nil) {
+                    onSelect(action)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: action.symbol)
+                            .font(.system(size: 13, weight: .regular))
+                            .frame(width: 16)
+                        Text(action.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .foregroundStyle(action == .clearHistory ? Color.red : .primary)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(.primary.opacity(highlightedAction == action && enabledActions.contains(action) ? 0.04 : 0))
+                    }
+                    .opacity(enabledActions.contains(action) ? 1 : 0.35)
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .disabled(!enabledActions.contains(action))
+                .onHover { hovering in
+                    if hovering, enabledActions.contains(action) {
+                        highlightedAction = action
+                    } else if highlightedAction == action {
+                        highlightedAction = nil
+                    }
+                }
+                .help(action == .settings ? "Open Settings" : "Clear all clipboard history after confirmation")
+                .accessibilityIdentifier(action == .settings ? "openPasketSettings" : "clearClipboardHistory")
+            }
+        }
+        .padding(6)
+        .frame(width: 208)
+        .modifier(ClipboardMenuSurface())
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .onAppear {
+            isFocused = true
+        }
+        .onKeyPress(.downArrow) {
+            moveHighlight(by: 1)
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            moveHighlight(by: -1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            let action = highlightedAction ?? .settings
+            if enabledActions.contains(action) { onSelect(action) }
+            return .handled
+        }
+        .onExitCommand(perform: onDismiss)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("More actions")
+        .onChange(of: canClearHistory) {
+            if let highlightedAction, !enabledActions.contains(highlightedAction) {
+                self.highlightedAction = .settings
+            }
+        }
+    }
+
+    private func moveHighlight(by offset: Int) {
+        let actions = enabledActions
+        guard let highlightedAction, let current = actions.firstIndex(of: highlightedAction) else {
+            self.highlightedAction = offset > 0 ? actions.first : actions.last
+            return
+        }
+        self.highlightedAction = actions[(current + offset + actions.count) % actions.count]
     }
 }
 

@@ -15,7 +15,9 @@ Pasket lives in the menu bar and opens its history panel at launch.
   The selector and its menu keep the same width across all content types.
 - **Return**, double-click, or **Copy** copies the complete item, closes the panel,
   and returns to the previous application. Press **Command + V** there to paste.
-- **Escape** dismisses the panel. With the filter menu open, Escape first closes that menu.
+- **Escape** dismisses the panel. With the filter or **…** menu open, Escape first closes that menu
+  and restores search focus. Both menus use the same custom appearance and support arrow keys and Return;
+  clicking outside also closes them. The **…** menu opens above its button.
 - The detail preview shows only content. Images fit the available space without scrolling;
   metadata and file access controls sit in the table below, which scrolls independently when needed.
   Long table values are truncated; hover to see the complete value.
@@ -125,7 +127,9 @@ For the desktop smoke test:
    or click a row, then verify the search caret stays visible and typing and deletion still edit
    the search. Use Delete Selected to remove one entry, and test both Cancel and Clear History
    in the **… → Delete All Entries…** confirmation. Check that **… → Settings…** opens Settings.
-   Confirm typing resumes after each action and Return still copies.
+   Confirm typing resumes after each action and Return still copies. Check the custom **…** menu's
+   placement above its button, hover feedback, arrow-key navigation, Return selection, outside-click
+   dismissal, and Escape dismissal. Disabled Delete All Entries must be skipped by keyboard navigation.
 7. In Settings, record a Delete Selected Item shortcut. Verify it deletes one selected entry
    while preserving the search text and caret, does not repeatedly delete when held, and does
    nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,

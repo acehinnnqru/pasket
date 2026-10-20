@@ -102,7 +102,7 @@ final class ClipboardStore {
         return !isDebugMode && selectedDetail?.id == item.id ? selectedDetail : item
     }
     var isStorageBlocked: Bool { storageBlocked }
-    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isSearching && !isCopying }
+    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
     var hasMoreItems: Bool { !isDebugMode && items.count < matchingCount }
 
     func start() async {
@@ -325,10 +325,20 @@ final class ClipboardStore {
 
     @discardableResult
     func copySelection() async -> Bool {
-        guard !isDebugMode, let summary = selectedItem, !isCopying, !isLoading, !isSearching else { return false }
+        guard !isDebugMode, !isCopying, !isLoading else { return false }
         isCopying = true
         defer { isCopying = false }
         let presentation = presentationID
+        // Keep Paste available while searching, but resolve the latest results before copying.
+        while isSearching {
+            let generation = queryGeneration
+            await queryTask?.value
+            await saveTask?.value
+            guard !Task.isCancelled, presentationID == presentation, !isDebugMode, storageError == nil else { return false }
+            if generation == queryGeneration && isSearching { return false }
+        }
+        guard let summary = selectedItem, !Task.isCancelled, presentationID == presentation, !isDebugMode else { return false }
+        let generation = queryGeneration
         var item = summary
         do {
             await saveTask?.value
@@ -336,13 +346,15 @@ final class ClipboardStore {
             if let pending = pendingItem(summary.id) { fullItem = pending }
             else { fullItem = try await persistence.item(summary.id) }
             guard let fullItem, presentationID == presentation,
+                  generation == queryGeneration, !Task.isCancelled,
                   items.contains(where: { $0.id == summary.id }) else { return false }
             item = fullItem
             switch item.kind {
             case .image:
                 guard let image = item.image else { return false }
                 let data = try await persistence.imageData(image)
-                guard presentationID == presentation, items.contains(where: { $0.id == item.id }) else { return false }
+                guard presentationID == presentation, generation == queryGeneration, !Task.isCancelled,
+                      items.contains(where: { $0.id == item.id }) else { return false }
                 pasteboard.clearContents()
                 guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
             case .file:
@@ -634,16 +646,29 @@ final class ClipboardStore {
         let generation = queryGeneration
         let page = try await persistence.page(query: query, filter: filter, limit: loadedLimit)
         guard generation == queryGeneration, !isDebugMode else { return }
+        // Publish the selected item's full metadata together with the result summaries.
+        // If navigation changes during the read, resolve the latest selection first.
+        var detail: ClipboardItem?
+        while true {
+            let previousSelection = selectedID
+            let nextSelection = page.items.first(where: { $0.id == previousSelection })?.id ?? page.items.first?.id
+            if let nextSelection {
+                detail = try await persistence.item(nextSelection)
+            } else {
+                detail = nil
+            }
+            guard generation == queryGeneration, !isDebugMode else { return }
+            if selectedID == previousSelection { break }
+        }
         items = page.items
         totalCount = page.totalCount
         matchingCount = page.matchingCount
         imageStorageBytes = page.imageBytes
         textStorageBytes = page.textBytes
-        selectedDetail = nil
         pruneCaches()
         reconcileSelection()
+        selectedDetail = detail
         isSearching = false
-        await loadSelection()
     }
 
     func loadMore() async {

@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import Testing
 @testable import PasketCore
 
@@ -197,6 +198,71 @@ struct ClipboardTests {
         await fixture.store.flush()
         #expect(fixture.store.items.count == 50)
         #expect(fixture.store.items.first?.id == items[124].id)
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [false, true])
+    func searchPublishesFullDetailsBeforeFinishing(keepsSelection: Bool) async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let first = ClipboardItem.text(String(repeating: "a", count: 700) + " shared first",
+                                       source: .unknown, at: now)
+        let second = ClipboardItem.text(String(repeating: "b", count: 800) + " shared second",
+                                        source: .unknown, at: now.addingTimeInterval(-1))
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [first, second]))
+        await fixture.start()
+        let store = fixture.store
+        let expected = keepsSelection ? first : second
+        store.query = keepsSelection ? "shared" : "second"
+        #expect(store.isSearching)
+        withObservationTracking {
+            _ = store.isSearching
+        } onChange: {
+            MainActor.assumeIsolated {
+                #expect(store.selectedItem?.id == expected.id)
+                #expect(store.selectedItem?.content == expected.content)
+                #expect(store.selectedItem?.hasTruncatedPreview == true)
+            }
+        }
+        await store.flush()
+        #expect(!store.isSearching)
+        #expect(store.selectedItem?.content == expected.content)
+        #expect(store.items.allSatisfy { $0.content.count == 500 })
+        await fixture.cleanUp()
+    }
+
+    @Test func pasteStaysAvailableDuringSearchAndCopiesTheLatestResult() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let text = String(repeating: "a", count: 700) + " target"
+        await fixture.copy(text)
+        await fixture.copy("previous selection")
+        fixture.store.selectedID = fixture.store.items.first?.id
+        #expect(fixture.store.selectedItem?.content == "previous selection")
+
+        fixture.store.query = "previous"
+        fixture.store.query = "target"
+        #expect(fixture.store.isSearching)
+        #expect(fixture.store.canCopySelection)
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.pasteboard.string(forType: .string) == text)
+        #expect(!fixture.store.isSearching)
+        await fixture.cleanUp()
+    }
+
+    @Test func pasteDuringSearchDoesNotCopyWhenTheLatestResultsAreEmpty() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        await fixture.copy("previous selection")
+        let changeCount = fixture.pasteboard.changeCount
+
+        fixture.store.query = "no matching item"
+        #expect(fixture.store.isSearching)
+        #expect(fixture.store.canCopySelection)
+        #expect(await fixture.store.copySelection() == false)
+        #expect(fixture.pasteboard.changeCount == changeCount)
+        #expect(!fixture.store.canCopySelection)
+        #expect(!fixture.store.isCopying)
         await fixture.cleanUp()
     }
 

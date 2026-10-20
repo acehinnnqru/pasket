@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var isMoreMenuPresented = false
     @State private var moreControlFrame: CGRect = .zero
     @State private var isConfirmingClear = false
+    @State private var showsSearchProgress = false
 
     private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
 
@@ -167,6 +168,15 @@ struct ContentView: View {
             await store.loadSelection()
             await store.loadPreview(for: store.selectedItem)
         }
+        .task(id: store.isSearching) {
+            showsSearchProgress = false
+            guard store.isSearching else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                try Task.checkCancellation()
+                showsSearchProgress = true
+            } catch {}
+        }
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
@@ -190,6 +200,14 @@ struct ContentView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(.secondary)
+                .opacity(showsSearchProgress ? 0 : 1)
+                .overlay {
+                    if showsSearchProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("Searching history")
+                    }
+                }
             TextField("Search your clipboard…", text: $store.query)
                 .textFieldStyle(.plain)
                 .accessibilityIdentifier("clipboardSearch")
@@ -269,9 +287,9 @@ struct ContentView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
-                    if store.isLoading || store.isSearching {
+                    if store.isLoading {
                         ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
-                    } else if store.filteredItems.isEmpty {
+                    } else if store.filteredItems.isEmpty && !store.isSearching {
                         if store.isDebugMode ? store.displayedItems.isEmpty : store.totalCount == 0 {
                             ContentUnavailableView("Your basket is empty", systemImage: "basket",
                                 description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
@@ -315,7 +333,7 @@ struct ContentView: View {
                                 .accessibilityAddTraits(.isHeader)
                         }
                     }
-                    if store.hasMoreItems {
+                    if store.hasMoreItems && !store.isSearching {
                         ProgressView("Loading more…")
                             .frame(maxWidth: .infinity)
                             .task(id: store.items.last?.id) { await store.loadMore() }

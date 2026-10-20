@@ -106,20 +106,37 @@ Pasket never changes your system privacy settings.
 
 ## Local storage
 
-History uses a versioned `history.json` and a separate `Images` directory under the app's
-Application Support/Pasket directory inside its sandbox. No third-party dependencies or network
-services are used. Read-only folder bookmarks are stored in `history.json` and kept when history
-is cleared; they can be removed separately in Settings. Writes are serialized and atomic. Quitting
+History uses a versioned SQLite database (`history.sqlite`) and a separate `Images` directory under
+the app's Application Support/Pasket directory inside its sandbox. The system SQLite library is
+used without third-party dependencies or network services. The list initially reads 50 summaries,
+with at most 500 characters of text per row, and loads further batches as you scroll or move past
+the last loaded row with the keyboard. Selection and copying fetch the complete saved record.
+Search runs against all saved records and their complete bodies, including records outside the
+loaded pages, with the same Unicode-aware literal substring matching used previously.
+
+Collection, deletion, copy-time updates, and settings changes update individual database records
+in serialized transactions. Retention limits apply to the complete database. Read-only folder
+bookmarks are stored separately from history records and kept when history is cleared; they can
+be removed separately in Settings. Quitting
 waits for queued writes; failed writes show a retry action and require a choice before quitting
-with unsaved changes. A damaged or
-unsupported history file is left untouched, and collection stops until it can be loaded.
+with unsaved changes. Media cleanup runs only after database changes commit successfully.
+
+On first use, an existing version-1 `history.json` is validated and imported in one transaction,
+including identities, timestamps, source metadata, image references, pause state, and folder grants.
+The original JSON is left unchanged, and subsequent launches use the database without reimporting
+it. This retained JSON describes the history at migration time; image files continue to follow the
+active database's retention and deletion rules. A damaged or unsupported database or legacy history
+is left intact, and collection stops until it can be loaded. An existing database is never replaced
+by a fallback import from JSON.
 
 ## Validation
 
 Run `swift test` for the core suite. Tests use isolated named pasteboards and temporary fixtures;
 they do not read or overwrite the real clipboard. They cover text boundaries, deduplication,
 full-body search and copy, classification, source persistence, pause/resume, restart, deletion,
-retention, damaged history, images and thumbnails, storage failures, and file references.
+retention, damaged history, images and thumbnails, storage failures, and file references. SQLite
+coverage includes legacy migration, transaction rollback, incremental writes, pagination, searches
+of unloaded bodies, Unicode matching, and stable identities when repeating an unloaded entry.
 
 For the desktop smoke test:
 
@@ -184,7 +201,8 @@ pasted the expected content. The other manual checks above have not yet been rep
 - `ClipboardModels.swift`: versioned records, classification, fingerprints, and limits.
 - `ClipboardMonitor.swift`: polling, sensitive-type exclusions, and source estimation.
 - `ClipboardFileAccess.swift`: file bookmarks, availability checks, and scoped access lifecycle.
-- `ClipboardPersistence.swift`: atomic storage, image normalization, thumbnails, and cleanup.
+- `ClipboardPersistence.swift`: SQLite history, migration, paged queries, image normalization, thumbnails, and cleanup.
+- `ClipboardDatabase.swift`: system SQLite connection, bound statements, transactions, and Unicode search.
 - `ClipboardStore.swift`: collection queues, retention, selection, copying, and management actions.
 - `GlobalShortcut.swift` and `ShortcutSettingsView.swift`: shortcut registration and settings.
 - `Tests/PasketCoreTests`: dependency-free core regression tests, runnable through SwiftPM.

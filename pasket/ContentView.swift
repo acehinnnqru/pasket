@@ -19,7 +19,7 @@ struct ContentView: View {
     private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
 
     private var canClearHistory: Bool {
-        !store.isDebugMode && !store.items.isEmpty && !store.isLoading && !store.isStorageBlocked
+        !store.isDebugMode && store.totalCount > 0 && !store.isLoading && !store.isStorageBlocked
     }
 
     var body: some View {
@@ -128,7 +128,10 @@ struct ContentView: View {
                 }
             }
         }
-        .task(id: store.selectedItem?.id) { await store.loadPreview(for: store.selectedItem) }
+        .task(id: store.selectedItem?.id) {
+            await store.loadSelection()
+            await store.loadPreview(for: store.selectedItem)
+        }
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
@@ -143,7 +146,7 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
             Button("Clear History", role: .destructive) { store.clearHistory() }
         } message: {
-            Text("Delete all \(store.items.count.formatted()) saved items and their image copies? This cannot be undone. Your original files and current system clipboard will be kept.")
+            Text("Delete all \(store.totalCount.formatted()) saved items and their image copies? This cannot be undone. Your original files and current system clipboard will be kept.")
         }
     }
 
@@ -230,10 +233,10 @@ struct ContentView: View {
                         .padding(.horizontal, 9)
                         .padding(.top, 4)
                         .padding(.bottom, 5)
-                    if store.isLoading {
+                    if store.isLoading || store.isSearching {
                         ProgressView("Loading history…").frame(maxWidth: .infinity).padding()
                     } else if store.filteredItems.isEmpty {
-                        if store.displayedItems.isEmpty {
+                        if store.isDebugMode ? store.displayedItems.isEmpty : store.totalCount == 0 {
                             ContentUnavailableView("Your basket is empty", systemImage: "basket",
                                 description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
                                 .frame(maxWidth: .infinity)
@@ -263,6 +266,11 @@ struct ContentView: View {
                             Button("Delete", role: .destructive) { store.delete(item.id) }
                                 .disabled(store.isDebugMode || store.isStorageBlocked)
                         }
+                    }
+                    if store.hasMoreItems {
+                        ProgressView("Loading more…")
+                            .frame(maxWidth: .infinity)
+                            .task(id: store.items.last?.id) { await store.loadMore() }
                     }
                 }
                 .padding(8)
@@ -457,7 +465,7 @@ struct ContentView: View {
             }
             HStack(spacing: 6) {
             collectionControl
-            Label("\(store.isDebugMode ? store.displayedItems.count : store.items.count) items", systemImage: "basket")
+            Label("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items", systemImage: "basket")
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)

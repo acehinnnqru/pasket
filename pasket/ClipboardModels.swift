@@ -18,7 +18,7 @@ nonisolated enum ClipboardKind: String, CaseIterable, Identifiable, Codable, Sen
     }
 }
 
-enum ClipboardFilter: String, CaseIterable, Identifiable {
+nonisolated enum ClipboardFilter: String, CaseIterable, Identifiable, Sendable {
     case all, text, images, files, links, emails
 
     var id: Self { self }

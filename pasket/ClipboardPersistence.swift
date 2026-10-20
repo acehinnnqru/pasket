@@ -2,6 +2,23 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+nonisolated enum ClipboardMutation: Sendable {
+    case upsert(ClipboardItem)
+    case touch(UUID, Date)
+    case delete(UUID)
+    case deleteFingerprint(String)
+    case clear
+    case completeImageImport(UUID)
+    case settings(isPaused: Bool, folders: [ClipboardFile])
+}
+
+nonisolated struct ClipboardPage: Sendable {
+    var items: [ClipboardItem]
+    var matchingCount: Int
+    var totalCount: Int
+    var imageBytes: Int
+}
+
 nonisolated enum ClipboardStorageError: LocalizedError {
     case unsupportedVersion, invalidImage, largeImage, invalidHistory, missingImage
 
@@ -19,9 +36,11 @@ nonisolated enum ClipboardStorageError: LocalizedError {
 actor ClipboardPersistence {
     let directory: URL
     private var committedImageNames: Set<String> = []
-    private var pendingImageNames: Set<String> = []
+    private var pendingImages: [UUID: Set<String>] = [:]
     private var mediaDirectory: URL { directory.appendingPathComponent("Images", isDirectory: true) }
     private var historyURL: URL { directory.appendingPathComponent("history.json") }
+    private var databaseURL: URL { directory.appendingPathComponent("history.sqlite") }
+    private var hasOpenedDatabase = false
 
     init(directory: URL) { self.directory = directory }
 
@@ -31,9 +50,89 @@ actor ClipboardPersistence {
     }
 
     func load() throws -> ClipboardHistory {
-        guard FileManager.default.fileExists(atPath: historyURL.path) else { return ClipboardHistory() }
-        let data = try Data(contentsOf: historyURL)
-        let history = try JSONDecoder().decode(ClipboardHistory.self, from: data)
+        let database = try openDatabase()
+        var history = try settings(in: database)
+        try database.query("SELECT payload FROM items ORDER BY copied_at DESC, position DESC, id") {
+            history.items.append(try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0)))
+        }
+        return history
+    }
+
+    func loadSettings() throws -> ClipboardHistory {
+        try settings(in: openDatabase())
+    }
+
+    // Full snapshots are used by importers and fixtures; normal collection uses apply(_:).
+    func save(_ history: ClipboardHistory) throws {
+        try validate(history)
+        let database = try openDatabase()
+        try database.transaction {
+            try database.execute("DELETE FROM items")
+            for item in history.items.reversed() { try upsert(item, in: database) }
+            try writeSettings(history, in: database)
+            try enforceLimits(in: database)
+        }
+        for item in history.items { pendingImages[item.id] = nil }
+        try didCommit(in: database)
+    }
+
+    func apply(_ mutations: [ClipboardMutation]) throws {
+        let database = try openDatabase()
+        try database.transaction {
+            for mutation in mutations {
+                switch mutation {
+                case .upsert(let item): try upsert(item, in: database)
+                case .touch(let id, let date):
+                    if var item = try item(id, in: database) {
+                        item.copiedAt = date
+                        try upsert(item, in: database)
+                    }
+                case .delete(let id): try database.execute("DELETE FROM items WHERE id = ?", [.text(id.uuidString)])
+                case .deleteFingerprint(let fingerprint):
+                    try database.execute("DELETE FROM items WHERE fingerprint = ?", [.text(fingerprint)])
+                case .clear: try database.execute("DELETE FROM items")
+                case .completeImageImport: break
+                case let .settings(paused, folders):
+                    try writeSettings(ClipboardHistory(isPaused: paused, authorizedFolders: folders), in: database)
+                }
+            }
+            try enforceLimits(in: database)
+        }
+        for mutation in mutations {
+            switch mutation {
+            case .completeImageImport(let id): pendingImages[id] = nil
+            case .upsert(let item): pendingImages[item.id] = nil
+            default: break
+            }
+        }
+        try didCommit(in: database)
+    }
+
+    func item(_ id: UUID) throws -> ClipboardItem? { try item(id, in: openDatabase()) }
+
+    func page(query: String = "", filter: ClipboardFilter = .all, limit: Int = 50, offset: Int = 0) throws -> ClipboardPage {
+        let database = try openDatabase()
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var predicates: [String] = []
+        var values: [ClipboardDatabase.Value] = []
+        if filter == .images { predicates.append("has_image_preview = 1") }
+        else if let kind = filter.kind { predicates.append("kind = ?"); values.append(.text(kind.rawValue)) }
+        if !search.isEmpty {
+            predicates.append("(pasket_contains(title, ?) OR pasket_contains(content, ?) OR pasket_contains(source_name, ?) OR pasket_contains(source_bundle, ?))")
+            values.append(contentsOf: Array(repeating: .text(search), count: 4))
+        }
+        let clause = predicates.isEmpty ? "" : " WHERE " + predicates.joined(separator: " AND ")
+        var items: [ClipboardItem] = []
+        try database.query("SELECT summary FROM items" + clause + " ORDER BY copied_at DESC, position DESC, id LIMIT ? OFFSET ?",
+                           values + [.integer(max(0, limit)), .integer(max(0, offset))]) {
+            items.append(try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0)))
+        }
+        return ClipboardPage(items: items, matchingCount: try database.integer("SELECT COUNT(*) FROM items" + clause, values),
+                             totalCount: try database.integer("SELECT COUNT(*) FROM items"),
+                             imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"))
+    }
+
+    private func validate(_ history: ClipboardHistory) throws {
         guard history.version == 1 else { throw ClipboardStorageError.unsupportedVersion }
         guard Set(history.items.map(\.id)).count == history.items.count,
               Set(history.authorizedFolders.map(\.path)).count == history.authorizedFolders.count,
@@ -46,17 +145,129 @@ actor ClipboardPersistence {
                   if item.kind == .file { return !item.files.isEmpty }
                   return item.content.count <= ClipboardLimits.textCharacters
               }) else { throw ClipboardStorageError.invalidHistory }
-        committedImageNames = imageNames(in: history.items)
-        try cleanImages()
+    }
+
+    private func openDatabase() throws -> ClipboardDatabase {
+        if hasOpenedDatabase, !FileManager.default.fileExists(atPath: databaseURL.path) {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let database = try ClipboardDatabase(url: databaseURL)
+        let version = try database.integer("PRAGMA user_version")
+        guard version <= 1 else { throw ClipboardStorageError.unsupportedVersion }
+        guard version >= 0 else { throw ClipboardStorageError.invalidHistory }
+        if version == 0 {
+            guard try database.integer("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'") == 0 else {
+                throw ClipboardStorageError.invalidHistory
+            }
+            var history = ClipboardHistory()
+            if FileManager.default.fileExists(atPath: historyURL.path) {
+                history = try JSONDecoder().decode(ClipboardHistory.self, from: Data(contentsOf: historyURL))
+                try validate(history)
+            }
+            try database.transaction {
+                try database.execute("""
+                    CREATE TABLE items (
+                        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+                        title TEXT NOT NULL, content TEXT NOT NULL, source_name TEXT NOT NULL, source_bundle TEXT NOT NULL,
+                        copied_at REAL NOT NULL, position INTEGER NOT NULL, has_image_preview INTEGER NOT NULL,
+                        text_bytes INTEGER NOT NULL, image_bytes INTEGER NOT NULL,
+                        image_name TEXT NOT NULL, thumbnail_name TEXT NOT NULL, summary BLOB NOT NULL, payload BLOB NOT NULL
+                    )
+                    """)
+                try database.execute("CREATE INDEX items_recency ON items(copied_at DESC, position DESC, id)")
+                try database.execute("CREATE INDEX items_kind_recency ON items(kind, copied_at DESC, position DESC, id)")
+                try database.execute("CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK(id = 1), payload BLOB NOT NULL)")
+                for item in history.items.reversed() { try upsert(item, in: database) }
+                try writeSettings(history, in: database)
+                try enforceLimits(in: database)
+                try database.execute("PRAGMA user_version = 1")
+            }
+        }
+        // Only collect media after the schema and any legacy import have committed.
+        if !hasOpenedDatabase {
+            _ = try settings(in: database)
+            try didCommit(in: database)
+        }
+        hasOpenedDatabase = true
+        return database
+    }
+
+    private func settings(in database: ClipboardDatabase) throws -> ClipboardHistory {
+        var history: ClipboardHistory?
+        try database.query("SELECT payload FROM settings WHERE id = 1") {
+            history = try JSONDecoder().decode(ClipboardHistory.self, from: ClipboardDatabase.data($0, 0))
+        }
+        guard let history else { throw ClipboardStorageError.invalidHistory }
+        try validate(history)
         return history
     }
 
-    func save(_ history: ClipboardHistory) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(history)
-        try data.write(to: historyURL, options: .atomic)
-        committedImageNames = imageNames(in: history.items)
-        pendingImageNames.subtract(committedImageNames)
+    private func writeSettings(_ history: ClipboardHistory, in database: ClipboardDatabase) throws {
+        let settings = ClipboardHistory(isPaused: history.isPaused, authorizedFolders: history.authorizedFolders)
+        try validate(settings)
+        try database.execute("INSERT OR REPLACE INTO settings(id, payload) VALUES(1, ?)", [.blob(try JSONEncoder().encode(settings))])
+    }
+
+    private func item(_ id: UUID, in database: ClipboardDatabase) throws -> ClipboardItem? {
+        var item: ClipboardItem?
+        try database.query("SELECT payload FROM items WHERE id = ?", [.text(id.uuidString)]) {
+            item = try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0))
+        }
+        return item
+    }
+
+    private func upsert(_ incoming: ClipboardItem, in database: ClipboardDatabase) throws {
+        var item = incoming
+        try database.query("SELECT id FROM items WHERE fingerprint = ?", [.text(item.fingerprint)]) {
+            guard let id = UUID(uuidString: ClipboardDatabase.text($0, 0)) else { throw ClipboardStorageError.invalidHistory }
+            item.id = id
+        }
+        try validate(ClipboardHistory(items: [item]))
+        if item.id != incoming.id {
+            // Refreshed bookmarks can make two previously distinct paths converge.
+            try database.execute("DELETE FROM items WHERE id = ?", [.text(incoming.id.uuidString)])
+        }
+        let position = try database.integer("SELECT COALESCE(MAX(position), 0) + 1 FROM items")
+        var summary = item
+        summary.content = String(item.content.prefix(500))
+        let encoder = JSONEncoder()
+        try database.execute("""
+            INSERT INTO items VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                fingerprint=excluded.fingerprint, kind=excluded.kind, title=excluded.title, content=excluded.content,
+                source_name=excluded.source_name, source_bundle=excluded.source_bundle, copied_at=excluded.copied_at,
+                position=excluded.position, has_image_preview=excluded.has_image_preview,
+                text_bytes=excluded.text_bytes, image_bytes=excluded.image_bytes,
+                image_name=excluded.image_name, thumbnail_name=excluded.thumbnail_name,
+                summary=excluded.summary, payload=excluded.payload
+            """, [.text(item.id.uuidString), .text(item.fingerprint), .text(item.kind.rawValue), .text(item.title), .text(item.content),
+                  .text(item.source.name), .text(item.source.bundleIdentifier ?? ""), .real(item.copiedAt.timeIntervalSinceReferenceDate),
+                  .integer(position), .integer(item.hasImagePreview ? 1 : 0), .integer(item.textByteCount), .integer(item.imageByteCount),
+                  .text(item.image?.fileName ?? ""), .text(item.image?.thumbnailName ?? ""),
+                  .blob(try encoder.encode(summary)), .blob(try encoder.encode(item))])
+    }
+
+    private func enforceLimits(in database: ClipboardDatabase) throws {
+        // A prefix of the newest rows preserves the existing retention semantics.
+        try database.execute("""
+            DELETE FROM items WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER recent AS item_count,
+                        SUM(text_bytes) OVER recent AS text_total, SUM(image_bytes) OVER recent AS image_total
+                    FROM items WINDOW recent AS (ORDER BY copied_at DESC, position DESC, id ROWS UNBOUNDED PRECEDING)
+                ) WHERE item_count > ? OR text_total > ? OR image_total > ?
+            )
+            """, [.integer(ClipboardLimits.items), .integer(ClipboardLimits.textBytes), .integer(ClipboardLimits.totalImageBytes)])
+    }
+
+    private func didCommit(in database: ClipboardDatabase) throws {
+        var names: Set<String> = []
+        try database.query("SELECT image_name, thumbnail_name FROM items WHERE image_name != ''") {
+            names.insert(ClipboardDatabase.text($0, 0))
+            names.insert(ClipboardDatabase.text($0, 1))
+        }
+        committedImageNames = names
         try cleanImages()
     }
 
@@ -95,12 +306,13 @@ actor ClipboardPersistence {
         let hash = ClipboardItem.digest(png as Data)
         let payload = ClipboardImage(fileName: hash + ".png", thumbnailName: hash + ".thumb.png",
                                      byteCount: png.length, thumbnailByteCount: thumbnailData.length, width: image.width, height: image.height)
+        let item = ClipboardItem(kind: .image, title: "Image · \(image.width) × \(image.height)", content: "\(image.width) × \(image.height)",
+                                 source: source, copiedAt: date, fingerprint: "image:" + hash, image: payload)
         try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
-        pendingImageNames.formUnion([payload.fileName, payload.thumbnailName])
+        pendingImages[item.id] = [payload.fileName, payload.thumbnailName]
         try (png as Data).write(to: mediaDirectory.appendingPathComponent(payload.fileName), options: .atomic)
         try (thumbnailData as Data).write(to: mediaDirectory.appendingPathComponent(payload.thumbnailName), options: .atomic)
-        return ClipboardItem(kind: .image, title: "Image · \(image.width) × \(image.height)", content: "\(image.width) × \(image.height)",
-                             source: source, copiedAt: date, fingerprint: "image:" + hash, image: payload)
+        return item
     }
 
     func imageData(_ image: ClipboardImage, thumbnail: Bool = false) throws -> Data {
@@ -140,18 +352,14 @@ actor ClipboardPersistence {
         validImageNames(image) && FileManager.default.isReadableFile(atPath: mediaDirectory.appendingPathComponent(image.fileName).path)
     }
 
-    func discardImportedImage(_ image: ClipboardImage) throws {
-        pendingImageNames.subtract([image.fileName, image.thumbnailName])
+    func discardImportedImage(_ item: ClipboardItem) throws {
+        pendingImages[item.id] = nil
         try cleanImages()
-    }
-
-    private func imageNames(in items: [ClipboardItem]) -> Set<String> {
-        Set(items.compactMap(\.image).flatMap { [$0.fileName, $0.thumbnailName] })
     }
 
     private func cleanImages() throws {
         guard FileManager.default.fileExists(atPath: mediaDirectory.path) else { return }
-        let names = committedImageNames.union(pendingImageNames)
+        let names = committedImageNames.union(pendingImages.values.reduce(into: Set<String>()) { $0.formUnion($1) })
         for file in try FileManager.default.contentsOfDirectory(at: mediaDirectory, includingPropertiesForKeys: nil) {
             // Only remove files owned by this storage format.
             if isManagedImageName(file.lastPathComponent), !names.contains(file.lastPathComponent) {

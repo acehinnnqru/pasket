@@ -3,9 +3,9 @@ import Observation
 
 @MainActor @Observable
 final class ClipboardStore {
-    var query = ""
-    var filter: ClipboardFilter = .all
-    var selectedID: ClipboardItem.ID?
+    var query = "" { didSet { if query != oldValue { scheduleReload() } } }
+    var filter: ClipboardFilter = .all { didSet { if filter != oldValue { scheduleReload() } } }
+    var selectedID: ClipboardItem.ID? { didSet { if selectedID != oldValue { selectedDetail = nil } } }
     var presentationID = UUID()
     private(set) var copyError: String?
     private(set) var storageError: String?
@@ -15,6 +15,12 @@ final class ClipboardStore {
     private(set) var isCopying = false
     private(set) var clipboardAccessDenied = false
     private(set) var items: [ClipboardItem] = []
+    private(set) var totalCount = 0
+    private(set) var matchingCount = 0
+    private(set) var imageStorageBytes = 0
+    private(set) var isSearching = false
+    private(set) var isLoadingMore = false
+    private var selectedDetail: ClipboardItem?
     private(set) var thumbnails: [UUID: NSImage] = [:]
     private(set) var previewID: UUID?
     private(set) var previewImage: NSImage?
@@ -53,6 +59,13 @@ final class ClipboardStore {
     @ObservationIgnored private var previewRequestID = UUID()
     @ObservationIgnored private var deletionCutoffs: [String: Date] = [:]
     @ObservationIgnored private var fileAvailabilityGeneration = 0
+    @ObservationIgnored private var pendingMutations: [ClipboardMutation] = []
+    @ObservationIgnored private var queryTask: Task<Void, Never>?
+    @ObservationIgnored private var queryGeneration = 0
+    @ObservationIgnored private var loadedLimit = 50
+    @ObservationIgnored private var navigationTask: Task<Void, Never>?
+    @ObservationIgnored private var advanceAfterLoading: UUID?
+    private let pageSize = 50
 
     init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general) {
         persistence = ClipboardPersistence(directory: directory)
@@ -64,6 +77,7 @@ final class ClipboardStore {
     }
 
     var filteredItems: [ClipboardItem] {
+        if !isDebugMode { return items }
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return displayedItems.filter { item in
             (filter == .images ? item.hasImagePreview : filter.kind == nil || filter.kind == item.kind)
@@ -73,10 +87,13 @@ final class ClipboardStore {
         }
     }
 
-    var selectedItem: ClipboardItem? { filteredItems.first { $0.id == selectedID } }
+    var selectedItem: ClipboardItem? {
+        guard let item = filteredItems.first(where: { $0.id == selectedID }) else { return nil }
+        return !isDebugMode && selectedDetail?.id == item.id ? selectedDetail : item
+    }
     var isStorageBlocked: Bool { storageBlocked }
-    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
-    var imageStorageBytes: Int { items.reduce(0) { $0 + $1.imageByteCount } }
+    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isSearching && !isCopying }
+    var hasMoreItems: Bool { !isDebugMode && items.count < matchingCount }
 
     func start() async {
         guard !hasStarted else { return }
@@ -84,7 +101,6 @@ final class ClipboardStore {
         await load()
         if !stopRequested { monitor.start() }
         monitor.setPaused(shouldPauseMonitoring)
-        if !storageBlocked { persist() }
         await refreshFileAvailability()
     }
 
@@ -102,14 +118,12 @@ final class ClipboardStore {
     private func load() async {
         isLoading = true
         do {
-            let history = try await persistence.load()
-            items = history.items
+            let history = try await persistence.loadSettings()
             isPaused = history.isPaused
             authorizedFolders = history.authorizedFolders
             storageBlocked = false
             storageError = nil
-            enforceLimits()
-            selectedID = items.first?.id
+            try await refreshResults()
         } catch {
             storageBlocked = true
             storageError = "Could not load history. \(error.localizedDescription) Collection is stopped. Retry after checking the history file."
@@ -122,7 +136,7 @@ final class ClipboardStore {
             await load()
             monitor.setPaused(shouldPauseMonitoring)
         } else {
-            persist()
+            persist([])
             await saveTask?.value
         }
     }
@@ -133,7 +147,7 @@ final class ClipboardStore {
         isPaused = paused
         monitor.setPaused(shouldPauseMonitoring)
         notice = nil
-        persist()
+        persist([.settings(isPaused: isPaused, folders: authorizedFolders)])
     }
 
     func prepareForPresentation() {
@@ -142,6 +156,7 @@ final class ClipboardStore {
         selectedID = displayedItems.first?.id
         copyError = nil
         presentationID = UUID()
+        if !isDebugMode { scheduleReload() }
         Task { await refreshFileAvailability() }
     }
 
@@ -152,6 +167,9 @@ final class ClipboardStore {
         guard isDebugMode != enabled else { return }
         captureGeneration += 1
         isDebugMode = enabled
+        queryGeneration += 1
+        queryTask?.cancel()
+        isSearching = false
         monitor.setPaused(shouldPauseMonitoring)
         clearPreview()
         notice = nil
@@ -170,6 +188,11 @@ final class ClipboardStore {
         let visibleItems = filteredItems
         guard !visibleItems.isEmpty else { return }
         let current = visibleItems.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : visibleItems.count)
+        if offset > 0, current == visibleItems.count - 1, hasMoreItems {
+            advanceAfterLoading = selectedID
+            navigationTask = Task { await loadMore() }
+            return
+        }
         selectedID = visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id
         copyError = nil
     }
@@ -192,7 +215,9 @@ final class ClipboardStore {
         thumbnailOrder.removeAll { $0 == id }
         unavailableItems.remove(id)
         reconcileSelection()
-        persist()
+        totalCount = max(0, totalCount - 1)
+        matchingCount = max(0, matchingCount - 1)
+        persist([.deleteFingerprint(deleted.fingerprint)])
     }
 
     func clearHistory() {
@@ -201,6 +226,10 @@ final class ClipboardStore {
         deletionCutoffs = [:]
         monitor.checkpoint()
         items = []
+        totalCount = 0
+        matchingCount = 0
+        imageStorageBytes = 0
+        selectedDetail = nil
         thumbnails = [:]
         clearPreview()
         missingPreviews = []
@@ -209,16 +238,24 @@ final class ClipboardStore {
         selectedID = nil
         notice = nil
         copyError = nil
-        persist()
+        persist([.clear])
     }
 
     @discardableResult
     func copySelection() async -> Bool {
-        guard !isDebugMode, let item = selectedItem, !isCopying, !isLoading else { return false }
+        guard !isDebugMode, let summary = selectedItem, !isCopying, !isLoading, !isSearching else { return false }
         isCopying = true
         defer { isCopying = false }
         let presentation = presentationID
+        var item = summary
         do {
+            await saveTask?.value
+            let fullItem: ClipboardItem?
+            if let pending = pendingItem(summary.id) { fullItem = pending }
+            else { fullItem = try await persistence.item(summary.id) }
+            guard let fullItem, presentationID == presentation,
+                  items.contains(where: { $0.id == summary.id }) else { return false }
+            item = fullItem
             switch item.kind {
             case .image:
                 guard let image = item.image else { return false }
@@ -230,7 +267,7 @@ final class ClipboardStore {
                 try ClipboardFileAccess.withResolvedFiles(item.files, authorizedFolders: authorizedFolders) { urls, updatedFiles in
                     pasteboard.clearContents()
                     guard pasteboard.writeObjects(urls as [NSURL]) else { throw CocoaError(.fileWriteUnknown) }
-                    updateFiles(updatedFiles, for: item.id, replacing: item.files, persistChanges: false)
+                    updateFiles(updatedFiles, for: item.id, replacing: item.files)
                 }
             default:
                 pasteboard.clearContents()
@@ -241,7 +278,7 @@ final class ClipboardStore {
                 var recent = items.remove(at: index)
                 recent.copiedAt = Date()
                 items.insert(recent, at: 0)
-                persist()
+                persist([.touch(item.id, recent.copiedAt)])
             }
             unavailableItems.remove(item.id)
             copyError = nil
@@ -316,7 +353,7 @@ final class ClipboardStore {
         if let previewID, fileIDs.contains(previewID) { clearPreview() }
         folderAccessError = nil
         copyError = nil
-        persist()
+        persist([.settings(isPaused: isPaused, folders: authorizedFolders)])
         await refreshFileAvailability()
         if let selectedItem { await loadPreview(for: selectedItem) }
     }
@@ -330,7 +367,8 @@ final class ClipboardStore {
         items[index].content = files.map(\.path).joined(separator: "\n")
         items[index].title = Self.fileTitle(files)
         items[index].fingerprint = Self.fileFingerprint(files)
-        if persistChanges { persist() }
+        if selectedDetail?.id == id { selectedDetail = items[index] }
+        if persistChanges { persist([.upsert(items[index])]) }
         return true
     }
 
@@ -466,7 +504,10 @@ final class ClipboardStore {
                 }
             }
         }
-        if changed { persist() }
+        if changed {
+            let refreshed = items.filter { item in fileItems.contains { $0.id == item.id && $0.files != item.files } }
+            persist(refreshed.map(ClipboardMutation.upsert) + [.settings(isPaused: isPaused, folders: authorizedFolders)])
+        }
     }
 
     private func enqueue(_ capture: ClipboardCapture) {
@@ -489,7 +530,7 @@ final class ClipboardStore {
                 }
                 let deletedAfterCapture = deletionCutoffs[item.fingerprint].map { item.copiedAt <= $0 } ?? false
                 guard generation == captureGeneration, !isPaused, !deletedAfterCapture else {
-                    if let image = item.image { try await persistence.discardImportedImage(image) }
+                    if item.image != nil { try await persistence.discardImportedImage(item) }
                     return
                 }
                 insert(item)
@@ -506,20 +547,11 @@ final class ClipboardStore {
         }
         items.insert(recent, at: 0)
         notice = nil
-        enforceLimits()
         reconcileSelection()
-        persist()
+        persist([.upsert(recent)] + (item.image == nil ? [] : [.completeImageImport(item.id)]))
     }
 
-    private func enforceLimits() {
-        var textBytes = 0
-        var imageBytes = 0
-        let kept = items.prefix(ClipboardLimits.items).prefix { item in
-            textBytes += item.textByteCount
-            imageBytes += item.imageByteCount
-            return textBytes <= ClipboardLimits.textBytes && imageBytes <= ClipboardLimits.totalImageBytes
-        }
-        items = Array(kept)
+    private func pruneCaches() {
         let ids = Set(items.map(\.id))
         thumbnails = thumbnails.filter { ids.contains($0.key) }
         if let previewID, !ids.contains(previewID) { clearPreview() }
@@ -528,25 +560,120 @@ final class ClipboardStore {
         unavailableItems.formIntersection(ids)
     }
 
-    private func persist() {
+    private func persist(_ mutations: [ClipboardMutation]) {
         guard !storageBlocked else { return }
-        let snapshot = ClipboardHistory(isPaused: isPaused, items: items, authorizedFolders: authorizedFolders)
+        pendingMutations.append(contentsOf: mutations)
+        queryGeneration += 1
         let previousSave = saveTask
         saveTask = Task { [weak self, persistence] in
             await previousSave?.value
+            guard let self else { return }
+            let batch = pendingMutations
             do {
-                try await persistence.save(snapshot)
-                self?.storageError = nil
+                if !batch.isEmpty {
+                    try await persistence.apply(batch)
+                    pendingMutations.removeFirst(batch.count)
+                }
+                storageError = nil
+                if pendingMutations.isEmpty { try await refreshResults() }
             } catch {
-                self?.storageError = "History could not be saved. Changes may be lost after quitting. \(error.localizedDescription)"
+                isSearching = false
+                storageError = "History could not be saved. Changes may be lost after quitting. \(error.localizedDescription)"
             }
         }
     }
 
+    private func scheduleReload() {
+        guard hasStarted, !isLoading, !storageBlocked, !isDebugMode else { return }
+        loadedLimit = pageSize
+        advanceAfterLoading = nil
+        queryGeneration += 1
+        let generation = queryGeneration
+        queryTask?.cancel()
+        isSearching = true
+        queryTask = Task { [weak self] in
+            guard let self else { return }
+            await saveTask?.value
+            guard !Task.isCancelled, generation == queryGeneration else { return }
+            guard pendingMutations.isEmpty else { isSearching = false; return }
+            do {
+                try await refreshResults()
+                if generation == queryGeneration { await refreshFileAvailability() }
+            }
+            catch { storageError = "Could not search history. \(error.localizedDescription)" }
+            if generation == queryGeneration { isSearching = false }
+        }
+    }
+
+    private func refreshResults() async throws {
+        let generation = queryGeneration
+        let page = try await persistence.page(query: query, filter: filter, limit: loadedLimit)
+        guard generation == queryGeneration, !isDebugMode else { return }
+        items = page.items
+        totalCount = page.totalCount
+        matchingCount = page.matchingCount
+        imageStorageBytes = page.imageBytes
+        selectedDetail = nil
+        pruneCaches()
+        reconcileSelection()
+        isSearching = false
+        await loadSelection()
+    }
+
+    func loadMore() async {
+        guard hasMoreItems, !isLoadingMore, !isSearching, !storageBlocked else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        let generation = queryGeneration
+        await saveTask?.value
+        guard generation == queryGeneration, pendingMutations.isEmpty else { return }
+        do {
+            let page = try await persistence.page(query: query, filter: filter, limit: pageSize, offset: items.count)
+            guard generation == queryGeneration, !isDebugMode else { return }
+            items.append(contentsOf: page.items)
+            loadedLimit = max(pageSize, items.count)
+            totalCount = page.totalCount
+            matchingCount = page.matchingCount
+            imageStorageBytes = page.imageBytes
+            if let id = advanceAfterLoading, selectedID == id,
+               let index = items.firstIndex(where: { $0.id == id }), items.count > index + 1 {
+                selectedID = items[index + 1].id
+            }
+            advanceAfterLoading = nil
+        }
+        catch { storageError = "Could not load more history. \(error.localizedDescription)" }
+        await refreshFileAvailability()
+    }
+
+    func loadSelection() async {
+        guard !isDebugMode, let id = selectedID else { return }
+        if let pending = pendingItem(id) { selectedDetail = pending; return }
+        let generation = queryGeneration
+        do {
+            let detail = try await persistence.item(id)
+            guard selectedID == id, generation == queryGeneration, !isDebugMode else { return }
+            selectedDetail = detail
+        } catch {
+            copyError = "Could not load this item. \(error.localizedDescription)"
+        }
+    }
+
+    private func pendingItem(_ id: UUID) -> ClipboardItem? {
+        for case .upsert(let item) in pendingMutations.reversed() where item.id == id { return item }
+        return nil
+    }
+
     // Used by termination and tests to wait for queued imports and atomic writes.
     func flush() async {
-        await captureTask?.value
-        await saveTask?.value
+        var generation: Int
+        repeat {
+            generation = queryGeneration
+            await captureTask?.value
+            await navigationTask?.value
+            await queryTask?.value
+            await saveTask?.value
+        } while generation != queryGeneration
+        await loadSelection()
     }
 
     func pollClipboard() { monitor.poll() }

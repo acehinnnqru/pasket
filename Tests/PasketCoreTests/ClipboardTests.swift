@@ -82,6 +82,201 @@ struct ClipboardTests {
         #expect(ClipboardItem.classify("bad..address@example.com") == .text)
     }
 
+    @Test func legacyJSONMigratesOnceWithoutChangingItsContents() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let image = try await persistence.importImage(Self.smallPNG(), source: .unknown, at: Date())
+        let text = ClipboardItem.text(" \nhttps://example.com/path\n", source: .unknown, at: Date().addingTimeInterval(1))
+        let folder = try ClipboardFileAccess.captureFolder(fixture.directory)
+        let history = ClipboardHistory(isPaused: true, items: [text, image], authorizedFolders: [folder])
+        let legacyURL = fixture.directory.appendingPathComponent("history.json")
+        let original = try JSONEncoder().encode(history)
+        try original.write(to: legacyURL)
+        await fixture.start()
+        #expect(!fixture.store.isStorageBlocked)
+        #expect(fixture.store.isPaused)
+        #expect(fixture.store.items.map(\.id) == [text.id, image.id])
+        #expect(fixture.store.authorizedFolders == [folder])
+        #expect(try await persistence.imageData(try #require(image.image)).isEmpty == false)
+        #expect(try Data(contentsOf: legacyURL) == original)
+        fixture.store.delete(text.id)
+        await fixture.restart()
+        #expect(fixture.store.items.map(\.id) == [image.id])
+        #expect(try Data(contentsOf: legacyURL) == original)
+        await fixture.cleanUp()
+    }
+
+    @Test func pagesLoadSummariesAndSearchUnloadedFullBodies() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let items = (0..<125).map { index in
+            ClipboardItem.text(String(repeating: "a", count: 700) + " tail-\(index)-café-中文-%_",
+                               source: .unknown, at: now.addingTimeInterval(-Double(index)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
+        await fixture.start()
+        #expect(fixture.store.totalCount == 125)
+        #expect(fixture.store.items.count == 50)
+        #expect(fixture.store.items.allSatisfy { $0.content.count == 500 })
+        #expect(fixture.store.selectedItem?.content == items[0].content)
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.count == 100)
+        #expect(Set(fixture.store.items.map(\.id)).count == 100)
+        fixture.store.query = "TAIL-124-CAFE-中文-%_"
+        await fixture.store.flush()
+        #expect(fixture.store.filteredItems.map(\.id) == [items[124].id])
+        #expect(fixture.store.totalCount == 125)
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.pasteboard.string(forType: .string) == items[124].content)
+        await fixture.store.flush()
+        fixture.store.query = ""
+        await fixture.store.flush()
+        #expect(fixture.store.items.count == 50)
+        #expect(fixture.store.items.first?.id == items[124].id)
+        await fixture.cleanUp()
+    }
+
+    @Test func repeatingAnUnloadedItemPreservesItsIdentity() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let items = (0..<75).map {
+            ClipboardItem.text("Item \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
+        await fixture.start()
+        #expect(!fixture.store.items.contains { $0.id == items[74].id })
+        await fixture.copy(items[74].content)
+        #expect(fixture.store.totalCount == 75)
+        #expect(fixture.store.items.first?.id == items[74].id)
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.count == 75)
+        #expect(Set(fixture.store.items.map(\.id)).count == 75)
+        #expect(!fixture.store.hasMoreItems)
+        await fixture.cleanUp()
+    }
+
+    @Test func keyboardNavigationLoadsTheNextPage() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let items = (0..<65).map {
+            ClipboardItem.text("Item \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
+        await fixture.start()
+        fixture.store.selectedID = items[49].id
+        fixture.store.moveSelection(by: 1)
+        await fixture.store.flush()
+        #expect(fixture.store.selectedID == items[50].id)
+        #expect(fixture.store.items.count == 65)
+        #expect(!fixture.store.hasMoreItems)
+        await fixture.cleanUp()
+    }
+
+    @Test func deletingAPendingDuplicateUsesItsFingerprint() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let original = ClipboardItem.text("Repeated", source: .unknown, at: Date())
+        let repeated = ClipboardItem.text("Repeated", source: .unknown, at: Date())
+        try await persistence.apply([.upsert(original)])
+        try await persistence.apply([.upsert(repeated), .deleteFingerprint(repeated.fingerprint)])
+        #expect(try await persistence.page().totalCount == 0)
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [false, true])
+    func mediaImportedAndClearedInOneTransactionIsCollected(commitFirst: Bool) async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let png = try Self.smallPNG()
+        let first = try await persistence.importImage(png, source: .unknown, at: Date())
+        if commitFirst { try await persistence.apply([.upsert(first), .completeImageImport(first.id)]) }
+        // A second in-flight capture of the same pixels still needs these files.
+        let second = try await persistence.importImage(png, source: .unknown, at: Date())
+        if commitFirst { try await persistence.apply([.settings(isPaused: false, folders: [])]) }
+        let image = try #require(first.image)
+        try await persistence.apply([.upsert(first), .completeImageImport(first.id), .clear])
+        #expect(try await persistence.imageData(image).isEmpty == false)
+        try await persistence.discardImportedImage(second)
+        await #expect(throws: ClipboardStorageError.self) { try await persistence.imageData(image) }
+        await fixture.cleanUp()
+    }
+
+    @Test func equalTimestampsHaveStablePagesAndQueryChangesDiscardOlderResults() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let items = (0..<110).map { ClipboardItem.text("Item \($0)", source: .unknown, at: now) }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
+        await fixture.start()
+        await fixture.store.loadMore()
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.map(\.id) == items.map(\.id))
+        fixture.store.query = "Item 1"
+        fixture.store.query = "Item 109"
+        fixture.store.filter = .links
+        fixture.store.filter = .text
+        await fixture.store.flush()
+        #expect(fixture.store.items.map(\.id) == [items[109].id])
+        #expect(!fixture.store.isSearching)
+        fixture.store.clearHistory()
+        await fixture.restart()
+        #expect(fixture.store.totalCount == 0)
+        await fixture.cleanUp()
+    }
+
+    @Test func databaseMutationsAreIncrementalAndRollBackTogether() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let first = ClipboardItem.text("First", source: .unknown, at: Date())
+        let second = ClipboardItem.text("Second", source: .unknown, at: Date())
+        try await persistence.save(ClipboardHistory(items: [first]))
+        let database = try ClipboardDatabase(url: fixture.directory.appendingPathComponent("history.sqlite"))
+        try database.execute("""
+            CREATE TRIGGER protect_existing_item BEFORE UPDATE ON items
+            WHEN old.id = '\(first.id.uuidString)'
+            BEGIN SELECT RAISE(ABORT, 'Unchanged rows must not be rewritten'); END
+            """)
+        try await persistence.apply([.upsert(second)])
+        var invalid = ClipboardItem.text("Invalid", source: .unknown, at: Date())
+        invalid.kind = .image
+        await #expect(throws: ClipboardStorageError.self) {
+            try await persistence.apply([.delete(first.id), .upsert(invalid)])
+        }
+        #expect(try await persistence.page().totalCount == 2)
+        #expect(try await persistence.item(first.id)?.content == "First")
+        await fixture.cleanUp()
+    }
+
+    @Test func corruptAndFutureDatabasesArePreservedWithoutFallingBackToJSON() async throws {
+        for future in [false, true] {
+            let fixture = try Fixture()
+            let url = fixture.directory.appendingPathComponent("history.sqlite")
+            if future {
+                let database = try ClipboardDatabase(url: url)
+                try database.execute("PRAGMA user_version = 99")
+            } else {
+                try Data("Invalid database".utf8).write(to: url)
+            }
+            let original = try Data(contentsOf: url)
+            try JSONEncoder().encode(ClipboardHistory()).write(to: fixture.directory.appendingPathComponent("history.json"))
+            await fixture.start()
+            #expect(fixture.store.isStorageBlocked)
+            await fixture.copy("Must not overwrite")
+            #expect(try Data(contentsOf: url) == original)
+            await fixture.cleanUp()
+        }
+    }
+
+    @Test func textHashingAndSearchPreserveEmbeddedNulls() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let text = "Before\0After 中文"
+        let item = ClipboardItem.text(text, source: .unknown, at: Date())
+        try await persistence.apply([.upsert(item)])
+        #expect(try await persistence.page(query: "After 中文").items.map(\.id) == [item.id])
+        #expect(try await persistence.item(item.id)?.content == text)
+        await fixture.cleanUp()
+    }
+
     @Test func startupDoesNotImportTheExistingClipboard() async throws {
         let fixture = try Fixture()
         fixture.write("Existing content")
@@ -97,7 +292,8 @@ struct ClipboardTests {
         await fixture.start()
         let accepted = String(repeating: "👩🏽‍💻", count: 2_000)
         await fixture.copy(accepted)
-        #expect(fixture.store.items.first?.content == accepted)
+        #expect(fixture.store.selectedItem?.content == accepted)
+        #expect(fixture.store.items.first?.content.count == 500)
         let oversized = accepted + "x"
         await fixture.copy(oversized)
         #expect(fixture.store.items.count == 1)
@@ -132,6 +328,7 @@ struct ClipboardTests {
         await fixture.copy("https://example.com")
         await fixture.copy("test@example.com")
         fixture.store.query = "hidden-tail"
+        await fixture.store.flush()
         fixture.store.reconcileSelection()
         #expect(fixture.store.filteredItems.count == 1)
         #expect(fixture.store.selectedItem?.previewText.count == 500)
@@ -140,12 +337,14 @@ struct ClipboardTests {
         #expect(fixture.pasteboard.string(forType: .string) == text)
         fixture.store.pollClipboard()
         await fixture.store.flush()
-        #expect(fixture.store.items.count == 3)
+        #expect(fixture.store.totalCount == 3)
         fixture.store.query = ""
         fixture.store.filter = .links
+        await fixture.store.flush()
         fixture.store.reconcileSelection()
         #expect(fixture.store.filteredItems.map(\.kind) == [.link])
         fixture.store.filter = .emails
+        await fixture.store.flush()
         fixture.store.reconcileSelection()
         #expect(fixture.store.filteredItems.map(\.kind) == [.email])
         await fixture.cleanUp()
@@ -225,6 +424,7 @@ struct ClipboardTests {
         #expect(fixture.store.items.first?.id == item.id)
         #expect(fixture.store.items.first?.source.bundleIdentifier == "test.editor")
         fixture.store.query = "Test Editor"
+        await fixture.store.flush()
         #expect(fixture.store.filteredItems.count == 1)
         await fixture.cleanUp()
     }
@@ -246,9 +446,8 @@ struct ClipboardTests {
 
     @Test func unsupportedHistoryVersionIsPreserved() async throws {
         let fixture = try Fixture()
-        let persistence = ClipboardPersistence(directory: fixture.directory)
-        try await persistence.save(ClipboardHistory(version: 99))
         let url = fixture.directory.appendingPathComponent("history.json")
+        try JSONEncoder().encode(ClipboardHistory(version: 99)).write(to: url)
         let original = try Data(contentsOf: url)
         await fixture.start()
         #expect(fixture.store.isStorageBlocked)
@@ -264,14 +463,16 @@ struct ClipboardTests {
         }
         try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
         await fixture.start()
-        #expect(fixture.store.items.count == 1_000)
+        #expect(fixture.store.totalCount == 1_000)
+        #expect(fixture.store.items.count == 50)
         #expect(fixture.store.items.first?.content == "Item 0")
-        #expect(fixture.store.items.last?.content == "Item 999")
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        #expect(try await persistence.page(limit: 1, offset: 999).items.last?.content == "Item 999")
         await fixture.copy("newest")
         await fixture.restart()
-        #expect(fixture.store.items.count == 1_000)
+        #expect(fixture.store.totalCount == 1_000)
         #expect(fixture.store.items.first?.content == "newest")
-        #expect(fixture.store.items.last?.content == "Item 998")
+        #expect(try await persistence.page(limit: 1, offset: 999).items.last?.content == "Item 998")
         await fixture.cleanUp()
     }
 
@@ -321,9 +522,11 @@ struct ClipboardTests {
         #expect(item.files.first?.path == screenshotURL.path)
         #expect(item.image == nil)
         fixture.store.filter = .images
+        await fixture.store.flush()
         fixture.store.reconcileSelection()
         #expect(fixture.store.filteredItems.map(\.id) == [item.id])
         fixture.store.filter = .files
+        await fixture.store.flush()
         #expect(fixture.store.filteredItems.map(\.id) == [item.id])
         await fixture.store.loadThumbnail(for: item)
         await fixture.store.loadPreview(for: item)
@@ -364,6 +567,7 @@ struct ClipboardTests {
         #expect(restored.source.bundleIdentifier == source.bundleIdentifier)
         #expect(restored.copiedAt == item.copiedAt)
         fixture.store.filter = .images
+        await fixture.store.flush()
         #expect(fixture.store.filteredItems.map(\.id) == [item.id])
         await fixture.restart()
         await fixture.store.loadThumbnail(for: try #require(fixture.store.selectedItem))
@@ -524,18 +728,27 @@ struct ClipboardTests {
         await fixture.store.flush()
         let item = try #require(fixture.store.items.first)
         let image = try #require(item.image)
-        let historyURL = fixture.directory.appendingPathComponent("history.json")
+        let historyURL = fixture.directory.appendingPathComponent("history.sqlite")
         let imageURL = fixture.directory.appendingPathComponent("Images").appendingPathComponent(image.fileName)
+        let original = try Data(contentsOf: historyURL)
         try FileManager.default.removeItem(at: historyURL)
         try FileManager.default.createDirectory(at: historyURL, withIntermediateDirectories: false)
         fixture.store.delete(item.id)
         await fixture.store.flush()
         #expect(fixture.store.storageError != nil)
         #expect(FileManager.default.fileExists(atPath: imageURL.path))
+        let text = String(repeating: "a", count: 900) + " unsaved tail"
+        await fixture.copy(text)
+        #expect(fixture.store.selectedItem?.content == text)
         try FileManager.default.removeItem(at: historyURL)
+        try original.write(to: historyURL)
         await fixture.store.retryStorage()
         #expect(fixture.store.storageError == nil)
         #expect(!FileManager.default.fileExists(atPath: imageURL.path))
+        #expect(fixture.store.items.count == 1)
+        #expect(fixture.store.selectedItem?.content == text)
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.pasteboard.string(forType: .string) == text)
         await fixture.cleanUp()
     }
 

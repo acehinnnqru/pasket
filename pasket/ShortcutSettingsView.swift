@@ -310,7 +310,7 @@ struct ShortcutSettingsView: View {
                 shortcutRow(
                     title: "Show Clipboard History",
                     description: "Global · Available in any app",
-                    symbol: "basket",
+                    icon: Image(nsImage: PasketMenuIcon.image),
                     shortcut: shortcuts.shortcut,
                     action: .showHistory
                 )
@@ -318,7 +318,7 @@ struct ShortcutSettingsView: View {
                 shortcutRow(
                     title: "Open Settings",
                     description: "History panel only",
-                    symbol: "gearshape",
+                    icon: Image(systemName: "gearshape"),
                     shortcut: shortcuts.settingsShortcut,
                     action: .openSettings
                 )
@@ -326,7 +326,7 @@ struct ShortcutSettingsView: View {
                 shortcutRow(
                     title: "Delete Selected Item",
                     description: "History panel only · Optional",
-                    symbol: "trash",
+                    icon: Image(systemName: "trash"),
                     shortcut: shortcuts.deletionShortcut,
                     action: .deleteSelectedItem
                 )
@@ -341,12 +341,14 @@ struct ShortcutSettingsView: View {
     }
 
     private func shortcutRow(
-        title: String, description: String, symbol: String,
+        title: String, description: String, icon: Image,
         shortcut: GlobalShortcut?, action: GlobalShortcutManager.RecordingAction
     ) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .regular))
+            icon
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 4) {
@@ -445,8 +447,10 @@ struct PasketSetupView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "basket")
-                    .font(.system(size: 16, weight: .regular))
+                Image(nsImage: PasketMenuIcon.image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 4) {

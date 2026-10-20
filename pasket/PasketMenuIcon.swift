@@ -1,7 +1,8 @@
 import AppKit
 
 enum PasketMenuIcon {
-    // Draw directly at menu-bar scale rather than tracing the detailed Dock artwork.
+    // Share this monochrome mark across the menu bar, history, settings, and setup.
+    // Draw at menu-bar scale rather than tracing the detailed Dock artwork.
     static let image: NSImage = {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
             NSColor.black.setStroke()

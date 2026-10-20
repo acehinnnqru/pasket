@@ -272,8 +272,18 @@ struct ContentView: View {
     @ViewBuilder
     private var emptyState: some View {
         if store.isDebugMode ? store.displayedItems.isEmpty : store.totalCount == 0 {
-            ContentUnavailableView("Your basket is empty", systemImage: "basket",
-                description: Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started."))
+            ContentUnavailableView {
+                Label {
+                    Text("Your basket is empty")
+                } icon: {
+                    Image(nsImage: PasketMenuIcon.image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 48, height: 48)
+                }
+            } description: {
+                Text(store.isPaused ? "Resume collection to save new copies." : "Copy text, an image, or a file to get started.")
+            }
         } else {
             ContentUnavailableView("No matching items", systemImage: "magnifyingglass",
                 description: Text("Try another search or content type."))
@@ -497,7 +507,14 @@ struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             collectionControl
-            Label("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items", systemImage: "basket")
+            Label {
+                Text("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items")
+            } icon: {
+                Image(nsImage: PasketMenuIcon.image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 12, height: 12)
+            }
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)

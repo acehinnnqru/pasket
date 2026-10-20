@@ -7,6 +7,7 @@ nonisolated enum ClipboardMutation: Sendable {
     case touch(UUID, Date)
     case delete(UUID)
     case deleteFingerprint(String)
+    case deleteUnavailableFiles
     case clear
     case completeImageImport(UUID)
     case settings(isPaused: Bool)
@@ -94,6 +95,15 @@ actor ClipboardPersistence {
                 case .delete(let id): try database.execute("DELETE FROM items WHERE id = ?", [.text(id.uuidString)])
                 case .deleteFingerprint(let fingerprint):
                     try database.execute("DELETE FROM items WHERE fingerprint = ?", [.text(fingerprint)])
+                case .deleteUnavailableFiles:
+                    var unavailableIDs: [UUID] = []
+                    try database.query("SELECT payload FROM items WHERE kind = ?", [.text(ClipboardKind.file.rawValue)]) {
+                        let item = try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0))
+                        if !ClipboardFileAccess.areAvailable(item.files) { unavailableIDs.append(item.id) }
+                    }
+                    for id in unavailableIDs {
+                        try database.execute("DELETE FROM items WHERE id = ?", [.text(id.uuidString)])
+                    }
                 case .clear: try database.execute("DELETE FROM items")
                 case .completeImageImport: break
                 case let .settings(paused):

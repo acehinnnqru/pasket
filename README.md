@@ -114,6 +114,9 @@ Pasket never changes your system privacy settings.
   Pasket does not save a copy. Existing image file entries support the same previews. Once the original
   is removed or access expires, the row falls back to the default image icon and the preview is unavailable.
   These entries appear in both Images and Files filters.
+- **Delete Unavailable Files** in the bottom-right More menu checks file references across the entire
+  history, regardless of the current search or filter. It removes an entry if any referenced file is
+  missing or inaccessible, while keeping original files, readable file entries, text, and saved images.
 - Up to 100 file references can be recorded together. Pasket retains paths and read-only
   security-scoped bookmarks when the system grants access, allowing those file references to be
   reopened after relaunch. Existing ordinary bookmarks are upgraded while accessible entries are

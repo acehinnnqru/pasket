@@ -31,6 +31,7 @@ struct ContentView: View {
 
     private var canClearHistory: Bool {
         !store.isDebugMode && store.totalCount > 0 && !store.isLoading && !store.isStorageBlocked
+            && !store.isDeletingUnavailableFiles
     }
 
     var body: some View {
@@ -152,6 +153,8 @@ struct ContentView: View {
                             case .clearHistory:
                                 searchFocused = false
                                 isConfirmingClear = true
+                            case .deleteUnavailableFiles:
+                                Task { await store.deleteUnavailableFiles() }
                             }
                         }, onDismiss: dismissMenus)
                         .padding(.bottom, geometry.size.height - moreControlFrame.minY + 4)
@@ -763,10 +766,30 @@ private struct ClipboardMenuSurface: ViewModifier {
 
 private struct ClipboardMoreActionsMenu: View {
     enum Action: CaseIterable {
-        case clearHistory, settings
+        case deleteUnavailableFiles, clearHistory, settings
 
-        var title: String { self == .settings ? "Settings…" : "Delete All Entries…" }
+        var title: String {
+            switch self {
+            case .deleteUnavailableFiles: "Delete Unavailable Files"
+            case .clearHistory: "Delete All Entries…"
+            case .settings: "Settings…"
+            }
+        }
         var symbol: String { self == .settings ? "gearshape" : "trash" }
+        var help: String {
+            switch self {
+            case .deleteUnavailableFiles: "Remove history entries with unavailable files. Original files are kept."
+            case .clearHistory: "Clear all clipboard history after confirmation"
+            case .settings: "Open Settings"
+            }
+        }
+        var accessibilityIdentifier: String {
+            switch self {
+            case .deleteUnavailableFiles: "deleteUnavailableClipboardFiles"
+            case .clearHistory: "clearClipboardHistory"
+            case .settings: "openPasketSettings"
+            }
+        }
     }
 
     let canClearHistory: Bool
@@ -784,7 +807,7 @@ private struct ClipboardMoreActionsMenu: View {
                 if action == .settings {
                     Divider().padding(.horizontal, 8).padding(.vertical, 4)
                 }
-                Button(role: action == .clearHistory ? .destructive : nil) {
+                Button(role: action == .settings ? nil : .destructive) {
                     onSelect(action)
                 } label: {
                     HStack(spacing: 8) {
@@ -796,7 +819,7 @@ private struct ClipboardMoreActionsMenu: View {
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .foregroundStyle(action == .clearHistory ? Color.red : .primary)
+                    .foregroundStyle(action == .settings ? .primary : Color.red)
                     .padding(.horizontal, 8)
                     .frame(minHeight: 32)
                     .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -816,8 +839,8 @@ private struct ClipboardMoreActionsMenu: View {
                         highlightedAction = nil
                     }
                 }
-                .help(action == .settings ? "Open Settings" : "Clear all clipboard history after confirmation")
-                .accessibilityIdentifier(action == .settings ? "openPasketSettings" : "clearClipboardHistory")
+                .help(action.help)
+                .accessibilityIdentifier(action.accessibilityIdentifier)
             }
         }
         .padding(6)

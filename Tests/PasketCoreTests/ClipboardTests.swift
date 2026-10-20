@@ -86,6 +86,7 @@ struct ClipboardTests {
 
         fixture.store.delete(originalID)
         fixture.store.clearHistory()
+        await fixture.store.deleteUnavailableFiles()
         fixture.store.setPaused(true)
         await fixture.copy("Copied during screenshot mode")
         #expect(fixture.store.items.map(\.id) == [originalID])
@@ -919,6 +920,94 @@ struct ClipboardTests {
         fixture.store.delete(item.id)
         await fixture.store.flush()
         #expect(FileManager.default.fileExists(atPath: urls[1].path))
+        await fixture.cleanUp()
+    }
+
+    @Test func deletingUnavailableFilesScansAllHistoryAndKeepsOriginalFiles() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let originalURL = fixture.directory.appendingPathComponent("Readable.png")
+        let originalData = Data("Readable file without an image preview".utf8)
+        try originalData.write(to: originalURL)
+        let readable = ClipboardFileAccess.capture(originalURL)
+        let missing = ClipboardFile(path: fixture.directory.appendingPathComponent("Missing.txt").path, name: "Missing.txt")
+        let now = Date()
+        let unavailable = ClipboardItem(kind: .file, title: "Missing file", content: missing.path, source: .unknown,
+                                        copiedAt: now.addingTimeInterval(-100), fingerprint: "missing", files: [missing])
+        let partialGroup = ClipboardItem(kind: .file, title: "Partially missing group", content: "Group", source: .unknown,
+                                         copiedAt: now.addingTimeInterval(-101), fingerprint: "group", files: [readable, missing])
+        let available = ClipboardItem(kind: .file, title: "Readable file", content: readable.path, source: .unknown,
+                                      copiedAt: now.addingTimeInterval(-102), fingerprint: "readable", files: [readable])
+        let image = try await persistence.importImage(Self.smallPNG(), source: .unknown, at: now.addingTimeInterval(-103))
+        let texts = (0..<55).map {
+            ClipboardItem.text("Visible text \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await persistence.save(ClipboardHistory(items: texts + [unavailable, partialGroup, available, image]))
+        await fixture.start()
+        #expect(fixture.store.items.count == 50)
+        #expect(!fixture.store.items.contains { $0.kind == .file })
+        fixture.store.filter = .text
+        fixture.store.query = "Visible"
+        await fixture.store.flush()
+        fixture.write("Keep the clipboard unchanged")
+        let changeCount = fixture.pasteboard.changeCount
+
+        await fixture.store.deleteUnavailableFiles()
+        await fixture.store.flush()
+
+        let expectedIDs = Set((texts + [available, image]).map(\.id))
+        #expect(Set(try await persistence.load().items.map(\.id)) == expectedIDs)
+        #expect(fixture.store.totalCount == expectedIDs.count)
+        #expect(fixture.store.matchingCount == texts.count)
+        #expect(fixture.store.filter == .text)
+        #expect(fixture.store.query == "Visible")
+        #expect(fixture.pasteboard.changeCount == changeCount)
+        #expect(try Data(contentsOf: originalURL) == originalData)
+        #expect(try await persistence.imageData(try #require(image.image)).isEmpty == false)
+        #expect(!fixture.store.isDeletingUnavailableFiles)
+        #expect(fixture.store.storageError == nil)
+        await fixture.store.deleteUnavailableFiles()
+        #expect(Set(try await persistence.load().items.map(\.id)) == expectedIDs)
+        await fixture.restart()
+        #expect(fixture.store.totalCount == expectedIDs.count)
+        await fixture.cleanUp()
+    }
+
+    @Test func deletingUnavailableFilesRechecksAvailabilityAndReconcilesSelection() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        await fixture.copy("Keep this text")
+        let textID = try #require(fixture.store.items.first?.id)
+        let url = fixture.directory.appendingPathComponent("Restored.png")
+        try Self.smallPNG().write(to: url)
+        fixture.pasteboard.clearContents()
+        #expect(fixture.pasteboard.writeObjects([url as NSURL]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let file = try #require(fixture.store.items.first)
+        fixture.store.selectedID = file.id
+        try FileManager.default.removeItem(at: url)
+        await fixture.store.refreshFileAvailability()
+        #expect(fixture.store.unavailableItems.contains(file.id))
+        try Self.smallPNG().write(to: url)
+
+        await fixture.store.deleteUnavailableFiles()
+        #expect(fixture.store.items.contains { $0.id == file.id })
+        #expect(!fixture.store.unavailableItems.contains(file.id))
+        await fixture.store.loadThumbnail(for: file)
+        await fixture.store.loadPreview(for: file)
+        #expect(fixture.store.previewID == file.id)
+        try FileManager.default.removeItem(at: url)
+
+        await fixture.store.deleteUnavailableFiles()
+        #expect(fixture.store.items.map(\.id) == [textID])
+        #expect(fixture.store.selectedID == textID)
+        #expect(fixture.store.thumbnails[file.id] == nil)
+        #expect(fixture.store.previewID == nil)
+        #expect(!fixture.store.unavailableItems.contains(file.id))
+        #expect(!fixture.store.missingPreviews.contains(file.id))
+        await fixture.restart()
+        #expect(fixture.store.items.map(\.id) == [textID])
         await fixture.cleanUp()
     }
 

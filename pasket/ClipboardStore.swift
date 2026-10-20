@@ -14,6 +14,7 @@ final class ClipboardStore {
     private(set) var isLoading = true
     private(set) var isPaused = false
     private(set) var isCopying = false
+    private(set) var isDeletingUnavailableFiles = false
     private(set) var clipboardAccessDenied = false
     private(set) var items: [ClipboardItem] = []
     private(set) var totalCount = 0
@@ -300,6 +301,20 @@ final class ClipboardStore {
         totalCount = max(0, totalCount - 1)
         matchingCount = max(0, matchingCount - 1)
         persist([.deleteFingerprint(deleted.fingerprint)])
+    }
+
+    func deleteUnavailableFiles() async {
+        guard !isDebugMode, !storageBlocked, !isLoading, !isDeletingUnavailableFiles else { return }
+        isDeletingUnavailableFiles = true
+        defer { isDeletingUnavailableFiles = false }
+        // Finish existing captures so an older capture cannot restore a removed entry.
+        await flush()
+        guard !isDebugMode, !storageBlocked, storageError == nil else { return }
+        persist([.deleteUnavailableFiles])
+        await saveTask?.value
+        guard storageError == nil else { return }
+        await refreshFileAvailability()
+        notice = "Unavailable file entries removed."
     }
 
     func clearHistory() {

@@ -44,6 +44,62 @@ struct ShortcutTests {
         #expect(GlobalShortcutManager(defaults: defaults).deletionShortcut == shortcut)
     }
 
+    @Test func settingsDefaultsToCommandCommaAndPersistsChangesAndClearing() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        let comma = try keyEvent(code: kVK_ANSI_Comma, modifiers: .command, characters: ",")
+        #expect(manager.settingsShortcut?.matches(comma) == true)
+        #expect(manager.settingsShortcut?.displayName == "⌘,")
+
+        let custom = GlobalShortcut(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey | optionKey), keyLabel: "S")
+        #expect(manager.setSettingsShortcut(custom))
+        #expect(!manager.settingsShortcut!.matches(comma))
+        #expect(GlobalShortcutManager(defaults: defaults).settingsShortcut == custom)
+        #expect(manager.setSettingsShortcut(nil))
+        #expect(GlobalShortcutManager(defaults: defaults).settingsShortcut == nil)
+        #expect(manager.setSettingsShortcut(.defaultSettings))
+        #expect(GlobalShortcutManager(defaults: defaults).settingsShortcut == .defaultSettings)
+    }
+
+    @Test func settingsAndDeletionRejectConflictsWithoutChangingSavedBindings() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        #expect(!manager.setSettingsShortcut(manager.shortcut))
+        #expect(!manager.setDeletionShortcut(.defaultSettings))
+        #expect(manager.deletionShortcut == nil)
+        let deletion = GlobalShortcut(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey | optionKey), keyLabel: "⌫")
+        #expect(manager.setDeletionShortcut(deletion))
+        #expect(!manager.setSettingsShortcut(deletion))
+        #expect(manager.settingsShortcut == .defaultSettings)
+        let restored = GlobalShortcutManager(defaults: defaults)
+        #expect(restored.settingsShortcut == .defaultSettings)
+        #expect(restored.deletionShortcut == deletion)
+    }
+
+    @Test func introducingSettingsPreservesExistingCommandCommaBindings() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let data = try JSONEncoder().encode(GlobalShortcut.defaultSettings)
+        defaults.set(data, forKey: "deleteSelectedItemShortcut")
+        let manager = GlobalShortcutManager(defaults: defaults)
+        #expect(manager.settingsShortcut == nil)
+        #expect(manager.deletionShortcut == .defaultSettings)
+        #expect(!manager.setSettingsShortcut(.defaultSettings))
+        #expect(manager.setDeletionShortcut(nil))
+        #expect(manager.setSettingsShortcut(.defaultSettings))
+
+        defaults.removeObject(forKey: "deleteSelectedItemShortcut")
+        defaults.set(data, forKey: "globalInvocationShortcut")
+        let restored = GlobalShortcutManager(defaults: defaults)
+        #expect(restored.shortcut == .defaultSettings)
+        #expect(restored.settingsShortcut == nil)
+    }
+
     private func keyEvent(code: Int, modifiers: NSEvent.ModifierFlags, characters: String) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,

@@ -121,6 +121,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func showSettings() {
+        let screen = (panel?.isVisible == true ? panel?.screen : nil)
+            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
         hidePanel(restorePreviousApplication: false)
         if settingsWindow == nil {
             let window = SettingsWindow(
@@ -141,8 +144,13 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 store: store,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
             ))
-            window.center()
             settingsWindow = window
+        }
+        if let window = settingsWindow, let visibleFrame = screen?.visibleFrame {
+            window.setFrameOrigin(NSPoint(
+                x: visibleFrame.midX - window.frame.width / 2,
+                y: visibleFrame.midY - window.frame.height / 2
+            ))
         }
         NSApplication.shared.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)

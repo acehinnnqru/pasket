@@ -23,6 +23,7 @@ struct ShortcutSettingsView: View {
 
                     VStack(spacing: 8) {
                         historyShortcutCard
+                        settingsShortcutCard
                         deletionShortcutCard
                     }
 
@@ -115,6 +116,35 @@ struct ShortcutSettingsView: View {
                 Button("Restore Default") { shortcuts.restoreDefault() }
                     .buttonStyle(PasketButtonStyle())
                     .disabled(shortcuts.shortcut == .default)
+            }
+            .font(.system(size: 12))
+            .padding(.leading, 12)
+            .padding(.trailing, 3)
+            .padding(.vertical, 4)
+        }
+        .modifier(SettingsCard())
+    }
+
+    private var settingsShortcutCard: some View {
+        VStack(spacing: 0) {
+            shortcutRow(
+                title: "Open Settings",
+                description: "Open Settings from your clipboard history.",
+                symbol: "gearshape",
+                shortcut: shortcuts.settingsShortcut,
+                action: .openSettings
+            )
+            Divider().opacity(0.35)
+            HStack {
+                Label("History panel only · Default: ⌘,", systemImage: "rectangle")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") { shortcuts.setSettingsShortcut(nil) }
+                    .buttonStyle(PasketButtonStyle())
+                    .disabled(shortcuts.settingsShortcut == nil)
+                Button("Restore Default") { shortcuts.setSettingsShortcut(.defaultSettings) }
+                    .buttonStyle(PasketButtonStyle())
+                    .disabled(shortcuts.settingsShortcut == .defaultSettings)
             }
             .font(.system(size: 12))
             .padding(.leading, 12)
@@ -272,8 +302,7 @@ struct ShortcutSettingsView: View {
             VStack(spacing: 4) {
                 Text("Record a shortcut")
                     .font(.system(size: 16, weight: .medium))
-                Text(shortcuts.recordingAction == .deleteSelectedItem
-                     ? "Delete Selected Item" : "Show Clipboard History")
+                Text(shortcuts.recordingAction.title)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }

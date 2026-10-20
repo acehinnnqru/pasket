@@ -67,8 +67,16 @@ struct ContentView: View {
         }
         .background {
             ShortcutEventMonitor { event in
-                guard !isMenuPresented, !isConfirmingClear, !shortcuts.isRecording,
-                      shortcuts.deletionShortcut?.matches(event) == true else { return false }
+                guard !isConfirmingClear, !shortcuts.isRecording else { return false }
+                if shortcuts.settingsShortcut?.matches(event) == true {
+                    if !event.isARepeat {
+                        dismissMenus()
+                        searchFocused = false
+                        onOpenSettings()
+                    }
+                    return true
+                }
+                guard !isMenuPresented, shortcuts.deletionShortcut?.matches(event) == true else { return false }
                 if !event.isARepeat, !store.isLoading, !store.isStorageBlocked,
                    let item = store.selectedItem {
                     store.delete(item.id)

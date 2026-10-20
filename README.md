@@ -26,10 +26,16 @@ Pasket lives in the menu bar and opens its history panel at launch.
   entries, selecting text, and dragging other content do not move the window.
 - Open the **…** menu after **Copy** and choose **Settings…** to change the global shortcut.
   Preferences persist; registration failures are shown.
+  Settings opens centered on the history panel's display each time, including when reusing an
+  existing settings window. When history is hidden, it uses the display under the pointer.
+- **Command + ,** opens Settings from the history panel. Change **Open Settings** in Settings,
+  use **Restore Default** to return to Command + comma, or **Clear** to disable it. The menu bar
+  uses the same binding. Settings, history, and deletion shortcuts must use different combinations.
+  Existing history or deletion bindings take priority if they already use Command + comma.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
   per key press. No deletion shortcut is assigned by default; use **Clear** in Settings to disable it.
-  The delete shortcut and the global history shortcut must use different combinations.
+  The delete shortcut must differ from the history and settings shortcuts.
 - Click the status light in the panel footer to pause or resume collection, or use the menu bar.
   While collecting, a small dot in the app's accent color gently brightens and dims every 2.8 seconds,
   with the Soft glow treatment: a matching halo strengthens and softens in sync. The icon does not move.
@@ -134,6 +140,13 @@ For the desktop smoke test:
    while preserving the search text and caret, does not repeatedly delete when held, and does
    nothing in Settings or while a filter menu or confirmation is open. Test recording cancellation,
    rejecting the global history shortcut, and clearing the binding. Relaunch to verify persistence.
+   Press Command + comma in the history search field to open Settings. Change Open Settings,
+   verify the new binding works and the previous one stops working, then test clearing, restoring
+   the default, conflict rejection, and persistence after relaunch. Recording and confirmation
+   dialogs must not invoke the settings shortcut.
+   With multiple displays, open history on each display and invoke Settings with both its shortcut
+   and the **…** menu. Settings must follow history even if it was previously opened on another
+   display. With history hidden, open Settings from the menu bar and check the pointer's display.
 8. Quit and relaunch to verify history persistence; test pause/resume separately.
 9. Using a trackpad, click and slightly drag both selected and unselected rows, select preview text,
    and interact with search, filters, and footer controls; the window should stay in place. Move the

@@ -327,6 +327,8 @@ struct ContentView: View {
                 if let id = store.selectedID { proxy.scrollTo(id) }
             }
         }
+        // Reset scrolling even when reopening keeps the same selected item.
+        .id(store.presentationID)
         .onChange(of: store.query) { store.reconcileSelection() }
         .onChange(of: store.filter) { store.reconcileSelection() }
     }

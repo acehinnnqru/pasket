@@ -84,6 +84,14 @@ nonisolated final class ClipboardDatabase {
         return String(decoding: UnsafeBufferPointer(start: bytes, count: Int(sqlite3_column_bytes(statement, column))), as: UTF8.self)
     }
 
+    static func int(_ statement: OpaquePointer, _ column: Int32) -> Int {
+        Int(sqlite3_column_int64(statement, column))
+    }
+
+    static func real(_ statement: OpaquePointer, _ column: Int32) -> Double {
+        sqlite3_column_double(statement, column)
+    }
+
     static func data(_ statement: OpaquePointer, _ column: Int32) -> Data {
         guard let bytes = sqlite3_column_blob(statement, column) else { return Data() }
         return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column)))

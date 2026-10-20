@@ -459,23 +459,23 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
-    @Test func retentionKeepsTheNewestThousandRecords() async throws {
+    @Test func retentionKeepsTheNewest2026Records() async throws {
         let fixture = try Fixture()
-        let items = (0..<1_001).map {
+        let items = (0..<2_027).map {
             ClipboardItem.text("Item \($0)", source: .unknown, at: Date().addingTimeInterval(-Double($0)))
         }
         try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
         await fixture.start()
-        #expect(fixture.store.totalCount == 1_000)
+        #expect(fixture.store.totalCount == 2_026)
         #expect(fixture.store.items.count == 50)
         #expect(fixture.store.items.first?.content == "Item 0")
         let persistence = ClipboardPersistence(directory: fixture.directory)
-        #expect(try await persistence.page(limit: 1, offset: 999).items.last?.content == "Item 999")
+        #expect(try await persistence.page(limit: 1, offset: 2_025).items.last?.content == "Item 2025")
         await fixture.copy("newest")
         await fixture.restart()
-        #expect(fixture.store.totalCount == 1_000)
+        #expect(fixture.store.totalCount == 2_026)
         #expect(fixture.store.items.first?.content == "newest")
-        #expect(try await persistence.page(limit: 1, offset: 999).items.last?.content == "Item 998")
+        #expect(try await persistence.page(limit: 1, offset: 2_025).items.last?.content == "Item 2024")
         await fixture.cleanUp()
     }
 
@@ -717,7 +717,7 @@ struct ClipboardTests {
         try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: items))
         await fixture.start()
         #expect(fixture.store.items.count == 25)
-        #expect(fixture.store.imageStorageBytes == ClipboardLimits.totalImageBytes)
+        #expect(fixture.store.imageStorageBytes == ClipboardRetention.default.maximumImageBytes)
         #expect(fixture.store.items.last?.title == "Image 24")
         await fixture.cleanUp()
     }

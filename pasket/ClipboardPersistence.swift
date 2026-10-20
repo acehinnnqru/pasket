@@ -10,6 +10,7 @@ nonisolated enum ClipboardMutation: Sendable {
     case clear
     case completeImageImport(UUID)
     case settings(isPaused: Bool, folders: [ClipboardFile])
+    case maintenance
 }
 
 nonisolated struct ClipboardPage: Sendable {
@@ -17,10 +18,11 @@ nonisolated struct ClipboardPage: Sendable {
     var matchingCount: Int
     var totalCount: Int
     var imageBytes: Int
+    var textBytes: Int
 }
 
 nonisolated enum ClipboardStorageError: LocalizedError {
-    case unsupportedVersion, invalidImage, largeImage, invalidHistory, missingImage
+    case unsupportedVersion, invalidImage, largeImage, invalidHistory, missingImage, imageBudget, invalidRetention
 
     var errorDescription: String? {
         switch self {
@@ -29,6 +31,8 @@ nonisolated enum ClipboardStorageError: LocalizedError {
         case .largeImage: "Image not saved: the limit is 20 MB and 40 million pixels."
         case .invalidHistory: "The history file is damaged. It has been left unchanged."
         case .missingImage: "This saved image is unavailable. You can delete its history entry."
+        case .imageBudget: "Image not saved: the image and its thumbnail exceed your image storage limit. Existing history has been kept."
+        case .invalidRetention: "History limits must be positive whole numbers or Unlimited."
         }
     }
 }
@@ -93,7 +97,11 @@ actor ClipboardPersistence {
                 case .clear: try database.execute("DELETE FROM items")
                 case .completeImageImport: break
                 case let .settings(paused, folders):
-                    try writeSettings(ClipboardHistory(isPaused: paused, authorizedFolders: folders), in: database)
+                    var history = try settings(in: database)
+                    history.isPaused = paused
+                    history.authorizedFolders = folders
+                    try writeSettings(history, in: database)
+                case .maintenance: break
                 }
             }
             try enforceLimits(in: database)
@@ -129,17 +137,21 @@ actor ClipboardPersistence {
         }
         return ClipboardPage(items: items, matchingCount: try database.integer("SELECT COUNT(*) FROM items" + clause, values),
                              totalCount: try database.integer("SELECT COUNT(*) FROM items"),
-                             imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"))
+                             imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"),
+                             textBytes: try database.integer("SELECT COALESCE(SUM(text_bytes), 0) FROM items"))
     }
 
     private func validate(_ history: ClipboardHistory) throws {
         guard history.version == 1 else { throw ClipboardStorageError.unsupportedVersion }
+        guard history.retention?.isValid != false else { throw ClipboardStorageError.invalidRetention }
         guard Set(history.items.map(\.id)).count == history.items.count,
               Set(history.authorizedFolders.map(\.path)).count == history.authorizedFolders.count,
               history.authorizedFolders.allSatisfy({ $0.isSecurityScoped == true && $0.bookmark != nil }),
               history.items.allSatisfy({ item in
                   if let image = item.image {
-                      return item.kind == .image && validImageNames(image) && image.byteCount >= 0 && image.thumbnailByteCount >= 0
+                      return item.kind == .image && validImageNames(image) && image.byteCount >= 0
+                          && image.byteCount <= ClipboardLimits.imageBytes && image.thumbnailByteCount >= 0
+                          && image.thumbnailByteCount <= ClipboardLimits.imageBytes
                   }
                   if item.kind == .image { return false }
                   if item.kind == .file { return !item.files.isEmpty }
@@ -204,7 +216,8 @@ actor ClipboardPersistence {
     }
 
     private func writeSettings(_ history: ClipboardHistory, in database: ClipboardDatabase) throws {
-        let settings = ClipboardHistory(isPaused: history.isPaused, authorizedFolders: history.authorizedFolders)
+        let settings = ClipboardHistory(isPaused: history.isPaused, authorizedFolders: history.authorizedFolders,
+                                        retention: history.retention)
         try validate(settings)
         try database.execute("INSERT OR REPLACE INTO settings(id, payload) VALUES(1, ?)", [.blob(try JSONEncoder().encode(settings))])
     }
@@ -249,16 +262,105 @@ actor ClipboardPersistence {
     }
 
     private func enforceLimits(in database: ClipboardDatabase) throws {
-        // A prefix of the newest rows preserves the existing retention semantics.
-        try database.execute("""
-            DELETE FROM items WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER recent AS item_count,
-                        SUM(text_bytes) OVER recent AS text_total, SUM(image_bytes) OVER recent AS image_total
-                    FROM items WINDOW recent AS (ORDER BY copied_at DESC, position DESC, id ROWS UNBOUNDED PRECEDING)
-                ) WHERE item_count > ? OR text_total > ? OR image_total > ?
-            )
-            """, [.integer(ClipboardLimits.items), .integer(ClipboardLimits.textBytes), .integer(ClipboardLimits.totalImageBytes)])
+        guard let retention = try settings(in: database).retention else { return }
+        try delete(retentionPlan(retention, in: database, now: Date()), in: database)
+    }
+
+    func previewRetention(_ retention: ClipboardRetention, now: Date = Date()) throws -> ClipboardRetentionPlan {
+        guard retention.isValid else { throw ClipboardStorageError.invalidRetention }
+        return try retentionPlan(retention, in: openDatabase(), now: now)
+    }
+
+    // The preview is checked again inside the same transaction that saves settings and deletes rows.
+    // Even a different set of victims with the same count and size requires another confirmation.
+    func applyRetention(_ retention: ClipboardRetention, confirmed: ClipboardRetentionPlan? = nil,
+                        now: Date = Date()) throws -> ClipboardRetentionResult {
+        guard retention.isValid else { throw ClipboardStorageError.invalidRetention }
+        let database = try openDatabase()
+        var result = ClipboardRetentionResult.applied
+        try database.transaction {
+            let plan = try retentionPlan(retention, in: database, now: now)
+            if plan.count > 0, plan != confirmed {
+                result = .confirmationRequired(plan)
+                return
+            }
+            var history = try settings(in: database)
+            history.retention = retention
+            try writeSettings(history, in: database)
+            try delete(plan, in: database)
+        }
+        if case .applied = result { try didCommit(in: database) }
+        return result
+    }
+
+    private func retentionPlan(_ retention: ClipboardRetention, in database: ClipboardDatabase,
+                               now: Date) throws -> ClipboardRetentionPlan {
+        var entries: [ClipboardRetentionEntry] = []
+        try database.query("""
+            SELECT id, copied_at, text_bytes, image_bytes,
+                length(payload) + length(summary) + length(CAST(content AS BLOB))
+                + length(CAST(title AS BLOB)) + length(CAST(source_name AS BLOB))
+                + length(CAST(source_bundle AS BLOB)) + length(CAST(fingerprint AS BLOB)),
+                image_name, thumbnail_name
+            FROM items ORDER BY copied_at DESC, position DESC, id
+            """) { row in
+            entries.append(ClipboardRetentionEntry(
+                id: ClipboardDatabase.text(row, 0), copiedAt: Date(timeIntervalSinceReferenceDate: ClipboardDatabase.real(row, 1)),
+                textBytes: ClipboardDatabase.int(row, 2), imageBytes: ClipboardDatabase.int(row, 3),
+                recordBytes: ClipboardDatabase.int(row, 4), imageName: ClipboardDatabase.text(row, 5),
+                thumbnailName: ClipboardDatabase.text(row, 6)))
+        }
+        let cutoff = retention.maximumAgeDays.map { now.addingTimeInterval(-Double($0) * 86_400) }
+        var remainingText = retention.maximumTextBytes ?? Int.max
+        var remainingImages = retention.maximumImageBytes ?? Int.max
+        var remainingItems = retention.maximumItems ?? Int.max
+        var textExceeded = false
+        var imagesExceeded = false
+        var deleted: [ClipboardRetentionEntry] = []
+        var survivingImages: Set<String> = []
+        for entry in entries {
+            var remove = cutoff.map { entry.copiedAt < $0 } ?? false
+            if !remove, entry.textBytes > 0 {
+                textExceeded = textExceeded || entry.textBytes > remainingText
+                remove = textExceeded
+                if !remove { remainingText -= entry.textBytes }
+            }
+            if !remove, entry.imageBytes > 0 {
+                imagesExceeded = imagesExceeded || entry.imageBytes > remainingImages
+                remove = imagesExceeded
+                if !remove { remainingImages -= entry.imageBytes }
+            }
+            if !remove {
+                remove = remainingItems == 0
+                if !remove { remainingItems -= 1 }
+            }
+            if remove { deleted.append(entry) }
+            else if !entry.imageName.isEmpty {
+                survivingImages.insert(entry.imageName)
+                survivingImages.insert(entry.thumbnailName)
+            }
+        }
+        // Database records contain bookmarks and metadata, never the referenced original file bytes.
+        // Shared or in-flight image files will not be released by this cleanup.
+        let pending = pendingImages.values.reduce(into: Set<String>()) { $0.formUnion($1) }
+        var countedImages = survivingImages.union(pending)
+        var bytes = 0
+        for entry in deleted {
+            bytes += entry.recordBytes
+            for name in [entry.imageName, entry.thumbnailName] where isManagedImageName(name) {
+                if countedImages.insert(name).inserted,
+                   let size = try? mediaDirectory.appendingPathComponent(name).resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    bytes += size
+                }
+            }
+        }
+        return ClipboardRetentionPlan(settings: retention, entries: deleted, estimatedBytes: bytes)
+    }
+
+    private func delete(_ plan: ClipboardRetentionPlan, in database: ClipboardDatabase) throws {
+        for entry in plan.entries {
+            try database.execute("DELETE FROM items WHERE id = ?", [.text(entry.id)])
+        }
     }
 
     private func didCommit(in database: ClipboardDatabase) throws {
@@ -269,6 +371,13 @@ actor ClipboardPersistence {
         }
         committedImageNames = names
         try cleanImages()
+        // Reclaim substantial free space without compacting the database on every copy.
+        let pageSize = try database.integer("PRAGMA page_size")
+        let freePages = try database.integer("PRAGMA freelist_count")
+        let totalPages = try database.integer("PRAGMA page_count")
+        if freePages > 0, freePages >= totalPages / 4, freePages * pageSize >= 4 * ClipboardRetention.mebibyte {
+            try database.execute("VACUUM")
+        }
     }
 
     func importImage(_ data: Data, source: ClipboardSource, at date: Date) throws -> ClipboardItem {
@@ -306,6 +415,11 @@ actor ClipboardPersistence {
         let hash = ClipboardItem.digest(png as Data)
         let payload = ClipboardImage(fileName: hash + ".png", thumbnailName: hash + ".thumb.png",
                                      byteCount: png.length, thumbnailByteCount: thumbnailData.length, width: image.width, height: image.height)
+        if FileManager.default.fileExists(atPath: databaseURL.path),
+           let budget = try settings(in: openDatabase()).retention?.maximumImageBytes,
+           payload.byteCount + payload.thumbnailByteCount > budget {
+            throw ClipboardStorageError.imageBudget
+        }
         let item = ClipboardItem(kind: .image, title: "Image · \(image.width) × \(image.height)", content: "\(image.width) × \(image.height)",
                                  source: source, copiedAt: date, fingerprint: "image:" + hash, image: payload)
         try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)

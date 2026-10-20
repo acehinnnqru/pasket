@@ -51,6 +51,16 @@ struct ContentView: View {
                 .padding(.vertical, 8)
                 .background(.orange.opacity(0.1))
             }
+            if !store.isDebugMode, store.needsRetentionReview {
+                HStack {
+                    Label("Review history limits to enable automatic cleanup. Existing history has been kept.", systemImage: "info.circle")
+                        .font(.caption)
+                    Spacer()
+                    Button("Review Settings…", action: onOpenSettings)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(.orange.opacity(0.1))
+            }
             HStack(spacing: 0) {
                 historyList.frame(width: 292)
                 Divider().opacity(0.45)
@@ -482,7 +492,7 @@ struct ContentView: View {
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .help("Up to 1,000 items. Text is limited to 2,000 characters; image storage to 500 MB.")
+                .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
             Spacer()
             #if DEBUG
             Toggle("Debug mode", isOn: Binding(get: { store.isDebugMode }, set: { enabled in

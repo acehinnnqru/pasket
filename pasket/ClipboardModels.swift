@@ -122,15 +122,19 @@ nonisolated struct ClipboardHistory: Codable, Sendable {
     var isPaused = false
     var items: [ClipboardItem] = []
     var authorizedFolders: [ClipboardFile] = []
+    // Missing settings identify an upgrade that must be reviewed before cleanup begins.
+    var retention: ClipboardRetention? = .default
 
-    init(version: Int = 1, isPaused: Bool = false, items: [ClipboardItem] = [], authorizedFolders: [ClipboardFile] = []) {
+    init(version: Int = 1, isPaused: Bool = false, items: [ClipboardItem] = [], authorizedFolders: [ClipboardFile] = [],
+         retention: ClipboardRetention? = .default) {
         self.version = version
         self.isPaused = isPaused
         self.items = items
         self.authorizedFolders = authorizedFolders
+        self.retention = retention
     }
 
-    private enum CodingKeys: String, CodingKey { case version, isPaused, items, authorizedFolders }
+    private enum CodingKeys: String, CodingKey { case version, isPaused, items, authorizedFolders, retention }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -138,6 +142,7 @@ nonisolated struct ClipboardHistory: Codable, Sendable {
         isPaused = try container.decode(Bool.self, forKey: .isPaused)
         items = try container.decode([ClipboardItem].self, forKey: .items)
         authorizedFolders = try container.decodeIfPresent([ClipboardFile].self, forKey: .authorizedFolders) ?? []
+        retention = try container.decodeIfPresent(ClipboardRetention.self, forKey: .retention)
     }
 }
 
@@ -178,9 +183,6 @@ nonisolated struct ClipboardHistorySection: Identifiable, Sendable {
 
 nonisolated enum ClipboardLimits {
     static let textCharacters = 2_000
-    static let items = 1_000
-    static let textBytes = 50 * 1_024 * 1_024
     static let imageBytes = 20 * 1_024 * 1_024
-    static let totalImageBytes = 500 * 1_024 * 1_024
     static let imagePixels = 40_000_000
 }

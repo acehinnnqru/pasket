@@ -18,6 +18,11 @@ final class ClipboardStore {
     private(set) var totalCount = 0
     private(set) var matchingCount = 0
     private(set) var imageStorageBytes = 0
+    private(set) var textStorageBytes = 0
+    private(set) var retentionSettings = ClipboardRetention.default
+    private(set) var needsRetentionReview = false
+    private(set) var retentionError: String?
+    private(set) var isApplyingRetention = false
     private(set) var isSearching = false
     private(set) var isLoadingMore = false
     private var selectedDetail: ClipboardItem?
@@ -66,6 +71,8 @@ final class ClipboardStore {
     @ObservationIgnored private var loadedLimit = 50
     @ObservationIgnored private var navigationTask: Task<Void, Never>?
     @ObservationIgnored private var advanceAfterLoading: UUID?
+    @ObservationIgnored private var retentionTimer: Timer?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     private let pageSize = 50
 
     init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general) {
@@ -103,17 +110,23 @@ final class ClipboardStore {
         if !stopRequested { monitor.start() }
         monitor.setPaused(shouldPauseMonitoring)
         await refreshFileAvailability()
+        if !stopRequested { startRetentionChecks() }
     }
 
     func stop() {
         stopRequested = true
         monitor.stop()
+        retentionTimer?.invalidate()
+        retentionTimer = nil
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
     }
 
     func resumeMonitoring() {
         stopRequested = false
         monitor.start()
         monitor.setPaused(shouldPauseMonitoring)
+        startRetentionChecks()
     }
 
     private func load() async {
@@ -122,8 +135,16 @@ final class ClipboardStore {
             let history = try await persistence.loadSettings()
             isPaused = history.isPaused
             authorizedFolders = history.authorizedFolders
+            retentionSettings = history.retention ?? .default
+            needsRetentionReview = history.retention == nil
             storageBlocked = false
             storageError = nil
+            if needsRetentionReview {
+                let result = try await persistence.applyRetention(.default)
+                if case .applied = result { needsRetentionReview = false }
+            } else {
+                try await persistence.apply([.maintenance])
+            }
             try await refreshResults()
         } catch {
             storageBlocked = true
@@ -149,6 +170,50 @@ final class ClipboardStore {
         monitor.setPaused(shouldPauseMonitoring)
         notice = nil
         persist([.settings(isPaused: isPaused, folders: authorizedFolders)])
+    }
+
+    func applyRetention(_ settings: ClipboardRetention,
+                        confirmed: ClipboardRetentionPlan? = nil) async -> ClipboardRetentionPlan? {
+        guard !isDebugMode, !isLoading, !storageBlocked, !isApplyingRetention else { return nil }
+        isApplyingRetention = true
+        defer { isApplyingRetention = false }
+        retentionError = nil
+        await flush()
+        guard pendingMutations.isEmpty, storageError == nil else {
+            retentionError = "Save pending history changes before applying history limits."
+            return nil
+        }
+        do {
+            let result = try await persistence.applyRetention(settings, confirmed: confirmed)
+            switch result {
+            case .confirmationRequired(let plan): return plan
+            case .applied:
+                retentionSettings = settings
+                needsRetentionReview = false
+                try await refreshResults()
+            }
+        } catch {
+            retentionError = "Could not apply history limits. \(error.localizedDescription)"
+        }
+        return nil
+    }
+
+    func checkRetention() async {
+        guard !stopRequested, !isDebugMode, !isLoading, !storageBlocked, !needsRetentionReview else { return }
+        persist([.maintenance])
+        await saveTask?.value
+    }
+
+    private func startRetentionChecks() {
+        guard retentionTimer == nil else { return }
+        retentionTimer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.checkRetention() }
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.checkRetention() }
+        }
     }
 
     func prepareForPresentation() {
@@ -535,6 +600,12 @@ final class ClipboardStore {
                     if item.image != nil { try await persistence.discardImportedImage(item) }
                     return
                 }
+                if item.image != nil, !needsRetentionReview,
+                   let budget = retentionSettings.maximumImageBytes, item.imageByteCount > budget {
+                    try await persistence.discardImportedImage(item)
+                    notice = ClipboardStorageError.imageBudget.localizedDescription
+                    return
+                }
                 insert(item)
             } catch {
                 if generation == captureGeneration { notice = error.localizedDescription }
@@ -615,6 +686,7 @@ final class ClipboardStore {
         totalCount = page.totalCount
         matchingCount = page.matchingCount
         imageStorageBytes = page.imageBytes
+        textStorageBytes = page.textBytes
         selectedDetail = nil
         pruneCaches()
         reconcileSelection()

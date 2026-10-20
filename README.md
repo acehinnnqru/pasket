@@ -102,10 +102,38 @@ Pasket never changes your system privacy settings.
   users add or remove them. Removing a saved folder grant does not delete files or history, and
   independent file grants may still provide access. Deleted originals remain unavailable; granting
   folder access cannot restore deleted files. Deleting history never deletes the original files.
-- Keep up to **1,000 entries**, **50 MiB of text bodies**, and **500 MiB of images including thumbnails**.
-  Oldest entries are evicted when a limit is reached. Saved image files are removed only after
-  updated history is written successfully. Deleting, clearing, and skipping oversized entries leave
-  the system clipboard unchanged.
+- By default, keep up to **2,026 entries**, **50 MiB of text bodies**, **500 MiB of images including
+  thumbnails**, and **60 days of history**. Settings → History lets you change each limit or choose
+  Unlimited independently. All four settings are shown together, with current record count and
+  text/image usage beside their inputs. Custom input fields align numbers and units in fixed columns;
+  the entire input surface, including its unit label and padding, can be clicked to start editing.
+  Clicking outside an input or pressing Return dismisses input focus. Unsaved edits are labeled,
+  and Apply uses a solid accent background whenever valid changes are ready to save.
+  Text storage includes text, links, and email bodies. File groups count as one entry; their original
+  file sizes are excluded. Single-entry collection limits still apply.
+- Cleanup first removes expired entries, then the oldest text entries when text storage is over its
+  limit, then the oldest images when image storage is over its limit, and finally the oldest remaining
+  entries when the record count is over its limit. Age and eviction order use the latest copy time;
+  copying an entry renews its age, while searching or viewing it does not. Days are elapsed 24-hour
+  periods. An incoming image that cannot fit its entire image budget, including its thumbnail, is
+  skipped with a notice without evicting existing history.
+- History limit edits remain drafts until **Apply**. If applying would delete anything, a second
+  confirmation shows the number of entries and estimated storage to release, with both numbers in
+  bold accent color. **Cancel** keeps the draft and leaves saved settings and history unchanged;
+  **Apply and Delete** saves the settings and deletes the confirmed entries in one transaction.
+  If the affected entries or storage estimate change before confirmation, review and confirm the
+  updated impact again. Restore Defaults only changes the draft and also requires Apply.
+- Cleanup runs at startup, after history writes, when limits are applied, every hour while running,
+  and after waking from sleep, including while collection is paused. Upgrades without saved history
+  limits keep existing entries and ask for review in Settings if adopting the defaults would delete
+  anything; automatic cleanup remains disabled until limits are applied. If no deletion is needed,
+  the defaults are adopted automatically.
+- Saved image files are removed only after updated history is written successfully. Deleting,
+  clearing, and skipping oversized entries leave the system clipboard unchanged. Folder grants and
+  original files are retained. Text and image quotas measure saved content; database metadata,
+  indexes, and free pages add overhead. Cleanup estimates include saved database record contents
+  and existing image files, excluding original files, shared images, and in-flight imports. Substantial
+  database free space is compacted after successful writes.
 
 ## Local storage
 
@@ -140,6 +168,9 @@ full-body search and copy, classification, source persistence, pause/resume, res
 retention, damaged history, images and thumbnails, storage failures, and file references. SQLite
 coverage includes legacy migration, transaction rollback, incremental writes, pagination, searches
 of unloaded bodies, Unicode matching, and stable identities when repeating an unloaded entry.
+Retention coverage includes category-specific eviction, overlapping limits, unlimited settings,
+confirmation previews, changed victims with identical counts and sizes, expiry during confirmation,
+copy renewal, upgrade review, paused maintenance, and rollback that preserves settings and images.
 
 For the desktop smoke test:
 
@@ -189,6 +220,23 @@ For the desktop smoke test:
 11. In Settings → File Access, add a folder, reauthorize it without creating a duplicate, and remove
     its saved grant. Confirm original files and history remain intact and the folder list persists
     after relaunch. Check grant creation failure feedback on a folder the app cannot authorize.
+12. In Settings → History, verify all four settings are visible with their default values (2,026 entries,
+    50 MiB text, 500 MiB images, 60 days), independent Unlimited controls, and active usage. Enter
+    zero, a negative number, a fraction, or an overflowing value and verify Apply is disabled.
+    Reduce a limit enough to delete history and click Apply: verify the confirmation displays the
+    entry count and estimated storage in bold accent color. Cancel with both the button and Escape;
+    saved limits and history must stay unchanged, with the draft still present. Confirm with Apply
+    and Delete, verify matching cleanup and persistence after relaunch, and test Restore Defaults.
+    While confirmation is open, copy content that changes which entries would be deleted; the next
+    confirmation must show the updated impact before anything is deleted under the new limits.
+    Click inside each input and edit a value: valid changes must immediately highlight Apply with
+    a solid accent background and show Unsaved changes, without requiring focus to leave the input.
+    Click blank space inside the card, between cards, and in the header/footer; the input must lose
+    its caret and focus border. Clicking another input must transfer focus normally, and clicking
+    within an input must still support caret placement and text selection. Return dismisses input
+    focus without applying changes. Restore Defaults remains a draft until Apply is clicked.
+    Verify that numbers line up across all four inputs despite their different units. Clicking a
+    unit label or input padding must focus that row's input; disabled Unlimited inputs stay inactive.
 
 Core tests and a successful build do not establish that this desktop smoke test passed.
 

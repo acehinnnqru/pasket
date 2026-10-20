@@ -97,14 +97,11 @@ Pasket never changes your system privacy settings.
   The app-scoped bookmark entitlement is enabled for Debug and Release; App Sandbox and user-selected
   read-only file access remain enabled. Pasket displays original size when known and copies file URLs.
   Groups of files and other file types remain references without a backup of their contents. If an
-  original needs permission, use **Authorize Folder…** in its detail pane to select a containing
-  folder once. Pasket saves a read-only folder grant and reuses it for current and future entries
-  in that folder and its subfolders, including after relaunch. This does not copy the original files
-  or replace the selected history entry. Groups spanning multiple folders may need a grant for
-  each folder, or one for a shared parent. Settings → File Access lists saved folders and lets
-  users add or remove them. Removing a saved folder grant does not delete files or history, and
-  independent file grants may still provide access. Deleted originals remain unavailable; granting
-  folder access cannot restore deleted files. Deleting history never deletes the original files.
+  original is deleted or can no longer be read, the entry is marked **File unavailable** and cannot
+  be copied. Its name and path remain visible; copy the original file again or delete the history
+  entry. Access is handled automatically, without folder authorization settings or a restore-access
+  prompt. A readable file that cannot be previewed shows **Preview unavailable** and can still be
+  copied. Deleting history never deletes the original files.
 - By default, keep up to **2,026 entries**, **50 MiB of text bodies**, **500 MiB of images including
   thumbnails**, and **60 days of history**. Settings → History lets you change each limit or choose
   Unlimited independently. All four settings are shown together, with current record count and
@@ -149,14 +146,13 @@ Search runs against all saved records and their complete bodies, including recor
 loaded pages, with the same Unicode-aware literal substring matching used previously.
 
 Collection, deletion, copy-time updates, and settings changes update individual database records
-in serialized transactions. Retention limits apply to the complete database. Read-only folder
-bookmarks are stored separately from history records and kept when history is cleared; they can
-be removed separately in Settings. Quitting
-waits for queued writes; failed writes show a retry action and require a choice before quitting
+in serialized transactions. Retention limits apply to the complete database. File bookmarks are
+stored with their history entries; legacy folder grants are ignored and omitted when settings are
+saved. Quitting waits for queued writes; failed writes show a retry action and require a choice before quitting
 with unsaved changes. Media cleanup runs only after database changes commit successfully.
 
 On first use, an existing version-1 `history.json` is validated and imported in one transaction,
-including identities, timestamps, source metadata, image references, pause state, and folder grants.
+including identities, timestamps, source metadata, image references, and pause state.
 The original JSON is left unchanged, and subsequent launches use the database without reimporting
 it. This retained JSON describes the history at migration time; image files continue to follow the
 active database's retention and deletion rules. A damaged or unsupported database or legacy history
@@ -202,12 +198,12 @@ For the desktop smoke test:
    the default, conflict rejection, and persistence after relaunch. Recording and confirmation
    dialogs must not invoke the settings shortcut.
    Press Escape in Settings with different controls focused and after reopening the window;
-   it must close Settings. While recording a shortcut or choosing a folder, Escape must cancel
-   only that operation and leave Settings open.
+   it must close Settings. While recording a shortcut, Escape must cancel only recording and leave
+   Settings open.
    Close Settings with its × button, move the pointer away, and reopen it with Command + comma.
    The close button must not flash or retain its previous hover highlight. Repeat by hovering
    another button and closing with Escape or Command + W; only the control currently under the
-   pointer should highlight after reopening, and saved shortcuts and folder grants must remain.
+   pointer should highlight after reopening, and saved shortcuts must remain.
    With multiple displays, open history on each display and invoke Settings with both its shortcut
    and the **…** menu. Settings must follow history even if it was previously opened on another
    display. With history hidden, open Settings from the menu bar and check the pointer's display.
@@ -217,15 +213,14 @@ For the desktop smoke test:
    dotted header handle less than 8 points and release; the window should stay still. Drag it farther
    to move the window. In Settings, repeat these checks by dragging the header title and empty
    header space. The close button and settings controls must still work without moving the window.
-10. Copy two image files from one folder and a third from a nested folder. Use **Authorize Folder…**
-    in a file's detail pane and select their shared parent. Confirm all three entries can preview and
-    copy, then quit and relaunch and repeat. Copy a new image file into the same history from that
-    folder and confirm it also works without another authorization. Canceling the picker or choosing
-    an unrelated folder must leave the entry unchanged. Delete an original and confirm its preview
-    becomes unavailable even though the folder is authorized.
-11. In Settings → File Access, add a folder, reauthorize it without creating a duplicate, and remove
-    its saved grant. Confirm original files and history remain intact and the folder list persists
-    after relaunch. Check grant creation failure feedback on a folder the app cannot authorize.
+10. Copy image files from different folders, preview and copy them, then quit and relaunch and repeat
+    while access remains available. Confirm Settings and the file detail pane have no folder
+    authorization or restore-access controls. Delete an original and confirm its preview becomes
+    **File unavailable**, copying is disabled, and the entry's name and path remain visible. Delete
+    that history entry and confirm other original files remain untouched.
+11. Copy a readable file with an image extension whose contents cannot be decoded as an image.
+    Confirm its detail pane shows **Preview unavailable**, copying still works, and no permission
+    picker or restore-access prompt appears.
 12. In Settings → History, verify all four settings are visible with their default values (2,026 entries,
     50 MiB text, 500 MiB images, 60 days), independent Unlimited controls, and active usage. Enter
     zero, a negative number, a fraction, or an overflowing value and verify Apply is disabled.

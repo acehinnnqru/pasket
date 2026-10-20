@@ -136,7 +136,7 @@ struct ClipboardRetentionTests {
         let settings = ClipboardRetention(maximumItems: 9, maximumTextBytes: nil, maximumImageBytes: 8_000_000, maximumAgeDays: 7)
         let result = try await fixture.persistence.applyRetention(settings)
         guard case .applied = result else { Issue.record("Empty history should not require confirmation"); return }
-        try await fixture.persistence.apply([.settings(isPaused: true, folders: [])])
+        try await fixture.persistence.apply([.settings(isPaused: true)])
         #expect(try await ClipboardPersistence(directory: fixture.directory).loadSettings().retention == settings)
         let entries = (0..<12).map { ClipboardItem.text("Record \($0)", source: .unknown, at: Date()) }
         try await fixture.persistence.apply(entries.map(ClipboardMutation.upsert))
@@ -150,8 +150,7 @@ struct ClipboardRetentionTests {
         let fixture = try RetentionFixture()
         defer { fixture.remove() }
         let expired = ClipboardItem.text("Older history", source: .unknown, at: Date().addingTimeInterval(-70 * 86_400))
-        let folder = try ClipboardFileAccess.captureFolder(fixture.directory)
-        let history = ClipboardHistory(items: [expired], authorizedFolders: [folder], retention: nil)
+        let history = ClipboardHistory(items: [expired], retention: nil)
         try JSONEncoder().encode(history).write(to: fixture.directory.appendingPathComponent("history.json"))
         let pasteboard = NSPasteboard(name: .init("pasket-retention-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
@@ -173,7 +172,6 @@ struct ClipboardRetentionTests {
         _ = await store.applyRetention(.default, confirmed: plan)
         #expect(!store.needsRetentionReview)
         #expect(store.totalCount == 0)
-        #expect(try await fixture.persistence.loadSettings().authorizedFolders == [folder])
         #expect(FileManager.default.fileExists(atPath: fixture.original.path))
         store.stop()
         await store.flush()

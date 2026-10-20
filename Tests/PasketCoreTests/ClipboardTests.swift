@@ -90,16 +90,17 @@ struct ClipboardTests {
         let persistence = ClipboardPersistence(directory: fixture.directory)
         let image = try await persistence.importImage(Self.smallPNG(), source: .unknown, at: Date())
         let text = ClipboardItem.text(" \nhttps://example.com/path\n", source: .unknown, at: Date().addingTimeInterval(1))
-        let folder = try ClipboardFileAccess.captureFolder(fixture.directory)
-        let history = ClipboardHistory(isPaused: true, items: [text, image], authorizedFolders: [folder])
+        let history = ClipboardHistory(isPaused: true, items: [text, image])
         let legacyURL = fixture.directory.appendingPathComponent("history.json")
-        let original = try JSONEncoder().encode(history)
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(history)) as? [String: Any])
+        legacy["authorizedFolders"] = [["path": fixture.directory.path, "name": "Legacy folder",
+                                         "bookmark": "AQID", "isSecurityScoped": true]]
+        let original = try JSONSerialization.data(withJSONObject: legacy)
         try original.write(to: legacyURL)
         await fixture.start()
         #expect(!fixture.store.isStorageBlocked)
         #expect(fixture.store.isPaused)
         #expect(fixture.store.items.map(\.id) == [text.id, image.id])
-        #expect(fixture.store.authorizedFolders == [folder])
         #expect(try await persistence.imageData(try #require(image.image)).isEmpty == false)
         #expect(try Data(contentsOf: legacyURL) == original)
         fixture.store.delete(text.id)
@@ -195,7 +196,7 @@ struct ClipboardTests {
         if commitFirst { try await persistence.apply([.upsert(first), .completeImageImport(first.id)]) }
         // A second in-flight capture of the same pixels still needs these files.
         let second = try await persistence.importImage(png, source: .unknown, at: Date())
-        if commitFirst { try await persistence.apply([.settings(isPaused: false, folders: [])]) }
+        if commitFirst { try await persistence.apply([.settings(isPaused: false)]) }
         let image = try #require(first.image)
         try await persistence.apply([.upsert(first), .completeImageImport(first.id), .clear])
         #expect(try await persistence.imageData(image).isEmpty == false)
@@ -522,7 +523,7 @@ struct ClipboardTests {
         await fixture.store.flush()
         let item = try #require(fixture.store.selectedItem)
         #expect(item.kind == .file)
-        #expect(item.files.first?.path == screenshotURL.path)
+        #expect(item.files.first?.path == screenshotURL.resolvingSymlinksInPath().path)
         #expect(item.image == nil)
         fixture.store.filter = .images
         await fixture.store.flush()
@@ -795,123 +796,104 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
-    @Test func legacyHistoryLoadsWithoutFolderPermissions() throws {
+    @Test func legacyHistoryLoadsWithoutFileAccessSettings() throws {
         let data = Data(#"{"version":1,"isPaused":false,"items":[]}"#.utf8)
         let history = try JSONDecoder().decode(ClipboardHistory.self, from: data)
-        #expect(history.authorizedFolders.isEmpty)
+        #expect(history.items.isEmpty)
+        #expect(!history.isPaused)
     }
 
-    @Test func folderAuthorizationCoversExistingAndFutureImageFilesAfterRestart() async throws {
+    @Test func legacyDatabaseFolderPermissionsAreIgnoredAndDroppedOnSave() async throws {
         let fixture = try Fixture()
-        let originals = fixture.directory.appendingPathComponent("Originals", isDirectory: true)
-        let nested = originals.appendingPathComponent("Nested", isDirectory: true)
-        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
-        let first = originals.appendingPathComponent("First.png")
-        let second = nested.appendingPathComponent("Second.png")
-        let imageData = try Self.smallPNG()
-        try imageData.write(to: first)
-        let file = ClipboardFile(path: first.path, name: first.lastPathComponent)
-        let item = ClipboardItem(kind: .file, title: file.name, content: file.path, source: .unknown,
-                                 copiedAt: Date(), fingerprint: "existing-folder-image", files: [file])
-        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [item]))
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let item = ClipboardItem.text("Keep this history", source: .unknown, at: Date())
+        try await persistence.save(ClipboardHistory(items: [item]))
+        var settings = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(ClipboardHistory())) as? [String: Any])
+        settings["authorizedFolders"] = [["path": fixture.directory.path, "name": "Legacy folder",
+                                           "bookmark": "AQID", "isSecurityScoped": true]]
+        let database = try ClipboardDatabase(url: fixture.directory.appendingPathComponent("history.sqlite"))
+        try database.execute("UPDATE settings SET payload = ? WHERE id = 1",
+                             [.blob(try JSONSerialization.data(withJSONObject: settings))])
         await fixture.start()
-        try await fixture.store.addAuthorizedFolder(originals)
-        #expect(fixture.store.items.first?.id == item.id)
-        #expect(fixture.store.authorizedFolders.count == 1)
+        #expect(!fixture.store.isStorageBlocked)
+        #expect(fixture.store.items.map(\.id) == [item.id])
+        fixture.store.setPaused(true)
         await fixture.restart()
-        let folder = try #require(fixture.store.authorizedFolders.first)
-        #expect(folder.isSecurityScoped == true)
-        #expect(folder.bookmark != nil)
-        #expect(fixture.store.unavailableItems.isEmpty)
-        #expect(await fixture.store.copySelection())
-        await fixture.store.loadPreview(for: fixture.store.selectedItem)
-        #expect(fixture.store.previewImage != nil)
+        #expect(fixture.store.isPaused)
+        #expect(fixture.store.items.map(\.id) == [item.id])
+        try database.query("SELECT payload FROM settings WHERE id = 1") {
+            let saved = try #require(JSONSerialization.jsonObject(with: ClipboardDatabase.data($0, 0)) as? [String: Any])
+            #expect(saved["authorizedFolders"] == nil)
+        }
+        await fixture.cleanUp()
+    }
 
-        // A new nested file uses the same grant without adding another authorized folder.
-        try imageData.write(to: second)
+    @Test func unreadableImagePreviewDoesNotInvalidateAReadableFile() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let url = fixture.directory.appendingPathComponent("Unsupported.png")
+        let original = Data("Readable file without a decodable image".utf8)
+        try original.write(to: url)
         fixture.pasteboard.clearContents()
-        #expect(fixture.pasteboard.writeObjects([second as NSURL]))
+        #expect(fixture.pasteboard.writeObjects([url as NSURL]))
         fixture.store.pollClipboard()
         await fixture.store.flush()
         await fixture.restart()
-        let newItem = try #require(fixture.store.items.first)
-        let storedPath = try #require(newItem.files.first?.path)
-        let storedIdentity = try URL(fileURLWithPath: storedPath).resourceValues(forKeys: [.fileResourceIdentifierKey])
-            .fileResourceIdentifier as? NSObject
-        let originalIdentity = try second.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier as? NSObject
-        #expect(storedIdentity != nil && storedIdentity == originalIdentity)
-        #expect(ClipboardFileAccess.contains(folder, path: storedPath))
-        #expect(fixture.store.authorizedFolders == [folder])
-        await fixture.store.loadThumbnail(for: newItem)
-        await fixture.store.loadPreview(for: newItem)
-        #expect(fixture.store.thumbnails[newItem.id] != nil)
-        #expect(fixture.store.previewImage != nil)
-        #expect(await fixture.store.copySelection())
-        #expect(fixture.store.imageStorageBytes == 0)
-        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
-
-        try FileManager.default.removeItem(at: second)
-        await fixture.store.refreshFileAvailability()
-        #expect(fixture.store.unavailableItems.contains(newItem.id))
+        let item = try #require(fixture.store.selectedItem)
+        #expect(item.kind == .file)
+        await fixture.store.loadThumbnail(for: item)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.thumbnails[item.id] == nil)
         #expect(fixture.store.previewImage == nil)
-        #expect(await fixture.store.copySelection() == false)
-        #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(fixture.store.missingPreviews.contains(item.id))
+        #expect(!fixture.store.unavailableItems.contains(item.id))
+        #expect(fixture.store.canCopySelection)
+        #expect(await fixture.store.copySelection())
+        let copied = fixture.pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        #expect(copied?.map { $0.resolvingSymlinksInPath() } == [url.resolvingSymlinksInPath()])
+        #expect(try Data(contentsOf: url) == original)
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
         await fixture.cleanUp()
     }
 
-    @Test func folderGrantsCanBeReplacedAndRemovedWithoutDeletingFilesOrHistory() async throws {
+    @Test func recopyingAnUnavailableFileRefreshesTheExistingEntry() async throws {
         let fixture = try Fixture()
-        let folderURL = fixture.directory.appendingPathComponent("Originals", isDirectory: true)
-        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
-        let original = folderURL.appendingPathComponent("Keep.txt")
-        try Data("Keep this file".utf8).write(to: original)
         await fixture.start()
-        await fixture.copy("Keep this entry")
-        try await fixture.store.addAuthorizedFolder(folderURL)
-        try await fixture.store.addAuthorizedFolder(folderURL)
-        #expect(fixture.store.authorizedFolders.count == 1)
-        await fixture.restart()
-        let path = try #require(fixture.store.authorizedFolders.first?.path)
-        await fixture.store.removeAuthorizedFolder(path)
-        await fixture.restart()
-        #expect(fixture.store.authorizedFolders.isEmpty)
-        #expect(fixture.store.items.first?.content == "Keep this entry")
-        #expect(try String(contentsOf: original, encoding: .utf8) == "Keep this file")
-        await fixture.cleanUp()
-    }
+        let url = fixture.directory.appendingPathComponent("Original.png")
+        try Self.smallPNG().write(to: url)
+        fixture.pasteboard.clearContents()
+        #expect(fixture.pasteboard.writeObjects([url as NSURL]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let item = try #require(fixture.store.selectedItem)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.previewImage != nil)
+        try FileManager.default.removeItem(at: url)
+        await fixture.store.refreshFileAvailability()
+        #expect(fixture.store.unavailableItems.contains(item.id))
+        #expect(fixture.store.missingPreviews.contains(item.id))
+        #expect(!fixture.store.canCopySelection)
 
-    @Test func folderGrantUsesDirectoryBoundariesAndResolvesChildrenWithoutChildBookmarks() async throws {
-        let fixture = try Fixture()
-        let folderURL = fixture.directory.appendingPathComponent("Images", isDirectory: true)
-        let childURL = folderURL.appendingPathComponent("Nested/Image.png")
-        try FileManager.default.createDirectory(at: childURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let imageData = try Self.smallPNG()
-        try imageData.write(to: childURL)
-        let folder = try ClipboardFileAccess.captureFolder(folderURL)
-        let child = ClipboardFile(path: childURL.path, name: childURL.lastPathComponent)
-        #expect(ClipboardFileAccess.contains(folder, path: child.path))
-        #expect(!ClipboardFileAccess.contains(folder, path: folderURL.path + "-Other/Image.png"))
-        #expect(!ClipboardFileAccess.contains(folder, path: folderURL.path + "/../Outside.png"))
-        try ClipboardFileAccess.withResolvedFiles([child], authorizedFolders: [folder]) { urls, updated in
-            let contents = try Data(contentsOf: urls[0])
-            #expect(contents == imageData)
-            #expect(updated[0].bookmark == nil)
-            #expect(updated[0].isSecurityScoped == nil)
-        }
-        let persistence = ClipboardPersistence(directory: fixture.directory.appendingPathComponent("History"))
-        let preview = try await persistence.previewImageFile(child, authorizedFolders: [folder])
-        #expect(preview.image.width == 8)
-        #expect(preview.image.height == 6)
-        await fixture.cleanUp()
-    }
-
-    @Test func authorizingAFileAsAFolderFailsWithoutRecordingAGrant() async throws {
-        let fixture = try Fixture()
-        let fileURL = fixture.directory.appendingPathComponent("File.txt")
-        try Data("Not a folder".utf8).write(to: fileURL)
-        await fixture.start()
-        await #expect(throws: (any Error).self) { try await fixture.store.addAuthorizedFolder(fileURL) }
-        #expect(fixture.store.authorizedFolders.isEmpty)
+        try Self.smallPNG(width: 12, height: 10).write(to: url)
+        fixture.pasteboard.clearContents()
+        #expect(fixture.pasteboard.writeObjects([url as NSURL]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let refreshed = try #require(fixture.store.selectedItem)
+        #expect(refreshed.id == item.id)
+        #expect(fixture.store.items.count == 1)
+        #expect(!fixture.store.unavailableItems.contains(item.id))
+        #expect(!fixture.store.missingPreviews.contains(item.id))
+        #expect(fixture.store.canCopySelection)
+        await fixture.store.loadThumbnail(for: refreshed)
+        await fixture.store.loadPreview(for: refreshed)
+        #expect(fixture.store.thumbnails[item.id] != nil)
+        #expect(fixture.store.previewImage?.size == NSSize(width: 12, height: 10))
+        #expect(await fixture.store.copySelection())
+        await fixture.restart()
+        #expect(fixture.store.items.count == 1)
+        #expect(fixture.store.selectedItem?.id == item.id)
+        #expect(fixture.store.canCopySelection)
         await fixture.cleanUp()
     }
 

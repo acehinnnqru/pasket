@@ -9,7 +9,7 @@ nonisolated enum ClipboardMutation: Sendable {
     case deleteFingerprint(String)
     case clear
     case completeImageImport(UUID)
-    case settings(isPaused: Bool, folders: [ClipboardFile])
+    case settings(isPaused: Bool)
     case maintenance
 }
 
@@ -96,10 +96,9 @@ actor ClipboardPersistence {
                     try database.execute("DELETE FROM items WHERE fingerprint = ?", [.text(fingerprint)])
                 case .clear: try database.execute("DELETE FROM items")
                 case .completeImageImport: break
-                case let .settings(paused, folders):
+                case let .settings(paused):
                     var history = try settings(in: database)
                     history.isPaused = paused
-                    history.authorizedFolders = folders
                     try writeSettings(history, in: database)
                 case .maintenance: break
                 }
@@ -145,8 +144,6 @@ actor ClipboardPersistence {
         guard history.version == 1 else { throw ClipboardStorageError.unsupportedVersion }
         guard history.retention?.isValid != false else { throw ClipboardStorageError.invalidRetention }
         guard Set(history.items.map(\.id)).count == history.items.count,
-              Set(history.authorizedFolders.map(\.path)).count == history.authorizedFolders.count,
-              history.authorizedFolders.allSatisfy({ $0.isSecurityScoped == true && $0.bookmark != nil }),
               history.items.allSatisfy({ item in
                   if let image = item.image {
                       return item.kind == .image && validImageNames(image) && image.byteCount >= 0
@@ -216,8 +213,7 @@ actor ClipboardPersistence {
     }
 
     private func writeSettings(_ history: ClipboardHistory, in database: ClipboardDatabase) throws {
-        let settings = ClipboardHistory(isPaused: history.isPaused, authorizedFolders: history.authorizedFolders,
-                                        retention: history.retention)
+        let settings = ClipboardHistory(isPaused: history.isPaused, retention: history.retention)
         try validate(settings)
         try database.execute("INSERT OR REPLACE INTO settings(id, payload) VALUES(1, ?)", [.blob(try JSONEncoder().encode(settings))])
     }
@@ -442,9 +438,8 @@ actor ClipboardPersistence {
         return try previewImage(at: url, maxPixelSize: 1_600)
     }
 
-    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false,
-                          authorizedFolders: [ClipboardFile] = []) throws -> (image: CGImage, file: ClipboardFile) {
-        try ClipboardFileAccess.withResolvedFiles([file], authorizedFolders: authorizedFolders) { urls, updated in
+    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws -> (image: CGImage, file: ClipboardFile) {
+        try ClipboardFileAccess.withResolvedFiles([file]) { urls, updated in
             (try previewImage(at: urls[0], maxPixelSize: thumbnail ? 480 : 1_600), updated[0])
         }
     }

@@ -6,7 +6,15 @@ struct ContentView: View {
     @Bindable var shortcuts: GlobalShortcutManager
     var onDismiss: () -> Void
     var onOpenSettings: () -> Void
-    var onRestoreFileAccess: (ClipboardItem) -> Void = { _ in }
+
+    private struct PreviewIdentity: Equatable {
+        let id: UUID
+        let copiedAt: Date
+    }
+
+    private var previewIdentity: PreviewIdentity? {
+        store.selectedItem.map { PreviewIdentity(id: $0.id, copiedAt: $0.copiedAt) }
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
@@ -138,7 +146,7 @@ struct ContentView: View {
                 }
             }
         }
-        .task(id: store.selectedItem?.id) {
+        .task(id: previewIdentity) {
             await store.loadSelection()
             await store.loadPreview(for: store.selectedItem)
         }
@@ -274,7 +282,7 @@ struct ContentView: View {
                                 })
                                 .id(item.id)
                                 .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
-                                .task(id: store.folderAccessRevision) { await store.loadThumbnail(for: item) }
+                                .task(id: item.copiedAt) { await store.loadThumbnail(for: item) }
                                 .contextMenu {
                                     Button("Delete", role: .destructive) { store.delete(item.id) }
                                         .disabled(store.isDebugMode || store.isStorageBlocked)
@@ -360,7 +368,8 @@ struct ContentView: View {
                         .resizable()
                         .scaledToFit()
                 } else if store.missingPreviews.contains(item.id) {
-                    Label(store.unavailableItems.contains(item.id) ? "Image unavailable" : "Preview unavailable",
+                    Label(store.unavailableItems.contains(item.id)
+                          ? (item.kind == .file ? "File unavailable" : "Image unavailable") : "Preview unavailable",
                           systemImage: "photo")
                 } else {
                     ProgressView("Loading preview…")
@@ -380,23 +389,10 @@ struct ContentView: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     informationRow(row.title, value: row.value, shaded: index.isMultiple(of: 2))
                 }
-                if item.kind == .file {
-                    HStack {
-                        Text("Access").foregroundStyle(.secondary)
-                        Spacer(minLength: 12)
-                        Button("Authorize Folder…") { onRestoreFileAccess(item) }
-                            .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
-                            .help("Authorize a containing folder to keep access after relaunch. Original files stay in their current location.")
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-                    .background(rows.count.isMultiple(of: 2) ? Color.primary.opacity(0.035) : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                }
             }
         }
         .font(.system(size: 12))
-        .frame(height: min(CGFloat(rows.count + (item.kind == .file ? 1 : 0)) * 30 - 2, 180))
+        .frame(height: min(CGFloat(rows.count) * 30 - 2, 180))
         .id(item.id)
     }
 
@@ -417,13 +413,7 @@ struct ContentView: View {
                 ? ByteCountFormatter.string(fromByteCount: Int64(item.files.compactMap(\.byteCount).reduce(0, +)), countStyle: .file)
                 : "Unknown"))
             if store.unavailableItems.contains(item.id) {
-                rows.append(("Status", "A file is missing or its folder needs permission."))
-            } else if item.files.contains(where: { file in
-                file.isSecurityScoped != true && !store.authorizedFolders.contains {
-                    ClipboardFileAccess.contains($0, path: file.path)
-                }
-            }) {
-                rows.append(("Status", "Authorize the containing folder once to keep access after relaunch."))
+                rows.append(("Status", "File unavailable. Copy the original file again or delete this entry."))
             }
         }
         if let image = item.image {

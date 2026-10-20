@@ -95,8 +95,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 store: store,
                 shortcuts: shortcuts,
                 onDismiss: { [weak self] in self?.hidePanel() },
-                onOpenSettings: { [weak self] in self?.showSettings() },
-                onRestoreFileAccess: { [weak self] item in self?.restoreFileAccess(item) }
+                onOpenSettings: { [weak self] in self?.showSettings() }
             ))
             self.panel = panel
         }
@@ -157,23 +156,14 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    private var isRestoringFileAccess = false
-
     func finishPendingWork() async {
         await startupTask?.value
         store.stop()
         await store.flush()
     }
 
-    private func restoreFileAccess(_ item: ClipboardItem) {
-        isRestoringFileAccess = true
-        store.restoreFileAccess(item)
-        isRestoringFileAccess = false
-        panel?.makeKeyAndOrderFront(nil)
-    }
-
     func windowDidResignKey(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, window === panel, !isRestoringFileAccess,
+        if let window = notification.object as? NSWindow, window === panel,
            window.attachedSheet == nil {
             hidePanel(restorePreviousApplication: false)
         }

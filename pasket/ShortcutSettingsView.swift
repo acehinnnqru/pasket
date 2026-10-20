@@ -16,7 +16,6 @@ struct ShortcutSettingsView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     keyboardShortcutsSection
                     HistoryRetentionSettingsView(store: store, focusedField: $focusedHistoryField)
-                    folderAccessSection
 
                     if let error = shortcuts.errorMessage {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -32,7 +31,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")
-                Text("Shortcuts and file access save automatically.")
+                Text("Shortcuts save automatically.")
                 Spacer()
                 Text("Pasket")
             }
@@ -208,62 +207,6 @@ struct ShortcutSettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 2)
-    }
-
-    private var folderAccessSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SettingsSectionHeader(title: "File access")
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Authorized folders")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Read-only access to files in these folders and their subfolders.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    Button("Authorize Folder…") { store.authorizeFolder() }
-                        .buttonStyle(PasketButtonStyle())
-                        .fixedSize()
-                }
-                .padding(12)
-                ForEach(store.authorizedFolders, id: \.path) { folder in
-                    Divider().opacity(0.35).padding(.horizontal, 12)
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder")
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(folder.name).font(.system(size: 13, weight: .medium))
-                            Text(folder.path)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .help(folder.path)
-                        }
-                        Spacer()
-                        Button("Remove") { Task { await store.removeAuthorizedFolder(folder.path) } }
-                            .buttonStyle(PasketButtonStyle())
-                            .accessibilityLabel("Remove folder access for \(folder.name)")
-                    }
-                    .padding(12)
-                }
-            }
-            .modifier(SettingsCard())
-            Text("Original files stay in place. No copies are saved.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 2)
-            if let error = store.folderAccessError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
     }
 
     private func panelControl(keys: String, title: String) -> some View {

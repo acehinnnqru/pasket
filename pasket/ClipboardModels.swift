@@ -121,27 +121,24 @@ nonisolated struct ClipboardHistory: Codable, Sendable {
     var version = 1
     var isPaused = false
     var items: [ClipboardItem] = []
-    var authorizedFolders: [ClipboardFile] = []
     // Missing settings identify an upgrade that must be reviewed before cleanup begins.
     var retention: ClipboardRetention? = .default
 
-    init(version: Int = 1, isPaused: Bool = false, items: [ClipboardItem] = [], authorizedFolders: [ClipboardFile] = [],
+    init(version: Int = 1, isPaused: Bool = false, items: [ClipboardItem] = [],
          retention: ClipboardRetention? = .default) {
         self.version = version
         self.isPaused = isPaused
         self.items = items
-        self.authorizedFolders = authorizedFolders
         self.retention = retention
     }
 
-    private enum CodingKeys: String, CodingKey { case version, isPaused, items, authorizedFolders, retention }
+    private enum CodingKeys: String, CodingKey { case version, isPaused, items, retention }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         isPaused = try container.decode(Bool.self, forKey: .isPaused)
         items = try container.decode([ClipboardItem].self, forKey: .items)
-        authorizedFolders = try container.decodeIfPresent([ClipboardFile].self, forKey: .authorizedFolders) ?? []
         retention = try container.decodeIfPresent(ClipboardRetention.self, forKey: .retention)
     }
 }

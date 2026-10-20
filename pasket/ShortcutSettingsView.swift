@@ -13,25 +13,10 @@ struct ShortcutSettingsView: View {
             header
             Divider().opacity(0.5)
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Text("Keyboard shortcuts")
-                            .font(.system(size: 12, weight: .medium))
-                        Spacer()
-                        Text("Click a shortcut to change it")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(.secondary)
-
-                    VStack(spacing: 8) {
-                        historyShortcutCard
-                        settingsShortcutCard
-                        deletionShortcutCard
-                    }
-
+                VStack(alignment: .leading, spacing: 24) {
+                    keyboardShortcutsSection
                     HistoryRetentionSettingsView(store: store, focusedField: $focusedHistoryField)
-                    panelControls
-                    folderAccessCard
+                    folderAccessSection
 
                     if let error = shortcuts.errorMessage {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -47,7 +32,7 @@ struct ShortcutSettingsView: View {
             Divider().opacity(0.5)
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle")
-                Text("History limits require Apply. Other changes save automatically.")
+                Text("Shortcuts and file access save automatically.")
                 Spacer()
                 Text("Pasket")
             }
@@ -113,85 +98,41 @@ struct ShortcutSettingsView: View {
         .padding(.trailing, 14)
     }
 
-    private var historyShortcutCard: some View {
-        VStack(spacing: 0) {
-            shortcutRow(
-                title: "Show Clipboard History",
-                description: "Bring your basket into view from any app.",
-                symbol: "basket",
-                shortcut: shortcuts.shortcut,
-                action: .showHistory
-            )
-            Divider().opacity(0.35)
-            HStack {
-                Label("Global · Default: Hyper + P", systemImage: "globe")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Restore Default") { shortcuts.restoreDefault() }
-                    .buttonStyle(PasketButtonStyle())
-                    .disabled(shortcuts.shortcut == .default)
+    private var keyboardShortcutsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Keyboard shortcuts")
+            VStack(spacing: 0) {
+                shortcutRow(
+                    title: "Show Clipboard History",
+                    description: "Global · Available in any app",
+                    symbol: "basket",
+                    shortcut: shortcuts.shortcut,
+                    action: .showHistory
+                )
+                Divider().opacity(0.35).padding(.leading, 40)
+                shortcutRow(
+                    title: "Open Settings",
+                    description: "History panel only",
+                    symbol: "gearshape",
+                    shortcut: shortcuts.settingsShortcut,
+                    action: .openSettings
+                )
+                Divider().opacity(0.35).padding(.leading, 40)
+                shortcutRow(
+                    title: "Delete Selected Item",
+                    description: "History panel only · Optional",
+                    symbol: "trash",
+                    shortcut: shortcuts.deletionShortcut,
+                    action: .deleteSelectedItem
+                )
             }
-            .font(.system(size: 12))
-            .padding(.leading, 12)
-            .padding(.trailing, 3)
-            .padding(.vertical, 4)
+            .modifier(SettingsCard())
+            Text("Click a shortcut to change it.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 2)
+            panelControls
         }
-        .modifier(SettingsCard())
-    }
-
-    private var settingsShortcutCard: some View {
-        VStack(spacing: 0) {
-            shortcutRow(
-                title: "Open Settings",
-                description: "Open Settings from your clipboard history.",
-                symbol: "gearshape",
-                shortcut: shortcuts.settingsShortcut,
-                action: .openSettings
-            )
-            Divider().opacity(0.35)
-            HStack {
-                Label("History panel only · Default: ⌘,", systemImage: "rectangle")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear") { shortcuts.setSettingsShortcut(nil) }
-                    .buttonStyle(PasketButtonStyle())
-                    .disabled(shortcuts.settingsShortcut == nil)
-                Button("Restore Default") { shortcuts.setSettingsShortcut(.defaultSettings) }
-                    .buttonStyle(PasketButtonStyle())
-                    .disabled(shortcuts.settingsShortcut == .defaultSettings)
-            }
-            .font(.system(size: 12))
-            .padding(.leading, 12)
-            .padding(.trailing, 3)
-            .padding(.vertical, 4)
-        }
-        .modifier(SettingsCard())
-    }
-
-    private var deletionShortcutCard: some View {
-        VStack(spacing: 0) {
-            shortcutRow(
-                title: "Delete Selected Item",
-                description: "Remove the selected entry from your history.",
-                symbol: "trash",
-                shortcut: shortcuts.deletionShortcut,
-                action: .deleteSelectedItem
-            )
-            Divider().opacity(0.35)
-            HStack {
-                Label("History panel only · Optional", systemImage: "rectangle")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Clear") { shortcuts.setDeletionShortcut(nil) }
-                    .buttonStyle(PasketButtonStyle())
-                    .disabled(shortcuts.deletionShortcut == nil)
-            }
-            .font(.system(size: 12))
-            .padding(.leading, 12)
-            .padding(.trailing, 3)
-            .padding(.vertical, 4)
-        }
-        .modifier(SettingsCard())
     }
 
     private func shortcutRow(
@@ -230,59 +171,91 @@ struct ShortcutSettingsView: View {
             .help("Record a shortcut for \(title)")
             .accessibilityLabel("Record \(title) shortcut")
             .accessibilityValue(shortcut?.displayName ?? "Not set")
+            if action != .deleteSelectedItem {
+                let defaultShortcut: GlobalShortcut = action == .showHistory ? .default : .defaultSettings
+                Button {
+                    if action == .showHistory {
+                        shortcuts.restoreDefault()
+                    } else {
+                        shortcuts.setSettingsShortcut(.defaultSettings)
+                    }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 14, height: 16)
+                }
+                .buttonStyle(PasketButtonStyle())
+                .disabled(shortcut == defaultShortcut)
+                .help(action == .showHistory ? "Restore Default (Hyper + P)" : "Restore Default (⌘,)")
+                .accessibilityLabel("Restore \(title) shortcut to default")
+            } else {
+                Color.clear
+                    .frame(width: 32, height: 28)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(12)
     }
 
     private var panelControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("In the history panel")
-                .font(.system(size: 12, weight: .medium))
+        HStack(spacing: 12) {
+            Text("In history:")
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                panelControl(keys: "↑ ↓", title: "Navigate")
-                panelControl(keys: "↩", title: "Copy & return")
-                panelControl(keys: "esc", title: "Dismiss")
-            }
+            panelControl(keys: "↑ ↓", title: "Navigate")
+            panelControl(keys: "↩", title: "Copy & return")
+            panelControl(keys: "esc", title: "Dismiss")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .modifier(SettingsCard())
+        .padding(.horizontal, 2)
     }
 
-    private var folderAccessCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("File access")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Authorize Folder…") { store.authorizeFolder() }
-                    .buttonStyle(PasketButtonStyle())
-            }
-            Text("Allow read-only access once for current and future files in a folder and its subfolders. Files stay in place; no copies are saved.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            ForEach(store.authorizedFolders, id: \.path) { folder in
-                HStack(spacing: 8) {
-                    Image(systemName: "folder")
-                        .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(folder.name).font(.system(size: 13, weight: .medium))
-                        Text(folder.path)
+    private var folderAccessSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "File access")
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Authorized folders")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Read-only access to files in these folders and their subfolders.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(folder.path)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
-                    Button("Remove") { Task { await store.removeAuthorizedFolder(folder.path) } }
+                    Button("Authorize Folder…") { store.authorizeFolder() }
                         .buttonStyle(PasketButtonStyle())
-                        .accessibilityLabel("Remove folder access for \(folder.name)")
+                        .fixedSize()
+                }
+                .padding(12)
+                ForEach(store.authorizedFolders, id: \.path) { folder in
+                    Divider().opacity(0.35).padding(.horizontal, 12)
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(folder.name).font(.system(size: 13, weight: .medium))
+                            Text(folder.path)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(folder.path)
+                        }
+                        Spacer()
+                        Button("Remove") { Task { await store.removeAuthorizedFolder(folder.path) } }
+                            .buttonStyle(PasketButtonStyle())
+                            .accessibilityLabel("Remove folder access for \(folder.name)")
+                    }
+                    .padding(12)
                 }
             }
+            .modifier(SettingsCard())
+            Text("Original files stay in place. No copies are saved.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 2)
             if let error = store.folderAccessError {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 12))
@@ -290,20 +263,18 @@ struct ShortcutSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12)
-        .modifier(SettingsCard())
         .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading)
     }
 
     private func panelControl(keys: String, title: String) -> some View {
         HStack(spacing: 8) {
             Text(keys)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .padding(.horizontal, 6)
                 .frame(height: 22)
                 .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
             Text(title)
-                .font(.system(size: 12))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
     }
@@ -346,12 +317,28 @@ struct ShortcutSettingsView: View {
             }
                 .frame(height: 1)
                 .accessibilityHidden(true)
-            Button { shortcuts.cancelRecording() } label: {
-                HStack(spacing: 8) {
-                    Text("Cancel")
-                    Text("esc").foregroundStyle(.secondary)
+            HStack {
+                if shortcuts.recordingAction != .showHistory {
+                    Button("Clear Shortcut", role: .destructive) {
+                        if shortcuts.recordingAction == .openSettings {
+                            shortcuts.setSettingsShortcut(nil)
+                        } else {
+                            shortcuts.setDeletionShortcut(nil)
+                        }
+                        shortcuts.cancelRecording()
+                    }
+                    .disabled(shortcuts.recordingAction == .openSettings
+                              ? shortcuts.settingsShortcut == nil : shortcuts.deletionShortcut == nil)
+                    .accessibilityLabel("Clear \(shortcuts.recordingAction.title) shortcut")
                 }
-                .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Button { shortcuts.cancelRecording() } label: {
+                    HStack(spacing: 8) {
+                        Text("Cancel")
+                        Text("esc").foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
             }
             .buttonStyle(PasketButtonStyle())
         }
@@ -379,73 +366,69 @@ private struct HistoryRetentionSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("History")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if hasChanges {
-                    Text("Unsaved changes")
-                        .font(.system(size: 11, weight: .medium))
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "History", showsUnsavedChanges: hasChanges)
+            VStack(alignment: .leading, spacing: 0) {
+                if store.needsRetentionReview {
+                    Label("Review and apply your history limits to enable automatic cleanup. Existing history has been kept.",
+                          systemImage: "info.circle")
+                        .font(.system(size: 12))
                         .foregroundStyle(.orange)
-                        .accessibilityIdentifier("historyLimitsUnsaved")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(12)
+                    Divider().opacity(0.35).padding(.horizontal, 12)
                 }
-            }
-            if store.needsRetentionReview {
-                Label("Review and apply your history limits to enable automatic cleanup. Existing history has been kept.",
-                      systemImage: "info.circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            VStack(spacing: 14) {
                 limitRow("Keep history for", detail: "Since the last copy", value: $draft.days, unit: "days", field: .days)
+                Divider().opacity(0.35).padding(.horizontal, 12)
                 limitRow("Maximum records", detail: "\(store.totalCount.formatted()) entries stored",
                          value: $draft.items, unit: "entries", field: .items)
+                Divider().opacity(0.35).padding(.horizontal, 12)
                 limitRow("Text storage", detail: "\(Self.formatBytes(store.textStorageBytes)) used · includes links and email",
                          value: $draft.text, unit: "MiB", field: .text)
+                Divider().opacity(0.35).padding(.horizontal, 12)
                 limitRow("Image storage", detail: "\(Self.formatBytes(store.imageStorageBytes)) used · includes thumbnails",
                          value: $draft.images, unit: "MiB", field: .images)
-            }
-            Divider().opacity(0.35)
-            Text("Click Apply to save these limits. The oldest matching entries are cleaned up first. Original files stay untouched.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let settings = draft.settings, settings.maximumItems == nil, settings.maximumTextBytes == nil,
-               settings.maximumImageBytes == nil, settings.maximumAgeDays == nil {
-                Text("All limits are Unlimited. History may continue to grow.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-            if draft.settings == nil {
-                Text("Enter positive whole numbers, or choose Unlimited.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            }
-            if let error = store.retentionError {
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Button("Restore Defaults") {
-                    focusedField.wrappedValue = nil
-                    draft = HistoryRetentionDraft(.default)
+                Divider().opacity(0.35)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Apply to save these limits. The oldest matching entries are cleaned up first. Original files stay untouched.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let settings = draft.settings, settings.maximumItems == nil, settings.maximumTextBytes == nil,
+                       settings.maximumImageBytes == nil, settings.maximumAgeDays == nil {
+                        Text("All limits are Unlimited. History may continue to grow.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                    }
+                    if draft.settings == nil {
+                        Text("Enter positive whole numbers, or choose Unlimited.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                    }
+                    if let error = store.retentionError {
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack {
+                        Button("Restore Defaults") {
+                            focusedField.wrappedValue = nil
+                            draft = HistoryRetentionDraft(.default)
+                        }
+                            .buttonStyle(PasketButtonStyle())
+                        Spacer()
+                        if store.isApplyingRetention { ProgressView().controlSize(.small) }
+                        Button("Apply") { apply() }
+                            .buttonStyle(HistoryApplyButtonStyle())
+                            .disabled(!canApply)
+                            .accessibilityIdentifier("applyHistoryLimits")
+                    }
                 }
-                    .buttonStyle(PasketButtonStyle())
-                Spacer()
-                if store.isApplyingRetention { ProgressView().controlSize(.small) }
-                Button("Apply") { apply() }
-                    .buttonStyle(HistoryApplyButtonStyle())
-                    .disabled(!canApply)
-                    .accessibilityIdentifier("applyHistoryLimits")
+                .padding(12)
             }
+            .modifier(SettingsCard())
         }
-        .padding(14)
-        .modifier(SettingsCard())
         .disabled(store.isDebugMode || store.isStorageBlocked || store.isLoading || store.isApplyingRetention)
         .onAppear { draft = HistoryRetentionDraft(store.retentionSettings) }
         .onChange(of: store.isLoading) {
@@ -470,9 +453,9 @@ private struct HistoryRetentionSettingsView: View {
         let isFocused = focusedField.wrappedValue == field
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 12, weight: .medium))
+                Text(title).font(.system(size: 13, weight: .medium))
                 Text(detail)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -523,6 +506,8 @@ private struct HistoryRetentionSettingsView: View {
                     if focusedField.wrappedValue == field { focusedField.wrappedValue = nil }
                 }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private func confirmationSheet(_ plan: ClipboardRetentionPlan) -> some View {
@@ -683,6 +668,28 @@ private struct HistoryRetentionDraft {
                                           maximumImageBytes: images.value(unit: ClipboardRetention.mebibyte),
                                           maximumAgeDays: days.value())
         return settings.isValid ? settings : nil
+    }
+}
+
+private struct SettingsSectionHeader: View {
+    let title: String
+    var showsUnsavedChanges = false
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if showsUnsavedChanges {
+                Text("Unsaved changes")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("historyLimitsUnsaved")
+            }
+        }
+        .padding(.horizontal, 2)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

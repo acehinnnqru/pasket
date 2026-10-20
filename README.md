@@ -31,12 +31,15 @@ Pasket lives in the menu bar and opens its history panel at launch.
   Settings opens centered on the history panel's display each time, including when reusing an
   existing settings window. When history is hidden, it uses the display under the pointer.
 - **Command + ,** opens Settings from the history panel. Change **Open Settings** in Settings,
-  use **Restore Default** to return to Command + comma, or **Clear** to disable it. The menu bar
+  use the reset icon to return to Command + comma, or **Clear Shortcut** in the recording dialog
+  to disable it. The menu bar
   uses the same binding. Settings, history, and deletion shortcuts must use different combinations.
   Existing history or deletion bindings take priority if they already use Command + comma.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
   Option. It only works in the history panel, preserves search focus, and deletes one selected entry
-  per key press. No deletion shortcut is assigned by default; use **Clear** in Settings to disable it.
+  per key press. No deletion shortcut is assigned by default; use **Clear Shortcut** in the recording
+  dialog to disable it. Clearing saves immediately and closes the dialog. The global history shortcut
+  always remains assigned and has no clear action.
   The delete shortcut must differ from the history and settings shortcuts.
 - Click the status light in the panel footer to pause or resume collection, or use the menu bar.
   While collecting, a small dot in the app's accent color gently brightens and dims every 2.8 seconds,

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 struct ShortcutSettingsView: View {
@@ -55,7 +56,15 @@ struct ShortcutSettingsView: View {
         }
         .frame(width: 600, height: 520)
         .modifier(PasketSurface())
-        .onExitCommand(perform: onClose)
+        .background {
+            ShortcutEventMonitor { event in
+                guard !shortcuts.isRecording, event.keyCode == UInt16(kVK_Escape),
+                      event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+                else { return false }
+                if !event.isARepeat { onClose() }
+                return true
+            }
+        }
         .sheet(isPresented: Binding(
             get: { shortcuts.isRecording },
             set: { if !$0 { shortcuts.cancelRecording() } }

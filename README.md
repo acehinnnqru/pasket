@@ -144,6 +144,9 @@ For the desktop smoke test:
    verify the new binding works and the previous one stops working, then test clearing, restoring
    the default, conflict rejection, and persistence after relaunch. Recording and confirmation
    dialogs must not invoke the settings shortcut.
+   Press Escape in Settings with different controls focused and after reopening the window;
+   it must close Settings. While recording a shortcut or choosing a folder, Escape must cancel
+   only that operation and leave Settings open.
    With multiple displays, open history on each display and invoke Settings with both its shortcut
    and the **…** menu. Settings must follow history even if it was previously opened on another
    display. With history hidden, open Settings from the menu bar and check the pointer's display.

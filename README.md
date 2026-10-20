@@ -50,6 +50,8 @@ Pasket lives in the menu bar and opens its history panel at launch.
   entry or **… → Delete All Entries…** to clear history with confirmation.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.
+  Deleting the selected entry selects the next entry in the current list, or the previous entry
+  if there is no next entry. Deleting the only entry clears the selection.
 - Debug builds include a **Debug mode** toggle in the panel footer. Turn it on to show fictional
   text, links, email, an illustration, and a file reference for screenshots. Each date group has two
   samples, with dates refreshed whenever Debug mode is enabled. Search, filters, and

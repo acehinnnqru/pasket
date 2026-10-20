@@ -261,7 +261,8 @@ final class ClipboardStore {
     }
 
     func delete(_ id: UUID) {
-        guard !isDebugMode, !storageBlocked, !isLoading, let deleted = items.first(where: { $0.id == id }) else { return }
+        guard !isDebugMode, !storageBlocked, !isLoading, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let deleted = items[index]
         let cutoff = Date()
         deletionCutoffs[deleted.fingerprint] = cutoff
         let pendingCapture = captureTask
@@ -271,7 +272,10 @@ final class ClipboardStore {
                 self?.deletionCutoffs[deleted.fingerprint] = nil
             }
         }
-        items.removeAll { $0.id == id }
+        items.remove(at: index)
+        if selectedID == id {
+            selectedID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+        }
         thumbnails[id] = nil
         if previewID == id { clearPreview() }
         missingPreviews.remove(id)

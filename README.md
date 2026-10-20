@@ -15,8 +15,16 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - Selecting a specific content type shows **Back To Default** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.
-- **Return**, double-click, or **Copy** copies the complete item, closes the panel,
-  and returns to the previous application. Press **Command + V** there to paste.
+- The history panel borrows keyboard focus without activating Pasket, preserving the previous
+  application's input focus and caret when it closes.
+- **Return**, double-click, or **Paste** copies the complete item, closes the panel,
+  and sends **Command + V** to the original application. Automatic paste requires event-posting
+  permission, shown in **System Settings → Privacy & Security → Accessibility**. If permission
+  is missing, the item is still copied and the panel shows a **System Settings…** button;
+  press **Escape**, then **Command + V** to paste manually. After granting permission, reopen
+  history from the intended input and select the item again; permission changes never replay a paste.
+  If you switch apps, reopen history, or change the clipboard before delivery, the pending paste is
+  cancelled. Holding Return or shortcut modifiers delays delivery for up to one second.
 - **Escape** dismisses the panel. With the filter or **…** menu open, Escape first closes that menu
   and restores search focus. Both menus use the same custom appearance and support arrow keys and Return;
   clicking outside also closes them. The **…** menu opens above its button.
@@ -26,7 +34,7 @@ Pasket lives in the menu bar and opens its history panel at launch.
 - Move the history window using the dotted drag handle in its header. Move Settings by dragging
   its header title or empty header space. Dragging starts after 8 points of movement; clicking
   entries, selecting text, and dragging other content do not move the window.
-- Open the **…** menu after **Copy** and choose **Settings…** to change the global shortcut.
+- Open the **…** menu after **Paste** and choose **Settings…** to change the global shortcut.
   Preferences persist; registration failures are shown.
   Settings opens centered on the history panel's display each time, including when reusing an
   existing settings window. When history is hidden, it uses the display under the pointer.
@@ -175,14 +183,24 @@ copy renewal, upgrade review, paused maintenance, and rollback that preserves se
 Settings input tests repeatedly switch and edit four fields in an isolated hidden window. Settings
 uses its own shared TextKit 1 field editor to avoid a main-thread hang observed in TextKit 2 mouse
 selection while switching numeric inputs. Other windows and secure text fields retain their normal editors.
+Paste tests inject permissions, target state, keyboard release, and event delivery; they never send
+real keystrokes. They cover dismissal order, held keys, permission denial and revocation, target exit,
+app switches, clipboard changes, reopening, task cancellation, and timeout.
 
 For the desktop smoke test:
 
 1. Run Pasket, dismiss its panel, and copy `Pasket interaction check 2000` from a text editor.
 2. Press Hyper + P; the search field should accept typing immediately.
 3. Search `interaction check`, select the entry, and press Return.
-4. Confirm the panel closes and focus returns to the editor; press Command + V and check the text.
-5. Repeat with arrow-key selection, type filtering, Escape, and successive invocations.
+4. With event-posting permission granted, confirm the panel closes, the item is pasted exactly once
+   at the original caret or selection, and continued typing stays in that input without clicking.
+   Repeat with double-click and **Paste**. Without permission, confirm the permission message appears,
+   **System Settings…** opens Accessibility settings, and Escape followed by Command + V still works.
+   Grant permission and reopen history from the editor to retry; no delayed paste should occur.
+5. Repeat with arrow-key selection, type filtering, Escape, and successive invocations. Escape and
+   shortcut dismissal must restore the original input without pasting. Repeat in a browser input,
+   a native text editor, and a full-screen app. Hold Return or modifiers, then switch apps or reopen
+   history before releasing them; no stale paste should occur.
 6. With the search field focused, test Backspace, Delete, and Fn + Backspace with both empty and
    nonempty text; verify they only edit the search and never remove history. Press an arrow key
    or click a row, then verify the search caret stays visible and typing and deletion still edit
@@ -247,7 +265,8 @@ Core tests and a successful build do not establish that this desktop smoke test 
 
 On October 19, 2026, the user verified the main desktop flow: Hyper + P opened the panel,
 search found the entry, Return copied it and returned to the original app, and Command + V
-pasted the expected content. The other manual checks above have not yet been reported.
+pasted the expected content. That check predates automatic paste and the nonactivating focus fix;
+the updated desktop checks above have not yet been reported.
 
 ## Structure
 

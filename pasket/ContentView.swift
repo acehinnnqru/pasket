@@ -4,7 +4,9 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var store: ClipboardStore
     @Bindable var shortcuts: GlobalShortcutManager
+    @Bindable var pasteController: ClipboardPasteController
     var onDismiss: () -> Void
+    var onPasteCopiedItem: () -> Void
     var onOpenSettings: () -> Void
 
     private struct PreviewIdentity: Equatable {
@@ -34,6 +36,21 @@ struct ContentView: View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
+            if let error = pasteController.errorMessage {
+                HStack {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                    Spacer()
+                    if pasteController.needsPermission {
+                        Button("System Settings…") {
+                            onDismiss()
+                            pasteController.openAccessibilitySettings()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(.orange.opacity(0.1))
+            }
             if !store.isDebugMode, store.clipboardAccessDenied {
                 HStack {
                     Label("Clipboard access is denied. Allow Pasket in System Settings, then copy again.", systemImage: "hand.raised")
@@ -514,7 +531,7 @@ struct ContentView: View {
             .accessibilityIdentifier("deleteSelectedClipboardItem")
             Button(action: copySelection) {
                 HStack(spacing: 8) {
-                    Text("Copy")
+                    Text("Paste")
                     Image(systemName: "return").foregroundStyle(.secondary)
                 }
                 .font(.system(size: 12, weight: .medium))
@@ -522,7 +539,7 @@ struct ContentView: View {
             .buttonStyle(PasketButtonStyle(isProminent: true))
             .focusable(false)
             .disabled(!store.canCopySelection)
-            .help("Copy the complete item and return to your previous app")
+            .help("Paste the complete item into your previous app")
             .accessibilityIdentifier("copyClipboardItem")
             Button {
                 isFilterMenuPresented = false
@@ -552,7 +569,7 @@ struct ContentView: View {
     private func copySelection() {
         let presentation = store.presentationID
         Task {
-            if await store.copySelection(), store.presentationID == presentation { onDismiss() }
+            if await store.copySelection(), store.presentationID == presentation { onPasteCopiedItem() }
         }
     }
 
@@ -992,6 +1009,8 @@ private struct VisualEffectBackground: NSViewRepresentable {
 }
 
 #Preview {
-    ContentView(store: ClipboardStore(), shortcuts: GlobalShortcutManager(), onDismiss: {}, onOpenSettings: {})
+    ContentView(store: ClipboardStore(), shortcuts: GlobalShortcutManager(),
+                pasteController: ClipboardPasteController(), onDismiss: {},
+                onPasteCopiedItem: {}, onOpenSettings: {})
         .frame(width: 800, height: 520)
 }

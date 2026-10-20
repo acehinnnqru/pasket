@@ -202,7 +202,7 @@ struct ShortcutSettingsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             panelControl(keys: "↑ ↓", title: "Navigate")
-            panelControl(keys: "↩", title: "Copy & return")
+            panelControl(keys: "↩", title: "Paste & return")
             panelControl(keys: "esc", title: "Dismiss")
         }
         .frame(maxWidth: .infinity, alignment: .leading)

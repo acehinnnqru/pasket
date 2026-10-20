@@ -44,12 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class ApplicationController: NSObject, NSWindowDelegate {
     let store = ClipboardStore()
     let shortcuts = GlobalShortcutManager()
+    let pasteController = ClipboardPasteController()
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
     private var previousApplication: NSRunningApplication?
     private var startupTask: Task<Void, Never>?
     private var settingsFieldEditor = SettingsFieldEditor()
+    private var isHidingPanel = false
 
     func start() {
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
@@ -67,10 +69,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func showPanel() {
+        pasteController.prepareForPresentation()
         if panel?.isVisible == true {
             panel?.makeKeyAndOrderFront(nil)
             return
         }
+        previousApplication = nil
         if let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             previousApplication = frontmost
@@ -94,7 +98,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel.contentView = NSHostingView(rootView: ContentView(
                 store: store,
                 shortcuts: shortcuts,
+                pasteController: pasteController,
                 onDismiss: { [weak self] in self?.hidePanel() },
+                onPasteCopiedItem: { [weak self] in self?.pasteCopiedItem() },
                 onOpenSettings: { [weak self] in self?.showSettings() }
             ))
             self.panel = panel
@@ -105,18 +111,32 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             if let visibleFrame = screen?.visibleFrame {
                 panel.setFrameOrigin(NSPoint(x: visibleFrame.midX - panel.frame.width / 2, y: visibleFrame.midY - panel.frame.height / 2))
             }
-            NSApplication.shared.activate()
+            // Let the nonactivating panel borrow keyboard focus without deactivating the editor.
             panel.makeKeyAndOrderFront(nil)
         }
     }
 
     func hidePanel(restorePreviousApplication: Bool = true) {
+        guard !isHidingPanel else { return }
+        isHidingPanel = true
+        defer { isHidingPanel = false }
+        pasteController.cancel()
         let applicationToRestore = previousApplication
         previousApplication = nil
         store.invalidatePresentation()
         panel?.orderOut(nil)
-        if restorePreviousApplication, let applicationToRestore, !applicationToRestore.isTerminated {
+        if restorePreviousApplication, let applicationToRestore,
+           !applicationToRestore.isTerminated, !applicationToRestore.isActive {
             applicationToRestore.activate()
+        }
+    }
+
+    private func pasteCopiedItem() {
+        let target = previousApplication.map { ClipboardPasteController.Target(application: $0) }
+        let presentation = store.presentationID
+        Task {
+            guard store.presentationID == presentation, panel?.isVisible == true else { return }
+            await pasteController.paste(to: target) { [weak self] in self?.hidePanel() }
         }
     }
 
@@ -163,7 +183,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, window === panel,
+        if !isHidingPanel, let window = notification.object as? NSWindow, window === panel, window.isVisible,
            window.attachedSheet == nil {
             hidePanel(restorePreviousApplication: false)
         }

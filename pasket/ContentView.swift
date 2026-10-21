@@ -37,12 +37,18 @@ struct ContentView: View {
     @State private var pasteControlFrame: CGRect = .zero
     @State private var textSeparator: ClipboardTextSeparator = .newline
     @State private var reversePasteOrder = false
+    @State private var isShowingQueueSetup = false
+    @State private var pendingQueueItems: [ClipboardItem] = []
+    @State private var pendingQueuePresentationID: UUID?
+    @State private var startsQueueAfterSetup = false
 
     private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented || isPasteMenuPresented }
     private var orderedSelectedItems: [ClipboardItem] {
         reversePasteOrder ? Array(store.selectedItems.reversed()) : store.selectedItems
     }
-    private var isDialogPresented: Bool { isConfirmingClear || isConfirmingDeletion || store.systemAccess.request != nil }
+    private var isDialogPresented: Bool {
+        isConfirmingClear || isConfirmingDeletion || isShowingQueueSetup || store.systemAccess.request != nil
+    }
 
     private var canClearHistory: Bool {
         !store.isDebugMode && store.totalCount > 0 && !store.isLoading && !store.isStorageBlocked
@@ -52,6 +58,13 @@ struct ContentView: View {
     var body: some View {
         historySurface
             .overlay(alignment: .bottomTrailing) { pasteMenuOverlay }
+            .sheet(isPresented: $isShowingQueueSetup, onDismiss: finishQueueSetup) {
+                ShortcutRecordingView(shortcuts: shortcuts,
+                                      onSave: { startsQueueAfterSetup = true; isShowingQueueSetup = false },
+                                      onCancel: { isShowingQueueSetup = false },
+                                      isPasteQueueSetup: true)
+                    .presentationBackground(.clear)
+            }
             .alert("Delete \(pendingDeletion.count) Selected Items?", isPresented: $isConfirmingDeletion) {
                 Button("Cancel", role: .cancel) { pendingDeletion = [] }
                 Button("Delete \(pendingDeletion.count) Items", role: .destructive) {
@@ -202,6 +215,13 @@ struct ContentView: View {
             isInspectingSelection = false
             isConfirmingDeletion = false
             pendingDeletion = []
+            if isShowingQueueSetup {
+                startsQueueAfterSetup = false
+                pendingQueueItems = []
+                pendingQueuePresentationID = nil
+                if shortcuts.isConfiguringPasteQueue { shortcuts.cancelRecording() }
+                isShowingQueueSetup = false
+            }
         }
         .onChange(of: store.selectedIDs) { isInspectingSelection = false }
         .onChange(of: store.query) { store.reconcileSelection() }
@@ -761,7 +781,29 @@ struct ContentView: View {
 
     private func startPasteQueue() {
         guard store.canCopySelection, !store.isSearching, !store.pasteQueue.isPasting else { return }
+        if shortcuts.needsPasteQueueShortcutSetup {
+            pendingQueueItems = orderedSelectedItems
+            pendingQueuePresentationID = store.presentationID
+            startsQueueAfterSetup = false
+            dismissMenus()
+            searchFocused = false
+            shortcuts.beginPasteQueueSetup()
+            isShowingQueueSetup = true
+            return
+        }
         onStartPasteQueue(orderedSelectedItems)
+    }
+
+    private func finishQueueSetup() {
+        let items = pendingQueueItems
+        let shouldStart = startsQueueAfterSetup && pendingQueuePresentationID == store.presentationID
+            && !items.isEmpty && !shortcuts.needsPasteQueueShortcutSetup
+        if shortcuts.isConfiguringPasteQueue { shortcuts.cancelRecording() }
+        startsQueueAfterSetup = false
+        pendingQueueItems = []
+        pendingQueuePresentationID = nil
+        searchFocused = true
+        if shouldStart { onStartPasteQueue(items) }
     }
 
     private func pasteCombinedSelection() {

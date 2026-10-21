@@ -63,6 +63,13 @@ save automatically for the next launch.
   cannot be combined. All selected content is loaded and all files are resolved before writing;
   an unavailable item stops the action instead of silently pasting a partial selection.
 - **Start Paste Queue** freezes the selection in the displayed order and pastes the first item.
+  On first use, a setup dialog explains Paste Next and asks you to record a shortcut or confirm
+  **Follow App**. Nothing is pasted before **Save & Start Queue**. Cancel keeps the selection and
+  shows setup again next time; confirming is remembered, and existing custom shortcuts skip setup.
+  Saving checks that the shortcut can be registered. Conflicts keep the dialog open without saving
+  or starting the queue. Using the same shortcut as normal paste is allowed: it advances the queue
+  only while active. Combinations assigned to other Pasket actions or unavailable global hotkeys
+  require another choice. Closing or reopening history during setup never starts a pending queue.
   Move the caret to the next destination, then press the destination app's paste shortcut (normally
   **Command-V**) to paste the next item. Pasket reads the standard Paste menu's current keyboard
   equivalent, including remapped shortcuts and common localized menu titles, and refreshes it when

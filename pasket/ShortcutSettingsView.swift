@@ -720,6 +720,7 @@ struct ShortcutRecordingView: View {
     @Bindable var shortcuts: GlobalShortcutManager
     var onSave: () -> Void = {}
     var onCancel: () -> Void = {}
+    var isPasteQueueSetup = false
 
     private var hasSavedShortcut: Bool {
         switch shortcuts.recordingAction {
@@ -746,7 +747,7 @@ struct ShortcutRecordingView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Record a shortcut")
+                    Text(isPasteQueueSetup ? "Set Up Paste Queue" : "Record a shortcut")
                         .font(.system(size: 16, weight: .medium))
                     Text(shortcuts.recordingAction.title)
                         .font(.system(size: 12))
@@ -757,6 +758,13 @@ struct ShortcutRecordingView: View {
             .padding(18)
             Divider().opacity(0.5)
             VStack(alignment: .leading, spacing: 14) {
+                if isPasteQueueSetup {
+                    Text("Choose how to paste the next item without reopening history. Record a shortcut, or use the app's Paste shortcut (currently \(shortcuts.resolvedPasteShortcut.displayName)).")
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text("If the shortcuts match, that key pastes the next queued item while the queue is active. Normal paste resumes when the queue finishes or is canceled. Nothing is pasted until you save.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Group {
                     if let pending = shortcuts.pendingShortcut {
                         ShortcutKeycaps(shortcut: pending)
@@ -810,7 +818,7 @@ struct ShortcutRecordingView: View {
                 .accessibilityHidden(true)
             Divider().opacity(0.5)
             HStack {
-                if hasSavedShortcut {
+                if hasSavedShortcut || isPasteQueueSetup {
                     Button(shortcuts.recordingAction == .pasteNext ? "Follow App" : shortcuts.recordingAction == .pasteFallback ? "Restore Default" : "Clear Shortcut",
                            role: shortcuts.recordingAction == .pasteNext || shortcuts.recordingAction == .pasteFallback ? nil : .destructive) {
                         shortcuts.stageShortcut(nil)
@@ -828,7 +836,7 @@ struct ShortcutRecordingView: View {
                     }
                     .font(.system(size: 12, weight: .medium))
                 }
-                Button("Save Shortcut") {
+                Button(isPasteQueueSetup ? "Save & Start Queue" : "Save Shortcut") {
                     if shortcuts.saveRecording() { onSave() }
                 }
                 .disabled(!shortcuts.canSaveRecording)

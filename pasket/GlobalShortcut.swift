@@ -107,6 +107,9 @@ final class GlobalShortcutManager {
     private(set) var recordingAction: RecordingAction = .showHistory
     private(set) var pendingShortcut: GlobalShortcut?
     private(set) var isClearingShortcut = false
+    private(set) var isConfiguringPasteQueue = false
+    private(set) var hasConfirmedPasteQueueShortcut = false
+    var needsPasteQueueShortcutSetup: Bool { !hasConfirmedPasteQueueShortcut && pasteNextShortcut == nil }
     var canSaveRecording: Bool { pendingShortcut != nil || isClearingShortcut }
     var onInvoke: (() -> Void)?
     var onPasteNext: (() -> Void)?
@@ -130,6 +133,7 @@ final class GlobalShortcutManager {
     private static let settingsStorageKey = "openSettingsShortcut"
     private static let pasteNextStorageKey = "pasteNextShortcut"
     private static let pasteFallbackStorageKey = "pasteFallbackShortcut"
+    private static let pasteQueueSetupStorageKey = "pasteQueueShortcutConfirmed"
     private static let signature: OSType = 0x50534B54
 
     init(defaults: UserDefaults = .standard,
@@ -138,6 +142,7 @@ final class GlobalShortcutManager {
         self.defaults = defaults
         self.queueRegistration = queueRegistration
         self.queueUnregistration = queueUnregistration
+        hasConfirmedPasteQueueShortcut = defaults.bool(forKey: Self.pasteQueueSetupStorageKey)
         if let data = defaults.data(forKey: Self.storageKey),
            let saved = try? JSONDecoder().decode(GlobalShortcut.self, from: data) {
             shortcut = saved
@@ -230,7 +235,14 @@ final class GlobalShortcutManager {
         pendingShortcut = nil
         isClearingShortcut = false
         recordingAction = action
+        isConfiguringPasteQueue = false
         isRecording = true
+    }
+
+    func beginPasteQueueSetup() {
+        beginRecording(.pasteNext)
+        isConfiguringPasteQueue = true
+        stageShortcut(pasteNextShortcut)
     }
 
     func record(_ event: NSEvent) {
@@ -260,6 +272,10 @@ final class GlobalShortcutManager {
         guard isRecording, canSaveRecording else { return false }
         switch recordingAction {
         case .pasteNext:
+            if isConfiguringPasteQueue, !pasteQueueIsActive {
+                guard registerPasteNext(pendingShortcut ?? resolvedPasteShortcut) else { return false }
+                unregisterPasteNext()
+            }
             guard setPasteNextShortcut(pendingShortcut) else { return false }
         case .pasteFallback:
             guard setPasteFallbackShortcut(pendingShortcut) else { return false }
@@ -302,6 +318,7 @@ final class GlobalShortcutManager {
         isRecording = false
         pendingShortcut = nil
         isClearingShortcut = false
+        isConfiguringPasteQueue = false
         errorMessage = nil
         restoreRegistration()
     }
@@ -379,6 +396,8 @@ final class GlobalShortcutManager {
             guard registerPasteNext(resolvedPasteShortcut) else { return false }
         }
         pasteNextShortcut = candidate
+        hasConfirmedPasteQueueShortcut = true
+        defaults.set(true, forKey: Self.pasteQueueSetupStorageKey)
         errorMessage = nil
         if let candidate, let data = try? JSONEncoder().encode(candidate) {
             defaults.set(data, forKey: Self.pasteNextStorageKey)
@@ -444,7 +463,7 @@ final class GlobalShortcutManager {
                                          GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &replacement)
         }
         guard status == noErr, queueRegistration != nil || replacement != nil else {
-            errorMessage = "Paste Next could not be registered (status \(status)). Choose another combination in Settings."
+            errorMessage = "Paste Next could not be registered. It may already be in use (status \(status)). Choose another combination."
             return false
         }
         unregisterPasteNext()

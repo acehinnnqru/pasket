@@ -1079,7 +1079,11 @@ private struct ClipboardPasteActionsMenu: View {
     @State private var highlighted: Row = .together
     @FocusState private var isFocused: Bool
     private var enabledRows: [Row] {
-        Row.allCases.filter { ($0 != .together || (canCombine && canPaste)) && ($0 != .queue || canPaste) }
+        Row.allCases.filter {
+            ($0 != .together || (canCombine && canPaste))
+                && ($0 != .queue || canPaste)
+                && ($0.separator == nil || canCombine)
+        }
     }
 
     var body: some View {
@@ -1092,9 +1096,18 @@ private struct ClipboardPasteActionsMenu: View {
                             .fixedSize(horizontal: false, vertical: true).padding(8)
                     }
                     Divider().padding(.vertical, 4)
-                    Text("Separate Text With").font(.system(size: 11)).foregroundStyle(.secondary).padding(8)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Paste Together Only").font(.system(size: 11, weight: .semibold))
+                        Text("Separate text with").font(.system(size: 11))
+                    }
+                    .foregroundStyle(.secondary).padding(8)
                 }
-                if row == .reverse { Divider().padding(.vertical, 4) }
+                if row == .reverse {
+                    Divider().padding(.vertical, 4)
+                    Text("Applies to Paste Together and Paste Queue")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true).padding(8)
+                }
                 Button { choose(row) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: row == .together ? "doc.on.clipboard" : row == .queue ? "text.insert" : "checkmark")

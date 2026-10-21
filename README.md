@@ -63,16 +63,26 @@ save automatically for the next launch.
   cannot be combined. All selected content is loaded and all files are resolved before writing;
   an unavailable item stops the action instead of silently pasting a partial selection.
 - **Start Paste Queue** freezes the selection in the displayed order and pastes the first item.
-  Move the caret to the next destination, then use **Paste Next** in the history panel or menu bar,
-  or configure its optional shortcut in Settings. That shortcut is global only while a queue is
-  active; Command-V always retains normal paste behavior. A held shortcut triggers only once per
-  press. The menu bar shows the remaining count, and both menus show the next item and a Cancel action.
+  Move the caret to the next destination, then press the destination app's paste shortcut (normally
+  **Command-V**) to paste the next item. Pasket reads the standard Paste menu's current keyboard
+  equivalent, including remapped shortcuts and common localized menu titles, and refreshes it when
+  switching apps. Both normal automatic paste and queue delivery send that destination shortcut.
+  Settings → **Paste Shortcut Fallback** provides a manual fallback for apps whose Paste menu cannot
+  be recognized; the fallback defaults to Command-V. Settings → **Paste Next** optionally overrides
+  the queue trigger independently of the shortcut sent to the destination. Existing custom triggers
+  are preserved; **Follow App** restores automatic following. The trigger is registered only while
+  a queue is active, temporarily released in Pasket Settings, then unregistered on completion or
+  cancellation so normal paste resumes. Pasket never changes macOS or another app's shortcut settings.
+  A held shortcut triggers only once per press. The menu bar shows the remaining count, and the
+  history panel and menu bar show the next item, actual trigger, Paste Next, and Cancel controls.
   Queues support individual text, link, email, image, and file entries without combining their formats.
   Search, type filters, and recency changes do not change the queue order. Each invocation pastes
   into the app active at that invocation; it never inserts Tab or Return automatically.
   Copying new content cancels the queue even when collection is paused. Cancelling, quitting,
   deleting a queued item, an unavailable item, or a failed paste stops the queue without skipping
   ahead or replaying it after a permission change. Opening history alone preserves the queue.
+  Progress tracks paste requests sent, not confirmed insertion into the destination: macOS provides
+  no general successful-paste receipt, and a pasteboard data request alone is not proof of insertion.
 - Selecting a specific content type shows a return arrow and **Reset** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.
@@ -84,10 +94,10 @@ save automatically for the next launch.
 - The history panel borrows keyboard focus without activating Pasket, preserving the previous
   application's input focus and caret when it closes.
 - **Return**, double-click, or **Paste** copies the complete item, closes the panel,
-  and sends **Command + V** to the original application. Automatic paste requires event-posting
+  and sends the detected paste shortcut to the original application. Automatic paste requires event-posting
   permission, shown in **System Settings → Privacy & Security → Accessibility**. If permission
   is missing, the item is still copied and a native permission dialog offers **Open System Settings…**;
-  press **Escape**, then **Command + V** to paste manually. After granting permission, reopen
+  press **Escape**, then use the original app's Paste command or paste shortcut. After granting permission, reopen
   history from the intended input and select the item again; permission changes never replay a paste.
   If access is already allowed but the permission dialog persists, choose **Quit & Reopen Pasket**
   in that dialog to refresh the running app. Pending history writes finish before quitting;
@@ -345,8 +355,13 @@ For the desktop smoke test:
    follows Reverse Order. Check every separator with text, links, and emails, and paste multiple file
    entries into Finder. A missing file must leave the clipboard unchanged. Mixed types must offer
    Start Paste Queue as the primary action and explain why Paste Together is disabled.
-   Start a queue in a text editor, move between fields, and invoke Paste Next using its optional
-   shortcut, the menu bar, and the reopened panel. Confirm one item per press, no repeats while held,
+   Start a queue in a text editor, move between fields, and invoke Paste Next with Command-V,
+   the menu bar, and the reopened panel. Remap the editor's Paste menu through macOS App Shortcuts:
+   confirm the queue trigger, progress hint, and actual paste follow the remapping. Switch to an app
+   with another Paste shortcut and confirm the trigger changes. For an unrecognized menu, configure
+   Paste Shortcut Fallback and verify it is used only when detection is unavailable. Save a custom
+   Paste Next trigger, verify delivery still uses the target's paste command, then select Follow App.
+   Confirm completion and cancellation restore normal paste. Confirm one item per press, no repeats while held,
    progress and the next title update, and changing search or selection does not reorder the queue.
    Verify Cancel, copying new content while collection is paused, deleting a queued entry, quitting,
    missing files, and revoked Accessibility all stop the queue without skipping or delayed replay.

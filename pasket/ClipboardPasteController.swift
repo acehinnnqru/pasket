@@ -34,17 +34,17 @@ final class ClipboardPasteController {
     let systemAccess: SystemAccessController
     @ObservationIgnored private var requestID = UUID()
     @ObservationIgnored private let hasAccess: () -> Bool
-    @ObservationIgnored private let inputReleased: () -> Bool
+    @ObservationIgnored private let inputReleased: (UInt32?) -> Bool
     @ObservationIgnored private let clipboardChangeCount: () -> Int
-    @ObservationIgnored private let postPaste: (pid_t) -> Bool
+    @ObservationIgnored private let postPaste: (pid_t, GlobalShortcut) -> Bool
     @ObservationIgnored private let wait: () async throws -> Void
 
     init(toasts: PasketToastCenter? = nil,
          systemAccess: SystemAccessController? = nil,
          hasAccess: @escaping () -> Bool = { CGPreflightPostEventAccess() },
-         inputReleased: @escaping () -> Bool = ClipboardPasteController.inputIsReleased,
+         inputReleased: @escaping (UInt32?) -> Bool = ClipboardPasteController.inputIsReleased,
          clipboardChangeCount: @escaping () -> Int = { NSPasteboard.general.changeCount },
-         postPaste: @escaping (pid_t) -> Bool = ClipboardPasteController.postPasteEvent,
+         postPaste: @escaping (pid_t, GlobalShortcut) -> Bool = ClipboardPasteController.postPasteEvent,
          wait: @escaping () async throws -> Void = { try await Task.sleep(for: .milliseconds(20)) }) {
         self.toasts = toasts ?? PasketToastCenter()
         self.systemAccess = systemAccess ?? SystemAccessController()
@@ -65,17 +65,18 @@ final class ClipboardPasteController {
     }
 
     @discardableResult
-    func paste(to target: Target?, expectedChangeCount: Int? = nil, dismiss: () -> Void) async -> Bool {
+    func paste(to target: Target?, using shortcut: GlobalShortcut = .defaultPaste,
+               invocationKeyCode: UInt32? = nil, expectedChangeCount: Int? = nil, dismiss: () -> Void) async -> Bool {
         guard !Task.isCancelled else { return false }
         if let expectedChangeCount, clipboardChangeCount() != expectedChangeCount { return false }
         prepareForPresentation()
         guard let target, !target.isTerminated(), target.isActive() else {
-            errorMessage = "Item copied. Open history from the app where you want to paste, or press Command + V there."
+            errorMessage = "Item copied. Open history from the app where you want to paste, or use that app's Paste command."
             return false
         }
         guard hasAccess() else {
             needsPermission = true
-            errorMessage = "Item copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically. You can also press Escape, then Command + V."
+            errorMessage = "Item copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically. You can also press Escape, then use the app's Paste command (\(shortcut.displayName))."
             systemAccess.present(.accessibility)
             return false
         }
@@ -89,7 +90,7 @@ final class ClipboardPasteController {
             guard !Task.isCancelled, requestID == request,
                   !target.isTerminated(), target.isActive(),
                   clipboardChangeCount() == changeCount else { return false }
-            guard inputReleased() else { continue }
+            guard inputReleased(invocationKeyCode) else { continue }
             guard hasAccess() else { return false }
             // Keep held Return repeats in the panel, then give AppKit time to release key focus.
             dismiss()
@@ -98,7 +99,7 @@ final class ClipboardPasteController {
             guard !Task.isCancelled, requestID == request,
                   !target.isTerminated(), target.isActive(),
                   clipboardChangeCount() == changeCount, hasAccess() else { return false }
-            return postPaste(target.processIdentifier)
+            return postPaste(target.processIdentifier, shortcut)
         }
         return false
     }
@@ -110,23 +111,24 @@ final class ClipboardPasteController {
         }
     }
 
-    nonisolated private static func inputIsReleased() -> Bool {
+    nonisolated private static func inputIsReleased(invocationKeyCode: UInt32?) -> Bool {
         let flags = CGEventSource.flagsState(.hidSystemState)
         guard flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).isEmpty else {
             return false
         }
         return !CGEventSource.keyState(.hidSystemState, key: CGKeyCode(kVK_Return))
             && !CGEventSource.keyState(.hidSystemState, key: CGKeyCode(kVK_ANSI_KeypadEnter))
+            && (invocationKeyCode.map { !CGEventSource.keyState(.hidSystemState, key: CGKeyCode($0)) } ?? true)
     }
 
-    nonisolated private static func postPasteEvent(to processIdentifier: pid_t) -> Bool {
+    nonisolated private static func postPasteEvent(to processIdentifier: pid_t, shortcut: GlobalShortcut) -> Bool {
         guard let source = CGEventSource(stateID: .privateState),
-              let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false) else {
+              let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(shortcut.keyCode), keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(shortcut.keyCode), keyDown: false) else {
             return false
         }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
+        down.flags = shortcut.eventFlags
+        up.flags = shortcut.eventFlags
         // Address the original process so a concurrent app switch cannot receive this paste.
         down.postToPid(processIdentifier)
         up.postToPid(processIdentifier)

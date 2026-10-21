@@ -21,7 +21,7 @@ struct PasketApp: App {
                 Divider()
                 Text("Next: \(appDelegate.controller.store.pasteQueue.next?.title ?? "")")
                 Text("\(appDelegate.controller.store.pasteQueue.remainingCount) remaining")
-                Button("Paste Next" + (appDelegate.controller.shortcuts.pasteNextShortcut.map { " (\($0.displayName))" } ?? "")) {
+                Button("Paste Next (\(appDelegate.controller.shortcuts.effectivePasteNextShortcut.displayName))") {
                     appDelegate.controller.pasteNextQueuedItem()
                 }
                 .disabled(appDelegate.controller.store.pasteQueue.isPasting)

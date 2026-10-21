@@ -19,7 +19,7 @@ final class SystemAccessController {
         var message: String {
             switch permission {
             case .accessibility:
-                "Your item has been copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically.\n\nAlready allowed access? Quit and reopen Pasket to refresh its permissions, then try pasting again.\n\nTo paste manually, cancel, press Escape, and use Command + V in your app."
+                "Your item has been copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically.\n\nAlready allowed access? Quit and reopen Pasket to refresh its permissions, then try pasting again.\n\nTo paste manually, cancel, press Escape, and use your app's Paste command or its configured paste shortcut."
             case .clipboard:
                 "Allow Pasket to read the clipboard in System Settings to collect new items. Your saved history is still available. After allowing access, copy the item again."
             }

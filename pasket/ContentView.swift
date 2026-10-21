@@ -781,14 +781,10 @@ struct ContentView: View {
             Image(systemName: "text.insert").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Next: \(store.pasteQueue.next?.title ?? "")").lineLimit(1)
-                Text("\(store.pasteQueue.remainingCount) remaining" + (shortcuts.pasteNextShortcut.map { " · \($0.displayName) to paste next" }
-                     ?? " · Set a Paste Next shortcut in Settings"))
+                Text("\(store.pasteQueue.remainingCount) remaining · \(shortcuts.effectivePasteNextShortcut.displayName) to paste next")
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            if shortcuts.pasteNextShortcut == nil {
-                Button("Set Shortcut…") { onOpenSettings() }.buttonStyle(PasketButtonStyle())
-            }
             Button("Paste Next", action: onPasteNext)
                 .buttonStyle(PasketButtonStyle(isProminent: true))
                 .disabled(store.pasteQueue.isPasting || store.isCopying)

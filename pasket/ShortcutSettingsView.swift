@@ -333,10 +333,18 @@ struct ShortcutSettingsView: View {
                 Divider().opacity(0.35).padding(.leading, 40)
                 shortcutRow(
                     title: "Paste Next",
-                    description: "Global while a paste queue is active · Optional",
+                    description: "Follows the app's paste shortcut while a queue is active",
                     icon: Image(systemName: "text.insert"),
                     shortcut: shortcuts.pasteNextShortcut,
                     action: .pasteNext
+                )
+                Divider().opacity(0.35).padding(.leading, 40)
+                shortcutRow(
+                    title: "Paste Shortcut Fallback",
+                    description: "Used when an app's Paste menu cannot be detected · Default: ⌘V",
+                    icon: Image(systemName: "doc.on.clipboard"),
+                    shortcut: shortcuts.pasteFallbackShortcut,
+                    action: .pasteFallback
                 )
             }
             .modifier(SettingsCard())
@@ -374,7 +382,7 @@ struct ShortcutSettingsView: View {
                 } else {
                     HStack(spacing: 8) {
                         Image(systemName: "plus")
-                        Text("Set Shortcut")
+                        Text(action == .pasteNext ? "Follow App" : action == .pasteFallback ? "Default (⌘V)" : "Set Shortcut")
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -385,7 +393,7 @@ struct ShortcutSettingsView: View {
             .fixedSize()
             .help("Record a shortcut for \(title)")
             .accessibilityLabel("Record \(title) shortcut")
-            .accessibilityValue(shortcut?.displayName ?? "Not set")
+            .accessibilityValue(shortcut?.displayName ?? (action == .pasteNext ? "Follow app's paste shortcut" : action == .pasteFallback ? "Default: Command V" : "Not set"))
             if action == .openSettings {
                 Button {
                     shortcuts.beginRecording(.openSettings)
@@ -719,6 +727,7 @@ struct ShortcutRecordingView: View {
         case .openSettings: shortcuts.settingsShortcut != nil
         case .deleteSelectedItem: shortcuts.deletionShortcut != nil
         case .pasteNext: shortcuts.pasteNextShortcut != nil
+        case .pasteFallback: shortcuts.pasteFallbackShortcut != nil
         }
     }
 
@@ -755,7 +764,9 @@ struct ShortcutRecordingView: View {
                         HStack(spacing: 8) {
                             Image(systemName: shortcuts.isClearingShortcut ? "minus.circle" : "record.circle")
                                 .foregroundStyle(.secondary)
-                            Text(shortcuts.isClearingShortcut ? "No shortcut" : "Press a key combination")
+                            Text(shortcuts.isClearingShortcut
+                                 ? (shortcuts.recordingAction == .pasteNext ? "Follow App" : shortcuts.recordingAction == .pasteFallback ? "Default (⌘V)" : "No shortcut")
+                                 : "Press a key combination")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                         }
                     }
@@ -800,7 +811,8 @@ struct ShortcutRecordingView: View {
             Divider().opacity(0.5)
             HStack {
                 if hasSavedShortcut {
-                    Button("Clear Shortcut", role: .destructive) {
+                    Button(shortcuts.recordingAction == .pasteNext ? "Follow App" : shortcuts.recordingAction == .pasteFallback ? "Restore Default" : "Clear Shortcut",
+                           role: shortcuts.recordingAction == .pasteNext || shortcuts.recordingAction == .pasteFallback ? nil : .destructive) {
                         shortcuts.stageShortcut(nil)
                     }
                     .accessibilityLabel("Clear \(shortcuts.recordingAction.title) shortcut")

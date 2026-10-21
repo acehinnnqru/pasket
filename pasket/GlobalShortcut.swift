@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Observation
 
-struct GlobalShortcut: Codable, Equatable {
+nonisolated struct GlobalShortcut: Codable, Equatable, Sendable {
     let keyCode: UInt32
     let modifiers: UInt32
     let keyLabel: String
@@ -12,6 +12,17 @@ struct GlobalShortcut: Codable, Equatable {
         modifiers: UInt32(cmdKey),
         keyLabel: ","
     )
+
+    static let defaultPaste = GlobalShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey), keyLabel: "V")
+
+    var eventFlags: CGEventFlags {
+        var flags: CGEventFlags = []
+        if modifiers & UInt32(cmdKey) != 0 { flags.insert(.maskCommand) }
+        if modifiers & UInt32(controlKey) != 0 { flags.insert(.maskControl) }
+        if modifiers & UInt32(optionKey) != 0 { flags.insert(.maskAlternate) }
+        if modifiers & UInt32(shiftKey) != 0 { flags.insert(.maskShift) }
+        return flags
+    }
 
     var displayName: String {
         var result = ""
@@ -71,6 +82,7 @@ final class GlobalShortcutManager {
         case openSettings
         case deleteSelectedItem
         case pasteNext
+        case pasteFallback
 
         var title: String {
             switch self {
@@ -78,6 +90,7 @@ final class GlobalShortcutManager {
             case .openSettings: "Open Settings"
             case .deleteSelectedItem: "Delete Selected Item"
             case .pasteNext: "Paste Next"
+            case .pasteFallback: "Paste Shortcut Fallback"
             }
         }
     }
@@ -86,6 +99,9 @@ final class GlobalShortcutManager {
     private(set) var deletionShortcut: GlobalShortcut?
     private(set) var settingsShortcut: GlobalShortcut?
     private(set) var pasteNextShortcut: GlobalShortcut?
+    private(set) var pasteFallbackShortcut: GlobalShortcut?
+    private(set) var resolvedPasteShortcut = GlobalShortcut.defaultPaste
+    var effectivePasteNextShortcut: GlobalShortcut { pasteNextShortcut ?? resolvedPasteShortcut }
     private(set) var errorMessage: String?
     private(set) var isRecording = false
     private(set) var recordingAction: RecordingAction = .showHistory
@@ -98,7 +114,12 @@ final class GlobalShortcutManager {
     @ObservationIgnored private var hotKey: EventHotKeyRef?
     @ObservationIgnored private var pasteNextHotKey: EventHotKeyRef?
     @ObservationIgnored private var activePasteNextID: UInt32 = 0
+    @ObservationIgnored private var registeredPasteNextShortcut: GlobalShortcut?
+    @ObservationIgnored private var detectedPasteShortcut: GlobalShortcut?
+    @ObservationIgnored private let queueRegistration: ((GlobalShortcut, UInt32) -> OSStatus)?
+    @ObservationIgnored private let queueUnregistration: (() -> Void)?
     @ObservationIgnored private var pasteQueueIsActive = false
+    @ObservationIgnored private var pasteQueueIsSuspended = false
     @ObservationIgnored private var pressedIDs: Set<UInt32> = []
     @ObservationIgnored private var handler: EventHandlerRef?
     @ObservationIgnored private var activeID: UInt32 = 0
@@ -108,10 +129,15 @@ final class GlobalShortcutManager {
     private static let deletionStorageKey = "deleteSelectedItemShortcut"
     private static let settingsStorageKey = "openSettingsShortcut"
     private static let pasteNextStorageKey = "pasteNextShortcut"
+    private static let pasteFallbackStorageKey = "pasteFallbackShortcut"
     private static let signature: OSType = 0x50534B54
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard,
+         queueRegistration: ((GlobalShortcut, UInt32) -> OSStatus)? = nil,
+         queueUnregistration: (() -> Void)? = nil) {
         self.defaults = defaults
+        self.queueRegistration = queueRegistration
+        self.queueUnregistration = queueUnregistration
         if let data = defaults.data(forKey: Self.storageKey),
            let saved = try? JSONDecoder().decode(GlobalShortcut.self, from: data) {
             shortcut = saved
@@ -138,9 +164,13 @@ final class GlobalShortcutManager {
            let candidate = try? JSONDecoder().decode(GlobalShortcut.self, from: data),
            shortcut?.hasSameKeys(as: candidate) != true,
            deletionShortcut?.hasSameKeys(as: candidate) != true,
-           settingsShortcut?.hasSameKeys(as: candidate) != true,
-           !isStandardPaste(candidate) {
+           settingsShortcut?.hasSameKeys(as: candidate) != true {
             pasteNextShortcut = candidate
+        }
+        if let data = defaults.data(forKey: Self.pasteFallbackStorageKey),
+           let candidate = try? JSONDecoder().decode(GlobalShortcut.self, from: data) {
+            pasteFallbackShortcut = candidate
+            resolvedPasteShortcut = candidate
         }
     }
 
@@ -161,17 +191,8 @@ final class GlobalShortcutManager {
                     let manager = Unmanaged<GlobalShortcutManager>.fromOpaque(context).takeUnretainedValue()
                     guard identifier.signature == GlobalShortcutManager.signature,
                           !manager.isRecording else { return OSStatus(eventNotHandledErr) }
-                    if GetEventKind(event) == UInt32(kEventHotKeyReleased) {
-                        manager.pressedIDs.remove(identifier.id)
-                        return noErr
-                    }
-                    guard manager.pressedIDs.insert(identifier.id).inserted else { return noErr }
-                    if identifier.id == manager.activeID {
-                        manager.onInvoke?()
-                    } else if identifier.id == manager.activePasteNextID {
-                        manager.onPasteNext?()
-                    } else { return OSStatus(eventNotHandledErr) }
-                    return noErr
+                    return manager.handleHotKey(id: identifier.id, pressed: GetEventKind(event) == UInt32(kEventHotKeyPressed))
+                        ? noErr : OSStatus(eventNotHandledErr)
                 }
             },
             2,
@@ -191,6 +212,15 @@ final class GlobalShortcutManager {
         unregisterPasteNext()
         if let handler { RemoveEventHandler(handler) }
         handler = nil
+    }
+
+    @discardableResult
+    func handleHotKey(id: UInt32, pressed: Bool) -> Bool {
+        guard !isRecording, id != 0, id == activeID || id == activePasteNextID else { return false }
+        if !pressed { pressedIDs.remove(id); return true }
+        guard pressedIDs.insert(id).inserted else { return true }
+        if id == activeID { onInvoke?() } else { onPasteNext?() }
+        return true
     }
 
     func beginRecording(_ action: RecordingAction = .showHistory) {
@@ -231,6 +261,8 @@ final class GlobalShortcutManager {
         switch recordingAction {
         case .pasteNext:
             guard setPasteNextShortcut(pendingShortcut) else { return false }
+        case .pasteFallback:
+            guard setPasteFallbackShortcut(pendingShortcut) else { return false }
         case .deleteSelectedItem, .openSettings:
             let accepted = recordingAction == .openSettings
                 ? setSettingsShortcut(pendingShortcut) : setDeletionShortcut(pendingShortcut)
@@ -276,7 +308,9 @@ final class GlobalShortcutManager {
 
     private func restoreRegistration() {
         if handler != nil, let shortcut { _ = register(shortcut, persist: false) }
-        if handler != nil, pasteQueueIsActive, let pasteNextShortcut { _ = registerPasteNext(pasteNextShortcut) }
+        if handler != nil || queueRegistration != nil, pasteQueueIsActive, !pasteQueueIsSuspended {
+            _ = registerPasteNext(effectivePasteNextShortcut)
+        }
     }
 
     @discardableResult
@@ -332,20 +366,18 @@ final class GlobalShortcutManager {
     @discardableResult
     func setPasteNextShortcut(_ candidate: GlobalShortcut?) -> Bool {
         if let candidate {
-            guard !isStandardPaste(candidate) else {
-                errorMessage = "Command + V is reserved for normal paste. Choose another combination."
-                return false
-            }
             guard shortcut?.hasSameKeys(as: candidate) != true,
                   settingsShortcut?.hasSameKeys(as: candidate) != true,
                   deletionShortcut?.hasSameKeys(as: candidate) != true else {
                 errorMessage = "This combination is assigned to another Pasket action. Choose another combination."
                 return false
             }
-            if pasteQueueIsActive {
+            if pasteQueueIsActive && !pasteQueueIsSuspended {
                 guard registerPasteNext(candidate) else { return false }
             }
-        } else { unregisterPasteNext() }
+        } else if pasteQueueIsActive && !pasteQueueIsSuspended {
+            guard registerPasteNext(resolvedPasteShortcut) else { return false }
+        }
         pasteNextShortcut = candidate
         errorMessage = nil
         if let candidate, let data = try? JSONEncoder().encode(candidate) {
@@ -358,31 +390,66 @@ final class GlobalShortcutManager {
     func setPasteQueueActive(_ active: Bool) -> Bool {
         pasteQueueIsActive = active
         if !active { unregisterPasteNext(); return true }
-        guard !isRecording, let pasteNextShortcut else { return true }
-        return registerPasteNext(pasteNextShortcut)
+        guard !isRecording, !pasteQueueIsSuspended else { return true }
+        return registerPasteNext(effectivePasteNextShortcut)
     }
 
-    private func isStandardPaste(_ candidate: GlobalShortcut) -> Bool {
-        candidate.keyCode == UInt32(kVK_ANSI_V) && candidate.modifiers == UInt32(cmdKey)
+    func suspendPasteQueueShortcut() {
+        pasteQueueIsSuspended = true
+        unregisterPasteNext()
+    }
+
+    @discardableResult
+    func setPasteFallbackShortcut(_ candidate: GlobalShortcut?) -> Bool {
+        let resolved = detectedPasteShortcut ?? candidate ?? .defaultPaste
+        if pasteQueueIsActive, !pasteQueueIsSuspended, pasteNextShortcut == nil {
+            guard registerPasteNext(resolved) else { return false }
+        }
+        pasteFallbackShortcut = candidate
+        resolvedPasteShortcut = resolved
+        if let candidate, let data = try? JSONEncoder().encode(candidate) {
+            defaults.set(data, forKey: Self.pasteFallbackStorageKey)
+        } else { defaults.removeObject(forKey: Self.pasteFallbackStorageKey) }
+        return true
+    }
+
+    @discardableResult
+    func updatePasteDestination(detectedShortcut: GlobalShortcut?) -> Bool {
+        pasteQueueIsSuspended = false
+        detectedPasteShortcut = detectedShortcut
+        resolvedPasteShortcut = detectedShortcut ?? pasteFallbackShortcut ?? .defaultPaste
+        guard pasteQueueIsActive, !isRecording else { return true }
+        return registerPasteNext(effectivePasteNextShortcut)
     }
 
     private func registerPasteNext(_ candidate: GlobalShortcut) -> Bool {
-        guard handler != nil else {
+        guard shortcut?.hasSameKeys(as: candidate) != true,
+              settingsShortcut?.hasSameKeys(as: candidate) != true,
+              deletionShortcut?.hasSameKeys(as: candidate) != true else {
+            errorMessage = "The app's paste shortcut conflicts with another Pasket action. Choose a different Paste Next shortcut in Settings."
+            return false
+        }
+        guard handler != nil || queueRegistration != nil else {
             errorMessage = "Global shortcuts are unavailable. Relaunch Pasket to try again."
             return false
         }
-        if pasteNextHotKey != nil, candidate == pasteNextShortcut { return true }
+        if registeredPasteNextShortcut?.hasSameKeys(as: candidate) == true { return true }
         var replacement: EventHotKeyRef?
         let identifier = EventHotKeyID(signature: Self.signature, id: nextID)
         nextID &+= 1
-        let status = RegisterEventHotKey(candidate.keyCode, candidate.modifiers, identifier,
-                                       GetApplicationEventTarget(), 0, &replacement)
-        guard status == noErr, let replacement else {
+        let status: OSStatus
+        if let queueRegistration { status = queueRegistration(candidate, identifier.id) }
+        else {
+            status = RegisterEventHotKey(candidate.keyCode, candidate.modifiers, identifier,
+                                         GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &replacement)
+        }
+        guard status == noErr, queueRegistration != nil || replacement != nil else {
             errorMessage = "Paste Next could not be registered (status \(status)). Choose another combination in Settings."
             return false
         }
         unregisterPasteNext()
         pasteNextHotKey = replacement
+        registeredPasteNextShortcut = candidate
         activePasteNextID = identifier.id
         return true
     }
@@ -427,8 +494,10 @@ final class GlobalShortcutManager {
     }
 
     private func unregisterPasteNext() {
+        if registeredPasteNextShortcut != nil { queueUnregistration?() }
         if let pasteNextHotKey { UnregisterEventHotKey(pasteNextHotKey) }
         pasteNextHotKey = nil
+        registeredPasteNextShortcut = nil
         pressedIDs.remove(activePasteNextID)
         activePasteNextID = 0
     }

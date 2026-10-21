@@ -3,6 +3,38 @@ import Testing
 @testable import PasketCore
 
 struct ClipboardSelectionTests {
+    @Test func tabMarksSurviveNavigationAndCanBeRemovedWithoutLosingFocus() {
+        let ids = (0..<4).map { _ in UUID() }
+        var selection = ClipboardSelection()
+        selection.selectOnly(ids[0])
+        selection.toggleMark()
+        #expect(selection.ids == [ids[0]])
+        #expect(selection.focusedID == ids[0])
+        selection.move(to: ids[1], in: ids)
+        selection.toggleMark()
+        selection.move(to: ids[2], in: ids)
+        #expect(selection.ids == Set(ids[0...2]))
+        selection.move(to: ids[1], in: ids)
+        selection.toggleMark()
+        selection.move(to: ids[3], in: ids)
+        #expect(selection.ids == [ids[0], ids[3]])
+        #expect(selection.focusedID == ids[3])
+        selection.select(ids[2], in: ids)
+        selection.move(to: ids[3], in: ids)
+        #expect(selection.ids == [ids[3]])
+    }
+
+    @Test func hiddenMarksDoNotReturnAfterReconciliation() {
+        let ids = (0..<3).map { _ in UUID() }
+        var selection = ClipboardSelection()
+        selection.selectOnly(ids[0])
+        selection.toggleMark()
+        selection.move(to: ids[1], in: ids)
+        selection.reconcile(with: Array(ids[1...2]), fallback: ids[1])
+        selection.move(to: ids[2], in: ids)
+        #expect(selection.ids == [ids[2]])
+    }
+
     @Test func commandTogglesIndividualItemsAndPlainClickReplacesSelection() {
         let ids = (0..<5).map { _ in UUID() }
         var selection = ClipboardSelection()

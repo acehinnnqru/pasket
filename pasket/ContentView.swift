@@ -118,6 +118,14 @@ struct ContentView: View {
             ShortcutEventMonitor { event in
                 guard !isDialogPresented, !shortcuts.isRecording else { return false }
                 if !isMenuPresented, searchFocused,
+                   event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                   event.keyCode == UInt16(kVK_Tab), store.selectedID != nil {
+                    if !event.isARepeat {
+                        store.toggleSelectionMark()
+                    }
+                    return true
+                }
+                if !isMenuPresented, searchFocused,
                    event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                    [UInt16(kVK_DownArrow), UInt16(kVK_UpArrow)].contains(event.keyCode) {
                     store.moveSelection(by: event.keyCode == UInt16(kVK_DownArrow) ? 1 : -1,
@@ -402,6 +410,10 @@ struct ContentView: View {
                                     searchFocused = true
                                 } label: {
                                     HistoryRow(item: item, isSelected: store.selectedIDs.contains(item.id),
+                                               isFocused: store.selectedID == item.id,
+                                               isMarked: store.markedIDs.contains(item.id)
+                                                   || (store.markedIDs.isEmpty && store.selectedIDs.count > 1
+                                                       && store.selectedIDs.contains(item.id)),
                                                thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
                                 }
                                 .buttonStyle(HistoryRowButtonStyle())
@@ -1229,6 +1241,8 @@ private struct HistoryRowButtonStyle: ButtonStyle {
 private struct HistoryRow: View {
     let item: ClipboardItem
     let isSelected: Bool
+    let isFocused: Bool
+    let isMarked: Bool
     var thumbnail: NSImage?
     var isUnavailable = false
     @State private var isHovered = false
@@ -1266,11 +1280,8 @@ private struct HistoryRow: View {
                 .animation(nil, value: isSelected)
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.accentColor.opacity(isSelected ? 0.12 : 0))
-        }
-        .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(isSelected ? 0.2 : 0))
-                .allowsHitTesting(false)
+                .fill(Color.accentColor.opacity(isFocused && isMarked ? 0.12 : 0))
         }
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { isHovered = $0 }

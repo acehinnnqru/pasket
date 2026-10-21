@@ -6,12 +6,29 @@ nonisolated struct ClipboardSelection {
     private(set) var anchorID: UUID?
     private var rangeBase: Set<UUID>?
     private var addsRange = false
+    private(set) var markedIDs: Set<UUID> = []
+
+    mutating func toggleMark() {
+        guard let focusedID else { return }
+        if !markedIDs.insert(focusedID).inserted { markedIDs.remove(focusedID) }
+        ids = markedIDs.union([focusedID])
+        anchorID = focusedID
+        rangeBase = nil
+    }
+
+    mutating func move(to id: UUID, in order: [UUID], extending: Bool = false) {
+        let marks = markedIDs.intersection(order)
+        select(id, in: order, shift: extending)
+        markedIDs = marks
+        ids.formUnion(marks)
+    }
 
     mutating func focus(_ id: UUID) {
         if ids.contains(id) { focusedID = id }
     }
 
     mutating func selectOnly(_ id: UUID?) {
+        markedIDs = []
         ids = Set(id.map { [$0] } ?? [])
         focusedID = id
         anchorID = id
@@ -20,6 +37,7 @@ nonisolated struct ClipboardSelection {
 
     mutating func select(_ id: UUID, in order: [UUID], command: Bool = false, shift: Bool = false) {
         guard let end = order.firstIndex(of: id) else { return }
+        markedIDs = []
         if shift, let anchorID, let start = order.firstIndex(of: anchorID) {
             if rangeBase == nil || addsRange != command {
                 rangeBase = command ? ids : []
@@ -38,6 +56,7 @@ nonisolated struct ClipboardSelection {
     }
 
     mutating func reconcile(with order: [UUID], fallback: UUID? = nil) {
+        markedIDs.formIntersection(order)
         ids.formIntersection(order)
         rangeBase = rangeBase.map { $0.intersection(order) }
         if ids.isEmpty {

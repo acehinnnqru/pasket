@@ -17,6 +17,7 @@ final class ClipboardStore {
         set { selection.selectOnly(newValue) }
     }
     var selectedIDs: Set<UUID> { selection.ids }
+    var markedIDs: Set<UUID> { selection.markedIDs }
     var selectedItems: [ClipboardItem] { filteredItems.filter { selectedIDs.contains($0.id) } }
     var presentationID = UUID()
     private(set) var copyError: String? {
@@ -312,6 +313,16 @@ final class ClipboardStore {
 
     func focusSelection(_ id: UUID) { selection.focus(id) }
 
+    func toggleSelectionMark() {
+        selection.toggleMark()
+        copyError = nil
+    }
+
+    private func moveSelection(to id: UUID, extending: Bool) {
+        selection.move(to: id, in: filteredItems.map(\.id), extending: extending)
+        copyError = nil
+    }
+
     func moveSelection(by offset: Int, extending: Bool = false) {
         let visibleItems = filteredItems
         guard !visibleItems.isEmpty else { return }
@@ -322,7 +333,7 @@ final class ClipboardStore {
             navigationTask = Task { await loadMore() }
             return
         }
-        select(visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id, shift: extending)
+        moveSelection(to: visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id, extending: extending)
         copyError = nil
     }
 
@@ -837,7 +848,7 @@ final class ClipboardStore {
             imageStorageBytes = page.imageBytes
             if let id = advanceAfterLoading, selectedID == id,
                let index = items.firstIndex(where: { $0.id == id }), items.count > index + 1 {
-                select(items[index + 1].id, shift: advanceExtendsSelection)
+                moveSelection(to: items[index + 1].id, extending: advanceExtendsSelection)
             }
             advanceAfterLoading = nil
         }

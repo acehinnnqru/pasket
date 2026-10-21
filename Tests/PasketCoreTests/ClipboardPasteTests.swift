@@ -4,6 +4,61 @@ import Testing
 
 @Suite @MainActor
 struct ClipboardPasteTests {
+    @Test func queueAfterSetupDismissesHistoryAndWaitsForTheOriginalAppToReactivate() async {
+        let fixture = Fixture()
+        fixture.active = false
+        var pasketIsActive = true
+        let target = ClipboardPasteController.Target(processIdentifier: 42,
+            isActive: { fixture.active }, isTerminated: { fixture.terminated },
+            canRestoreFocus: { pasketIsActive })
+        fixture.onWait = {
+            if fixture.waits == 3 {
+                fixture.active = true
+                pasketIsActive = false
+            }
+        }
+        let queue = ClipboardPasteQueue(clipboardChangeCount: { fixture.changeCount })
+        let items = ["A", "B"].map { ClipboardItem.text($0, source: .unknown, at: .now) }
+        #expect(queue.start(items))
+        let delivered = await queue.advance(copy: { _, _ in
+            #expect(target.canPrepareForPaste)
+            return fixture.changeCount
+        }, paste: { count in
+            await fixture.controller.paste(to: target, expectedChangeCount: count, dismiss: fixture.dismiss)
+        })
+        #expect(delivered)
+        #expect(fixture.events == ["wait", "dismiss", "wait", "wait", "paste:42"])
+        #expect(queue.next?.id == items[1].id)
+        #expect(fixture.controller.toasts.current == nil)
+        queue.cancel()
+    }
+
+    @Test func failedFocusRestorationNeverPostsAPaste() async {
+        let fixture = Fixture()
+        fixture.active = false
+        let target = ClipboardPasteController.Target(processIdentifier: 42,
+            isActive: { fixture.active }, isTerminated: { false }, canRestoreFocus: { true })
+        #expect(await fixture.controller.paste(to: target, dismiss: fixture.dismiss) == false)
+        #expect(fixture.events.contains("dismiss"))
+        #expect(!fixture.events.contains("paste:42"))
+    }
+
+    @Test func switchingToAnotherAppDuringFocusRestorationStopsTheQueue() async {
+        let fixture = Fixture()
+        fixture.active = false
+        var pasketIsActive = true
+        let target = ClipboardPasteController.Target(processIdentifier: 42,
+            isActive: { false }, isTerminated: { false }, canRestoreFocus: { pasketIsActive })
+        fixture.onWait = { if fixture.waits == 2 { pasketIsActive = false } }
+        let queue = ClipboardPasteQueue(clipboardChangeCount: { fixture.changeCount })
+        #expect(queue.start([ClipboardItem.text("A", source: .unknown, at: .now)]))
+        #expect(await queue.advance(copy: { _, _ in fixture.changeCount }, paste: { count in
+            await fixture.controller.paste(to: target, expectedChangeCount: count, dismiss: fixture.dismiss)
+        }) == false)
+        #expect(fixture.events == ["wait", "dismiss", "wait"])
+        #expect(!queue.isActive)
+    }
+
     @Test func postsTheDestinationShortcutAndWaitsForTheInvocationKeyToBeReleased() async {
         let fixture = Fixture()
         let shortcut = GlobalShortcut(keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(controlKey), keyLabel: "Y")

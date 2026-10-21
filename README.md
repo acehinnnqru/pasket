@@ -70,6 +70,8 @@ save automatically for the next launch.
   or starting the queue. Using the same shortcut as normal paste is allowed: it advances the queue
   only while active. Combinations assigned to other Pasket actions or unavailable global hotkeys
   require another choice. Closing or reopening history during setup never starts a pending queue.
+  If setup activates Pasket, starting the queue dismisses history and waits for the original app
+  to regain focus before sending the first paste. Switching to another app cancels that delivery.
   Move the caret to the next destination, then press the destination app's paste shortcut (normally
   **Command-V**) to paste the next item. Pasket reads the standard Paste menu's current keyboard
   equivalent, including remapped shortcuts and common localized menu titles, and refreshes it when

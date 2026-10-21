@@ -8,18 +8,23 @@ final class ClipboardPasteController {
         let processIdentifier: pid_t
         let isActive: () -> Bool
         let isTerminated: () -> Bool
+        let canRestoreFocus: () -> Bool
 
-        init(application: NSRunningApplication) {
+        var canPrepareForPaste: Bool { !isTerminated() && (isActive() || canRestoreFocus()) }
+
+        init(application: NSRunningApplication, canRestoreFocus: @escaping () -> Bool = { false }) {
             processIdentifier = application.processIdentifier
             isActive = { application.isActive }
             isTerminated = { application.isTerminated }
+            self.canRestoreFocus = canRestoreFocus
         }
 
         init(processIdentifier: pid_t, isActive: @escaping () -> Bool,
-             isTerminated: @escaping () -> Bool) {
+             isTerminated: @escaping () -> Bool, canRestoreFocus: @escaping () -> Bool = { false }) {
             self.processIdentifier = processIdentifier
             self.isActive = isActive
             self.isTerminated = isTerminated
+            self.canRestoreFocus = canRestoreFocus
         }
     }
 
@@ -70,7 +75,7 @@ final class ClipboardPasteController {
         guard !Task.isCancelled else { return false }
         if let expectedChangeCount, clipboardChangeCount() != expectedChangeCount { return false }
         prepareForPresentation()
-        guard let target, !target.isTerminated(), target.isActive() else {
+        guard let target, target.canPrepareForPaste else {
             errorMessage = "Item copied. Open history from the app where you want to paste, or use that app's Paste command."
             return false
         }
@@ -88,18 +93,21 @@ final class ClipboardPasteController {
         for _ in 0..<50 {
             do { try await wait() } catch { return false }
             guard !Task.isCancelled, requestID == request,
-                  !target.isTerminated(), target.isActive(),
+                  target.canPrepareForPaste,
                   clipboardChangeCount() == changeCount else { return false }
             guard inputReleased(invocationKeyCode) else { continue }
             guard hasAccess() else { return false }
             // Keep held Return repeats in the panel, then give AppKit time to release key focus.
             dismiss()
             requestID = request
-            do { try await wait() } catch { return false }
-            guard !Task.isCancelled, requestID == request,
-                  !target.isTerminated(), target.isActive(),
-                  clipboardChangeCount() == changeCount, hasAccess() else { return false }
-            return postPaste(target.processIdentifier, shortcut)
+            // A setup sheet can activate Pasket. Wait for dismissal to restore the original app.
+            for _ in 0..<50 {
+                do { try await wait() } catch { return false }
+                guard !Task.isCancelled, requestID == request, target.canPrepareForPaste,
+                      clipboardChangeCount() == changeCount, hasAccess() else { return false }
+                if target.isActive() { return postPaste(target.processIdentifier, shortcut) }
+            }
+            return false
         }
         return false
     }

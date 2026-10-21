@@ -222,7 +222,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
 
     private func pasteCopiedItem() {
         if let previousApplication { updatePasteDestination(previousApplication) }
-        let target = previousApplication.map { ClipboardPasteController.Target(application: $0) }
+        let target = previousApplication.map { pasteTarget($0) }
         let presentation = store.presentationID
         guard let changeCount = store.copiedChangeCount else { return }
         let shortcut = shortcuts.resolvedPasteShortcut
@@ -244,21 +244,22 @@ final class ApplicationController: NSObject, NSWindowDelegate {
               store.pasteQueue.checkClipboard(), store.systemAccess.request == nil else { return }
         let application = panel?.isVisible == true ? previousApplication : NSWorkspace.shared.frontmostApplication
         guard let application, application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-              !application.isTerminated, application.isActive else {
+              pasteTarget(application).canPrepareForPaste else {
+            store.pasteQueue.cancel()
             store.toasts.show("Open history from the app where you want to paste, then choose Paste Next.",
                               source: .notice, title: "Choose a Paste Destination", style: .information)
             return
         }
-        let target = ClipboardPasteController.Target(application: application)
+        let target = pasteTarget(application)
         guard updatePasteDestination(application) else { return }
         let pasteShortcut = shortcuts.resolvedPasteShortcut
         let invocationKeyCode = shortcuts.effectivePasteNextShortcut.keyCode
         let presentation = store.presentationID
         Task {
             let delivered = await store.pasteQueue.advance(copy: { [self] id, isCurrent in
-                guard target.isActive(), !target.isTerminated(), store.presentationID == presentation else { return nil }
+                guard target.canPrepareForPaste, store.presentationID == presentation else { return nil }
                 let copied = await store.copyItem(id, isCurrent: {
-                    isCurrent() && target.isActive() && !target.isTerminated()
+                    isCurrent() && target.canPrepareForPaste
                         && store.presentationID == presentation
                 })
                 return copied ? store.copiedChangeCount : nil
@@ -279,6 +280,13 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 }
             }
         }
+    }
+
+    private func pasteTarget(_ application: NSRunningApplication) -> ClipboardPasteController.Target {
+        let canRestoreFocus = panel?.isVisible == true
+        return ClipboardPasteController.Target(application: application, canRestoreFocus: {
+            canRestoreFocus && NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        })
     }
 
     @discardableResult

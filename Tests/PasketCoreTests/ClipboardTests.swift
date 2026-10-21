@@ -5,6 +5,42 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func batchDeletionRemovesOnlySelectedEntriesAndPersistsOnce() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for text in ["A", "B", "C", "D"] { await fixture.copy(text) }
+        let ids = fixture.store.items.map(\.id)
+        fixture.store.select(ids[0])
+        fixture.store.select(ids[2], command: true)
+        fixture.store.deleteItems(fixture.store.selectedIDs)
+        await fixture.store.flush()
+        #expect(fixture.store.items.map(\.content) == ["C", "A"])
+        #expect(fixture.store.selectedIDs == [ids[1]])
+        #expect(fixture.pasteboard.string(forType: .string) == "D")
+        await fixture.restart()
+        #expect(fixture.store.items.map(\.content) == ["C", "A"])
+        await fixture.cleanUp()
+    }
+
+    @Test func filteringAndKeyboardNavigationReconcileMultipleSelection() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for text in ["Alpha", "Beta", "Alpha two"] { await fixture.copy(text) }
+        let ids = fixture.store.items.map(\.id)
+        fixture.store.select(ids[0])
+        fixture.store.moveSelection(by: 1, extending: true)
+        fixture.store.moveSelection(by: 1, extending: true)
+        #expect(fixture.store.selectedIDs == Set(ids))
+        fixture.store.moveSelection(by: -1, extending: true)
+        #expect(fixture.store.selectedIDs == Set(ids[0...1]))
+        fixture.store.query = "Alpha"
+        await fixture.store.flush()
+        #expect(fixture.store.selectedIDs == [ids[0]])
+        fixture.store.moveSelection(by: 1)
+        #expect(fixture.store.selectedIDs == [ids[2]])
+        await fixture.cleanUp()
+    }
+
     @Test func filterMemoryStartsOnDismissalAndExpiresOnReopening() async throws {
         let suite = "PasketFilterTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

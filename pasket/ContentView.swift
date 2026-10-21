@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 struct ContentView: View {
@@ -27,9 +28,12 @@ struct ContentView: View {
     @State private var moreControlFrame: CGRect = .zero
     @State private var isConfirmingClear = false
     @State private var showsSearchProgress = false
+    @State private var pendingDeletion: Set<UUID> = []
+    @State private var isConfirmingDeletion = false
+    @State private var isInspectingSelection = false
 
     private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
-    private var isDialogPresented: Bool { isConfirmingClear || store.systemAccess.request != nil }
+    private var isDialogPresented: Bool { isConfirmingClear || isConfirmingDeletion || store.systemAccess.request != nil }
 
     private var canClearHistory: Bool {
         !store.isDebugMode && store.totalCount > 0 && !store.isLoading && !store.isStorageBlocked
@@ -37,6 +41,19 @@ struct ContentView: View {
     }
 
     var body: some View {
+        historySurface
+            .alert("Delete \(pendingDeletion.count) Selected Items?", isPresented: $isConfirmingDeletion) {
+                Button("Cancel", role: .cancel) { pendingDeletion = [] }
+                Button("Delete \(pendingDeletion.count) Items", role: .destructive) {
+                    store.deleteItems(pendingDeletion)
+                    pendingDeletion = []
+                }
+            } message: {
+                Text("These history entries and their saved image copies will be deleted. This cannot be undone. Your original files and current clipboard will be kept.")
+            }
+    }
+
+    private var historyLayout: some View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
@@ -53,6 +70,13 @@ struct ContentView: View {
         .background {
             ShortcutEventMonitor { event in
                 guard !isDialogPresented, !shortcuts.isRecording else { return false }
+                if !isMenuPresented, searchFocused,
+                   event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                   [UInt16(kVK_DownArrow), UInt16(kVK_UpArrow)].contains(event.keyCode) {
+                    store.moveSelection(by: event.keyCode == UInt16(kVK_DownArrow) ? 1 : -1,
+                                        extending: event.modifierFlags.contains(.shift))
+                    return true
+                }
                 if shortcuts.settingsShortcut?.matches(event) == true {
                     if !event.isARepeat {
                         dismissMenus()
@@ -62,9 +86,8 @@ struct ContentView: View {
                     return true
                 }
                 guard !isMenuPresented, shortcuts.deletionShortcut?.matches(event) == true else { return false }
-                if !event.isARepeat, !store.isLoading, !store.isStorageBlocked,
-                   let item = store.selectedItem {
-                    store.delete(item.id)
+                if !event.isARepeat, !store.isLoading, !store.isStorageBlocked {
+                    requestDeletion(store.selectedIDs)
                 }
                 return true
             }
@@ -119,6 +142,10 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var historySurface: some View {
+        historyLayout
         .task(id: previewIdentity) {
             await store.loadSelection()
             await store.loadPreview(for: store.selectedItem)
@@ -135,11 +162,18 @@ struct ContentView: View {
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
+            isInspectingSelection = false
+            isConfirmingDeletion = false
+            pendingDeletion = []
         }
+        .onChange(of: store.selectedIDs) { isInspectingSelection = false }
         .onChange(of: store.query) { store.reconcileSelection() }
         .onChange(of: store.filter) { store.reconcileSelection() }
         .onChange(of: isConfirmingClear) {
             if !isConfirmingClear { searchFocused = true }
+        }
+        .onChange(of: isConfirmingDeletion) {
+            if !isConfirmingDeletion { searchFocused = true }
         }
         .onChange(of: store.systemAccess.request?.id) {
             if store.systemAccess.request != nil { dismissMenus() }
@@ -305,24 +339,31 @@ struct ContentView: View {
                         Section {
                             ForEach(section.items) { item in
                                 Button {
-                                    store.selectedID = item.id
+                                    let flags = NSEvent.modifierFlags
+                                    store.select(item.id, command: flags.contains(.command), shift: flags.contains(.shift))
                                     searchFocused = true
                                 } label: {
-                                    HistoryRow(item: item, isSelected: store.selectedID == item.id,
+                                    HistoryRow(item: item, isSelected: store.selectedIDs.contains(item.id),
                                                thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
                                 }
                                 .buttonStyle(HistoryRowButtonStyle())
                                 .focusable(false)
                                 .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                    guard NSEvent.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty else { return }
                                     store.selectedID = item.id
                                     searchFocused = true
                                     copySelection()
                                 })
                                 .id(item.id)
                                 .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
+                                .accessibilityAddTraits(store.selectedIDs.contains(item.id) ? .isSelected : [])
                                 .task(id: item.copiedAt) { await store.loadThumbnail(for: item) }
                                 .contextMenu {
-                                    Button("Delete", role: .destructive) { store.delete(item.id) }
+                                    let ids = store.selectedIDs.contains(item.id) ? store.selectedIDs : [item.id]
+                                    Button(ids.count > 1 ? "Delete \(ids.count) Selected Items…" : "Delete", role: .destructive) {
+                                        if !store.selectedIDs.contains(item.id) { store.selectedID = item.id }
+                                        requestDeletion(ids)
+                                    }
                                         .disabled(store.isDebugMode || store.isStorageBlocked)
                                 }
                             }
@@ -355,6 +396,45 @@ struct ContentView: View {
 
     @ViewBuilder
     private var preview: some View {
+        if store.selectedIDs.count > 1 {
+            VStack(alignment: .leading, spacing: 12) {
+                if isInspectingSelection {
+                    Button("Back to \(store.selectedIDs.count) Selected") { isInspectingSelection = false }
+                        .buttonStyle(PasketButtonStyle())
+                    itemPreview
+                } else {
+                    Text("\(store.selectedIDs.count) Items Selected")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("Items are ordered from top to bottom. Select an item below to inspect it.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(store.selectedItems.enumerated()), id: \.element.id) { index, item in
+                                Button {
+                                    store.focusSelection(item.id)
+                                    isInspectingSelection = true
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text("\(index + 1)").monospacedDigit().foregroundStyle(.secondary)
+                                        Image(systemName: item.kind.symbol)
+                                        Text(item.title).lineLimit(2).multilineTextAlignment(.leading)
+                                        Spacer(minLength: 0)
+                                        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                }
+                                .buttonStyle(PasketButtonStyle())
+                            }
+                        }
+                    }
+                }
+            }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            itemPreview
+        }
+    }
+
+    @ViewBuilder
+    private var itemPreview: some View {
         if let item = store.selectedItem {
             VStack(alignment: .leading, spacing: 16) {
                 Group {
@@ -520,6 +600,10 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
             Spacer()
+            if store.selectedIDs.count > 1 {
+                Text("\(store.selectedIDs.count) Selected")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
             #if DEBUG
             Toggle("Debug mode", isOn: Binding(get: { store.isDebugMode }, set: { enabled in
                 isConfirmingClear = false
@@ -535,7 +619,7 @@ struct ContentView: View {
                 .accessibilityIdentifier("debugModeToggle")
             #endif
             Button(role: .destructive) {
-                if let item = store.selectedItem { store.delete(item.id) }
+                requestDeletion(store.selectedIDs)
                 searchFocused = true
             } label: {
                 Label("Delete Selected", systemImage: "trash")
@@ -545,8 +629,8 @@ struct ContentView: View {
             .focusable(false)
             .fixedSize()
             .disabled(store.isDebugMode || store.selectedItem == nil || store.isLoading || store.isStorageBlocked)
-            .help(shortcuts.deletionShortcut.map { "Delete the selected history entry (\($0.displayName))" }
-                  ?? "Delete the selected history entry")
+            .help(shortcuts.deletionShortcut.map { "Delete selected history entries (\($0.displayName))" }
+                  ?? "Delete selected history entries")
             .accessibilityIdentifier("deleteSelectedClipboardItem")
             Button(action: copySelection) {
                 HStack(spacing: 8) {
@@ -557,7 +641,7 @@ struct ContentView: View {
             }
             .buttonStyle(PasketButtonStyle(isProminent: true))
             .focusable(false)
-            .disabled(!store.canCopySelection)
+            .disabled(!store.canCopySelection || store.selectedIDs.count > 1)
             .help("Paste the complete item into your previous app")
             .accessibilityIdentifier("copyClipboardItem")
             Button {
@@ -607,9 +691,22 @@ struct ContentView: View {
     }
 
     private func copySelection() {
+        guard store.selectedIDs.count == 1 else { return }
         let presentation = store.presentationID
         Task {
             if await store.copySelection(), store.presentationID == presentation { onPasteCopiedItem() }
+        }
+    }
+
+    private func requestDeletion(_ ids: Set<UUID>) {
+        guard !ids.isEmpty, !store.isDebugMode, !store.isStorageBlocked, !store.isLoading, !store.isCopying else { return }
+        if ids.count == 1 {
+            store.deleteItems(ids)
+        } else {
+            pendingDeletion = ids
+            dismissMenus()
+            searchFocused = false
+            isConfirmingDeletion = true
         }
     }
 

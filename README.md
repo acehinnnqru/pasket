@@ -49,6 +49,13 @@ save automatically for the next launch.
   the search field focused, so you can continue typing immediately.
 - History is grouped by local calendar dates under **Today**, **Yesterday**, **7 Days** (2–7 days
   ago), and **30 Days** (8–30 days ago). Earlier entries appear under **Older**; empty groups are hidden.
+- Click to select one entry, Command-click to toggle individual entries, and Shift-click to select
+  a range across date groups. Command-Shift-click adds a range to existing selections. Shift-Up/Down
+  extends or shrinks a range; plain arrows return to single selection. Search keeps keyboard focus,
+  including its normal Command-A behavior. Search and type filters remove hidden entries from selection.
+  Multiple selections show a numbered summary; inspect an entry without changing the selection.
+  **Delete Selected** and the deletion shortcut affect the selection, with confirmation for multiple
+  entries. A selected row's Delete context menu uses the full selection; an unselected row uses itself.
 - Selecting a specific content type shows a return arrow and **Reset** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.

@@ -8,7 +8,15 @@ final class ClipboardStore {
     let systemAccess = SystemAccessController()
     var query = "" { didSet { if query != oldValue { scheduleReload() } } }
     var filter: ClipboardFilter = .all { didSet { if filter != oldValue { scheduleReload() } } }
-    var selectedID: ClipboardItem.ID? { didSet { if selectedID != oldValue { selectedDetail = nil } } }
+    private(set) var selection = ClipboardSelection() {
+        didSet { if selection.focusedID != oldValue.focusedID { selectedDetail = nil } }
+    }
+    var selectedID: ClipboardItem.ID? {
+        get { selection.focusedID }
+        set { selection.selectOnly(newValue) }
+    }
+    var selectedIDs: Set<UUID> { selection.ids }
+    var selectedItems: [ClipboardItem] { filteredItems.filter { selectedIDs.contains($0.id) } }
     var presentationID = UUID()
     private(set) var copyError: String? {
         didSet { toasts.show(copyError, source: .copy, title: "Could Not Copy", style: .error) }
@@ -82,6 +90,7 @@ final class ClipboardStore {
     @ObservationIgnored private var loadedLimit = 50
     @ObservationIgnored private var navigationTask: Task<Void, Never>?
     @ObservationIgnored private var advanceAfterLoading: UUID?
+    @ObservationIgnored private var advanceExtendsSelection = false
     @ObservationIgnored private var retentionTimer: Timer?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var isPresented = false
@@ -285,49 +294,63 @@ final class ClipboardStore {
 
     func reconcileSelection() {
         copyError = nil
-        if !filteredItems.contains(where: { $0.id == selectedID }) {
-            selectedID = filteredItems.first?.id
-        }
+        selection.reconcile(with: filteredItems.map(\.id), fallback: filteredItems.first?.id)
     }
 
-    func moveSelection(by offset: Int) {
+    func select(_ id: UUID, command: Bool = false, shift: Bool = false) {
+        selection.select(id, in: filteredItems.map(\.id), command: command, shift: shift)
+        copyError = nil
+    }
+
+    func focusSelection(_ id: UUID) { selection.focus(id) }
+
+    func moveSelection(by offset: Int, extending: Bool = false) {
         let visibleItems = filteredItems
         guard !visibleItems.isEmpty else { return }
         let current = visibleItems.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : visibleItems.count)
         if offset > 0, current == visibleItems.count - 1, hasMoreItems {
             advanceAfterLoading = selectedID
+            advanceExtendsSelection = extending
             navigationTask = Task { await loadMore() }
             return
         }
-        selectedID = visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id
+        select(visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id, shift: extending)
         copyError = nil
     }
 
     func delete(_ id: UUID) {
-        guard !isDebugMode, !storageBlocked, !isLoading, let index = items.firstIndex(where: { $0.id == id }) else { return }
-        let deleted = items[index]
+        deleteItems([id])
+    }
+
+    func deleteItems(_ ids: Set<UUID>) {
+        guard !isDebugMode, !storageBlocked, !isLoading, !isCopying else { return }
+        let deleted = items.filter { ids.contains($0.id) }
+        guard !deleted.isEmpty else { return }
+        let index = items.firstIndex(where: { ids.contains($0.id) }) ?? 0
         let cutoff = Date()
-        deletionCutoffs[deleted.fingerprint] = cutoff
+        for item in deleted { deletionCutoffs[item.fingerprint] = cutoff }
         let pendingCapture = captureTask
         Task { [weak self] in
             await pendingCapture?.value
-            if self?.deletionCutoffs[deleted.fingerprint] == cutoff {
-                self?.deletionCutoffs[deleted.fingerprint] = nil
+            for item in deleted where self?.deletionCutoffs[item.fingerprint] == cutoff {
+                self?.deletionCutoffs[item.fingerprint] = nil
             }
         }
-        items.remove(at: index)
-        if selectedID == id {
-            selectedID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+        items.removeAll { ids.contains($0.id) }
+        let fallback = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+        selection.reconcile(with: items.map(\.id), fallback: fallback)
+        for item in deleted {
+            let id = item.id
+            thumbnails[id] = nil
+            if previewID == id { clearPreview() }
+            missingPreviews.remove(id)
+            thumbnailOrder.removeAll { $0 == id }
+            unavailableItems.remove(id)
         }
-        thumbnails[id] = nil
-        if previewID == id { clearPreview() }
-        missingPreviews.remove(id)
-        thumbnailOrder.removeAll { $0 == id }
-        unavailableItems.remove(id)
         reconcileSelection()
-        totalCount = max(0, totalCount - 1)
-        matchingCount = max(0, matchingCount - 1)
-        persist([.deleteFingerprint(deleted.fingerprint)])
+        totalCount = max(0, totalCount - deleted.count)
+        matchingCount = max(0, matchingCount - deleted.count)
+        persist(deleted.map { .deleteFingerprint($0.fingerprint) })
     }
 
     func deleteUnavailableFiles() async {
@@ -748,7 +771,7 @@ final class ClipboardStore {
             imageStorageBytes = page.imageBytes
             if let id = advanceAfterLoading, selectedID == id,
                let index = items.firstIndex(where: { $0.id == id }), items.count > index + 1 {
-                selectedID = items[index + 1].id
+                select(items[index + 1].id, shift: advanceExtendsSelection)
             }
             advanceAfterLoading = nil
         }

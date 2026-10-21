@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var isConfirmingDeletion = false
     @State private var isInspectingSelection = false
     @State private var isPasteMenuPresented = false
+    @State private var isOptionHeld = false
     @State private var pasteControlFrame: CGRect = .zero
     @State private var textSeparator: ClipboardTextSeparator = .newline
     @State private var reversePasteOrder = false
@@ -85,6 +86,7 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                     ClipboardPasteActionsMenu(canCombine: store.canCombineSelection,
                                               canPaste: store.canCopySelection && !store.isSearching && !store.pasteQueue.isPasting,
+                                              showsNumberShortcuts: isOptionHeld,
                                               separator: $textSeparator, reversed: $reversePasteOrder,
                                               onPaste: { dismissMenus(); pasteCombinedSelection() },
                                               onQueue: { dismissMenus(); startPasteQueue() },
@@ -111,11 +113,27 @@ struct ContentView: View {
         .buttonStyle(PasketButtonStyle())
         .background {
             WindowKeyStateObserver { isKey in
+                if !isKey, isOptionHeld {
+                    isOptionHeld = false
+                    dismissMenus()
+                }
                 searchFocused = isKey && !isMenuPresented && !isDialogPresented
             }
         }
         .background {
-            ShortcutEventMonitor { event in
+            ShortcutEventMonitor(onFlagsChanged: { event in
+                let held = event.modifierFlags.contains(.option)
+                guard held != isOptionHeld else { return }
+                isOptionHeld = held
+                if !held {
+                    if isPasteMenuPresented { dismissMenus() }
+                } else if store.selectedIDs.count > 1, !isDialogPresented, !shortcuts.isRecording,
+                          event.modifierFlags.intersection([.command, .control, .shift]).isEmpty {
+                    dismissMenus()
+                    isPasteMenuPresented = true
+                    searchFocused = false
+                }
+            }) { event in
                 guard !isDialogPresented, !shortcuts.isRecording else { return false }
                 if !isMenuPresented, searchFocused,
                    event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
@@ -215,6 +233,7 @@ struct ContentView: View {
             } catch {}
         }
         .onChange(of: store.presentationID) {
+            isOptionHeld = false
             isFilterMenuPresented = false
             isMoreMenuPresented = false
             isPasteMenuPresented = false
@@ -231,7 +250,10 @@ struct ContentView: View {
                 isShowingQueueSetup = false
             }
         }
-        .onChange(of: store.selectedIDs) { isInspectingSelection = false }
+        .onChange(of: store.selectedIDs) {
+            isInspectingSelection = false
+            if store.selectedIDs.count < 2, isPasteMenuPresented { dismissMenus() }
+        }
         .onChange(of: store.query) { store.reconcileSelection() }
         .onChange(of: store.filter) { store.reconcileSelection() }
         .onChange(of: isConfirmingClear) {
@@ -729,12 +751,17 @@ struct ContentView: View {
                     isPasteMenuPresented = !wasPresented
                     searchFocused = !isPasteMenuPresented
                 } label: {
-                    Image(systemName: "chevron.down").frame(width: 12, height: 16)
+                    HStack(spacing: 6) {
+                        Text("Options")
+                        Text("⌥").foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12, weight: .medium))
                 }
                 .buttonStyle(PasketButtonStyle(isProminent: true, isActive: isPasteMenuPresented))
                 .focusable(false)
+                .fixedSize()
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("clipboardPanel")) } action: { pasteControlFrame = $0 }
-                .help("Paste actions and options")
+                .help("Hold Option (⌥) to show paste options, then press a number to choose")
                 .accessibilityLabel("Paste actions and options")
                 .accessibilityIdentifier("clipboardPasteActions")
             }
@@ -1043,6 +1070,7 @@ private struct ClipboardPasteActionsMenu: View {
 
     let canCombine: Bool
     let canPaste: Bool
+    let showsNumberShortcuts: Bool
     @Binding var separator: ClipboardTextSeparator
     @Binding var reversed: Bool
     var onPaste: () -> Void
@@ -1073,6 +1101,10 @@ private struct ClipboardPasteActionsMenu: View {
                             .frame(width: 16)
                             .opacity(row == .together || row == .queue || row.separator == separator || (row == .reverse && reversed) ? 1 : 0)
                         Text(row.title).frame(maxWidth: .infinity, alignment: .leading)
+                        if showsNumberShortcuts {
+                            Text("\(row.rawValue + 1)")
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }
                     }
                     .font(.system(size: 13, weight: .medium))
                     .padding(.horizontal, 8).frame(minHeight: 32)
@@ -1092,6 +1124,17 @@ private struct ClipboardPasteActionsMenu: View {
         .onKeyPress(.upArrow) { move(by: -1); return .handled }
         .onKeyPress(.return) { choose(highlighted); return .handled }
         .onExitCommand(perform: onDismiss)
+        .background {
+            ShortcutEventMonitor { event in
+                guard showsNumberShortcuts,
+                      event.modifierFlags.intersection([.command, .control, .option, .shift]) == .option else { return false }
+                let keys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4,
+                            kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7]
+                guard let index = keys.firstIndex(of: Int(event.keyCode)) else { return false }
+                if !event.isARepeat { choose(Row.allCases[index]) }
+                return true
+            }
+        }
         .accessibilityElement(children: .contain).accessibilityLabel("Paste actions and options")
     }
 

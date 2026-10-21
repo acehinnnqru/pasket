@@ -1309,16 +1309,19 @@ private struct SettingsWindowDragRegion: NSViewRepresentable {
 }
 
 struct ShortcutEventMonitor: NSViewRepresentable {
+    var onFlagsChanged: ((NSEvent) -> Void)? = nil
     var onKeyDown: (NSEvent) -> Bool
 
     func makeNSView(context: Context) -> CaptureView {
         let view = CaptureView()
         view.onKeyDown = onKeyDown
+        view.onFlagsChanged = onFlagsChanged
         return view
     }
 
     func updateNSView(_ nsView: CaptureView, context: Context) {
         nsView.onKeyDown = onKeyDown
+        nsView.onFlagsChanged = onFlagsChanged
     }
 
     static func dismantleNSView(_ nsView: CaptureView, coordinator: ()) {
@@ -1327,15 +1330,20 @@ struct ShortcutEventMonitor: NSViewRepresentable {
 
     final class CaptureView: NSView {
         var onKeyDown: ((NSEvent) -> Bool)?
+        var onFlagsChanged: ((NSEvent) -> Void)?
         private var monitor: Any?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             stopMonitoring()
             guard window != nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
                 guard let self, let window = self.window, window.isKeyWindow,
                       window.attachedSheet == nil, event.window === window else { return event }
+                if event.type == .flagsChanged {
+                    self.onFlagsChanged?(event)
+                    return event
+                }
                 return self.onKeyDown?(event) == true ? nil : event
             }
         }

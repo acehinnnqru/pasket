@@ -53,6 +53,7 @@ nonisolated struct ClipboardSelection {
         } else {
             selectOnly(id)
         }
+        markedIDs = ids
     }
 
     mutating func reconcile(with order: [UUID], fallback: UUID? = nil) {

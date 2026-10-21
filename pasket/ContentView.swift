@@ -693,6 +693,10 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
             Spacer()
+            Text("↑ ↓ Navigate · Tab Select / Deselect")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("Use arrow keys to move focus. Press Tab to select or deselect the focused item.")
             if store.selectedIDs.count > 1 {
                 Text("\(store.selectedIDs.count) Selected")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -1338,6 +1342,10 @@ private struct HistoryRow: View {
                 .fill(Color.accentColor.opacity(isSelected ? 0.12 : 0))
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.accentColor.opacity(isFocused && isMarked ? 0.12 : 0))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(isFocused ? 0.65 : 0), lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { isHovered = $0 }

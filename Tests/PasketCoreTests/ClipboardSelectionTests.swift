@@ -21,7 +21,33 @@ struct ClipboardSelectionTests {
         #expect(selection.focusedID == ids[3])
         selection.select(ids[2], in: ids)
         selection.move(to: ids[3], in: ids)
-        #expect(selection.ids == [ids[3]])
+        #expect(selection.ids == [ids[2], ids[3]])
+    }
+
+    @Test func mouseSelectionSurvivesNavigationAndSharesTabMarks() {
+        let ids = (0..<5).map { _ in UUID() }
+        var selection = ClipboardSelection()
+        selection.select(ids[0], in: ids)
+        selection.select(ids[2], in: ids, command: true)
+        selection.move(to: ids[3], in: ids)
+        #expect(selection.markedIDs == [ids[0], ids[2]])
+        #expect(selection.focusedID == ids[3])
+        selection.toggleMark()
+        selection.move(to: ids[2], in: ids)
+        selection.toggleMark()
+        selection.move(to: ids[4], in: ids)
+        #expect(selection.markedIDs == [ids[0], ids[3]])
+        #expect(selection.ids == [ids[0], ids[3], ids[4]])
+    }
+
+    @Test func mouseRangeSelectionSurvivesNavigation() {
+        let ids = (0..<5).map { _ in UUID() }
+        var selection = ClipboardSelection()
+        selection.select(ids[0], in: ids)
+        selection.select(ids[2], in: ids, shift: true)
+        selection.move(to: ids[4], in: ids)
+        #expect(selection.markedIDs == Set(ids[0...2]))
+        #expect(selection.ids == Set(Array(ids[0...2]) + [ids[4]]))
     }
 
     @Test func hiddenMarksDoNotReturnAfterReconciliation() {

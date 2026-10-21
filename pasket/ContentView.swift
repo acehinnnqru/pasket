@@ -567,6 +567,10 @@ struct ContentView: View {
                 information(for: item)
             }
             .padding(20)
+        } else {
+            ContentUnavailableView("Select an item", systemImage: "clipboard",
+                description: Text("Choose a history item to preview its contents."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

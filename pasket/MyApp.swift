@@ -39,6 +39,15 @@ struct PasketApp: App {
                 }
             }
             .disabled(appDelegate.controller.store.isLoading || appDelegate.controller.store.isStorageBlocked)
+            #if DEBUG
+            Toggle("Debug Mode", isOn: Binding(
+                get: { appDelegate.controller.store.isDebugMode },
+                set: { appDelegate.controller.store.setDebugMode($0) }
+            ))
+            .disabled(appDelegate.controller.store.isLoading || appDelegate.controller.store.isCopying)
+            .help("Show sample data for screenshots")
+            .accessibilityIdentifier("debugModeToggle")
+            #endif
             Divider()
             Button("Settings…") {
                 appDelegate.controller.showSettings()

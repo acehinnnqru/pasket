@@ -701,20 +701,6 @@ struct ContentView: View {
                 Text("\(store.selectedIDs.count) Selected")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            #if DEBUG
-            Toggle("Debug mode", isOn: Binding(get: { store.isDebugMode }, set: { enabled in
-                isConfirmingClear = false
-                dismissMenus()
-                store.setDebugMode(enabled)
-            }))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .font(.system(size: 12))
-                .fixedSize()
-                .disabled(store.isLoading || store.isCopying)
-                .help("Show sample data for screenshots")
-                .accessibilityIdentifier("debugModeToggle")
-            #endif
             Button(role: .destructive) {
                 requestDeletion(store.selectedIDs)
                 searchFocused = true

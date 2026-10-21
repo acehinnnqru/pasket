@@ -62,6 +62,17 @@ save automatically for the next launch.
   **Reverse Order**. The numbered summary reflects that order. Images and mixed text/file selections
   cannot be combined. All selected content is loaded and all files are resolved before writing;
   an unavailable item stops the action instead of silently pasting a partial selection.
+- **Start Paste Queue** freezes the selection in the displayed order and pastes the first item.
+  Move the caret to the next destination, then use **Paste Next** in the history panel or menu bar,
+  or configure its optional shortcut in Settings. That shortcut is global only while a queue is
+  active; Command-V always retains normal paste behavior. A held shortcut triggers only once per
+  press. The menu bar shows the remaining count, and both menus show the next item and a Cancel action.
+  Queues support individual text, link, email, image, and file entries without combining their formats.
+  Search, type filters, and recency changes do not change the queue order. Each invocation pastes
+  into the app active at that invocation; it never inserts Tab or Return automatically.
+  Copying new content cancels the queue even when collection is paused. Cancelling, quitting,
+  deleting a queued item, an unavailable item, or a failed paste stops the queue without skipping
+  ahead or replaying it after a permission change. Opening history alone preserves the queue.
 - Selecting a specific content type shows a return arrow and **Reset** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.
@@ -85,9 +96,9 @@ save automatically for the next launch.
   cannot launch the replacement, Pasket stays open and displays an error.
   If you switch apps, reopen history, or change the clipboard before delivery, the pending paste is
   cancelled. Holding Return or shortcut modifiers delays delivery for up to one second.
-- **Escape** dismisses the panel. With the filter or **…** menu open, Escape first closes that menu
-  and restores search focus. Both menus use the same custom appearance and support arrow keys and Return;
-  clicking outside also closes them. The **…** menu opens above its button.
+- **Escape** dismisses the panel. With the filter, paste-options, or **…** menu open, Escape first
+  closes that menu and restores search focus. All menus use the same custom appearance and support
+  arrow keys and Return; clicking outside also closes them. Bottom menus open above their buttons.
 - Notices appear as floating toast cards above the footer without moving the history list.
   Cleanup confirmations disappear after four seconds; other transient messages after eight seconds.
   Hovering or focusing a toast with accessibility tools pauses its timer. Each card has a dismiss button.
@@ -115,18 +126,18 @@ save automatically for the next launch.
   uses the same binding. Settings, history, and deletion shortcuts must use different combinations.
   Existing history or deletion bindings take priority if they already use Command + comma.
 - Configure **Delete Selected Item** in Settings to assign a shortcut with Command, Control, or
-  Option. It only works in the history panel, preserves search focus, and deletes one selected entry
-  per key press. No deletion shortcut is assigned by default; use **Clear Shortcut** in the recording
-  dialog and **Save Shortcut** to disable it. Clearing any shortcut requires confirmation;
+  Option. It only works in the history panel, preserves search focus, and deletes the selected entries
+  per key press, with confirmation for multiple entries. No deletion shortcut is assigned by default;
+  use **Clear Shortcut** in the recording dialog and **Save Shortcut** to disable it. Clearing any shortcut requires confirmation;
   the global history shortcut can also be cleared to use the menu bar instead.
-  The delete shortcut must differ from the history and settings shortcuts.
+  The history, settings, deletion, and Paste Next shortcuts must use different combinations.
 - Click the status light in the panel footer to pause or resume collection, or use the menu bar.
   While collecting, a small dot in the app's accent color gently brightens and dims every 2.8 seconds,
   with the Soft glow treatment: a matching halo strengthens and softens in sync. The icon does not move.
   Pausing turns the light gray and stops the animation. The separate item count and basket icon stay still.
   The animation respects Reduce Motion, and hovering over the light shows **Pause** or
   **Resume**. Use **Delete Selected** to delete one
-  entry or **… → Delete All Entries…** to clear history with confirmation.
+  entry or a confirmed selection, or **… → Delete All Entries…** to clear history with confirmation.
   Rows also have a Delete context menu. Unmodified **Backspace** and **Delete** only edit the search;
   they never delete history entries, even when the search field is empty.
   Deleting the selected entry selects the next entry in the current list, or the previous entry
@@ -328,6 +339,18 @@ For the desktop smoke test:
    shortcut dismissal must restore the original input without pasting. Repeat in a browser input,
    a native text editor, and a full-screen app. Hold Return or modifiers, then switch apps or reopen
    history before releasing them; no stale paste should occur.
+   Command-click separated rows, Shift-click across date groups, and Command-Shift-click to append
+   a range. Extend and shrink with Shift-Up/Down, including across the first 50 loaded rows. Confirm
+   plain arrows restore single selection, filtering drops hidden selections, and the numbered summary
+   follows Reverse Order. Check every separator with text, links, and emails, and paste multiple file
+   entries into Finder. A missing file must leave the clipboard unchanged. Mixed types must offer
+   Start Paste Queue as the primary action and explain why Paste Together is disabled.
+   Start a queue in a text editor, move between fields, and invoke Paste Next using its optional
+   shortcut, the menu bar, and the reopened panel. Confirm one item per press, no repeats while held,
+   progress and the next title update, and changing search or selection does not reorder the queue.
+   Verify Cancel, copying new content while collection is paused, deleting a queued entry, quitting,
+   missing files, and revoked Accessibility all stop the queue without skipping or delayed replay.
+   Check multi-selection and paste-options layouts at minimum panel size in light and dark appearance.
 6. With the search field focused, test Backspace, Delete, and Fn + Backspace with both empty and
    nonempty text; verify they only edit the search and never remove history. Press an arrow key
    or click a row, then verify the search caret stays visible and typing and deletion still edit

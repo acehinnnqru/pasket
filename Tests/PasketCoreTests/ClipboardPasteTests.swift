@@ -3,6 +3,13 @@ import Testing
 
 @Suite @MainActor
 struct ClipboardPasteTests {
+    @Test func clipboardChangedBeforeThePasteRequestNeverDeliversUnrelatedContent() async {
+        let fixture = Fixture()
+        let target = ClipboardPasteController.Target(processIdentifier: 42, isActive: { true }, isTerminated: { false })
+        #expect(await fixture.controller.paste(to: target, expectedChangeCount: -1, dismiss: fixture.dismiss) == false)
+        #expect(fixture.events.isEmpty)
+    }
+
     @Test func dismissesBeforePastingIntoOriginalProcess() async {
         let fixture = Fixture()
         let pasted = await fixture.paste()

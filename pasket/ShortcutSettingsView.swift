@@ -330,6 +330,14 @@ struct ShortcutSettingsView: View {
                     shortcut: shortcuts.deletionShortcut,
                     action: .deleteSelectedItem
                 )
+                Divider().opacity(0.35).padding(.leading, 40)
+                shortcutRow(
+                    title: "Paste Next",
+                    description: "Global while a paste queue is active · Optional",
+                    icon: Image(systemName: "text.insert"),
+                    shortcut: shortcuts.pasteNextShortcut,
+                    action: .pasteNext
+                )
             }
             .modifier(SettingsCard())
             Text("Click a shortcut to change it.")
@@ -710,6 +718,7 @@ struct ShortcutRecordingView: View {
         case .showHistory: shortcuts.shortcut != nil
         case .openSettings: shortcuts.settingsShortcut != nil
         case .deleteSelectedItem: shortcuts.deletionShortcut != nil
+        case .pasteNext: shortcuts.pasteNextShortcut != nil
         }
     }
 

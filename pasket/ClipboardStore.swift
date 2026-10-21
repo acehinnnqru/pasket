@@ -6,6 +6,7 @@ final class ClipboardStore {
     let filterPreferences: ClipboardFilterPreferences
     let toasts = PasketToastCenter()
     let systemAccess = SystemAccessController()
+    let pasteQueue: ClipboardPasteQueue
     var query = "" { didSet { if query != oldValue { scheduleReload() } } }
     var filter: ClipboardFilter = .all { didSet { if filter != oldValue { scheduleReload() } } }
     private(set) var selection = ClipboardSelection() {
@@ -28,6 +29,7 @@ final class ClipboardStore {
     private(set) var isLoading = true
     private(set) var isPaused = false
     private(set) var isCopying = false
+    private(set) var copiedChangeCount: Int?
     private(set) var isDeletingUnavailableFiles = false
     private(set) var clipboardAccessDenied = false {
         didSet {
@@ -102,6 +104,7 @@ final class ClipboardStore {
         self.filterPreferences = filterPreferences ?? ClipboardFilterPreferences()
         persistence = ClipboardPersistence(directory: directory)
         self.pasteboard = pasteboard
+        pasteQueue = ClipboardPasteQueue(clipboardChangeCount: { pasteboard.changeCount })
         monitor = ClipboardMonitor(pasteboard: pasteboard)
         monitor.onCapture = { [weak self] capture in self?.enqueue(capture) }
         monitor.onNotice = { [weak self] message in self?.setNotice(message) }
@@ -141,6 +144,7 @@ final class ClipboardStore {
     }
 
     func stop() {
+        pasteQueue.cancel()
         stopRequested = true
         monitor.stop()
         retentionTimer?.invalidate()
@@ -280,6 +284,7 @@ final class ClipboardStore {
     #if DEBUG
     func setDebugMode(_ enabled: Bool) {
         guard isDebugMode != enabled else { return }
+        pasteQueue.cancel()
         captureGeneration += 1
         debugItems = enabled ? ClipboardSamples.makeItems() : []
         isDebugMode = enabled
@@ -329,6 +334,7 @@ final class ClipboardStore {
         guard !isDebugMode, !storageBlocked, !isLoading, !isCopying else { return }
         let deleted = items.filter { ids.contains($0.id) }
         guard !deleted.isEmpty else { return }
+        if pasteQueue.entries.contains(where: { ids.contains($0.id) }) { pasteQueue.cancel() }
         let index = items.firstIndex(where: { ids.contains($0.id) }) ?? 0
         let cutoff = Date()
         for item in deleted { deletionCutoffs[item.fingerprint] = cutoff }
@@ -372,6 +378,7 @@ final class ClipboardStore {
 
     func clearHistory() {
         guard !isDebugMode, !storageBlocked, !isLoading else { return }
+        pasteQueue.cancel()
         captureGeneration += 1
         deletionCutoffs = [:]
         monitor.checkpoint()
@@ -393,26 +400,31 @@ final class ClipboardStore {
 
     @discardableResult
     func copySelection(separator: ClipboardTextSeparator = .newline, reversed: Bool = false) async -> Bool {
-        await copyItems(separator: separator, reversed: reversed)
+        guard !pasteQueue.isPasting else { return false }
+        pasteQueue.cancel()
+        return await copyItems(separator: separator, reversed: reversed)
     }
 
     @discardableResult
-    func copyItem(_ id: UUID) async -> Bool {
-        await copyItems([id])
+    func copyItem(_ id: UUID, isCurrent: () -> Bool = { true }) async -> Bool {
+        await copyItems([id], requestIsCurrent: isCurrent)
     }
 
     private func copyItems(_ requestedIDs: [UUID]? = nil, separator: ClipboardTextSeparator = .newline,
-                           reversed: Bool = false) async -> Bool {
+                           reversed: Bool = false, requestIsCurrent: () -> Bool = { true }) async -> Bool {
         guard !isDebugMode, !isCopying, !isLoading else { return false }
+        copiedChangeCount = nil
         isCopying = true
         defer { isCopying = false }
         let presentation = presentationID
+        let clipboardSnapshot = pasteboard.changeCount
         // Keep Paste available while searching, but resolve the latest results before copying.
         while isSearching {
             let generation = queryGeneration
             await queryTask?.value
             await saveTask?.value
-            guard !Task.isCancelled, presentationID == presentation, !isDebugMode, storageError == nil else { return false }
+            guard !Task.isCancelled, requestIsCurrent(), presentationID == presentation, !isDebugMode,
+                  storageError == nil, pasteboard.changeCount == clipboardSnapshot else { return false }
             if generation == queryGeneration && isSearching { return false }
         }
         guard !Task.isCancelled, presentationID == presentation, !isDebugMode else { return false }
@@ -422,7 +434,8 @@ final class ClipboardStore {
         guard !ids.isEmpty else { return false }
         let generation = queryGeneration
         func isCurrent() -> Bool {
-            !Task.isCancelled && presentationID == presentation && generation == queryGeneration && !isDebugMode
+            !Task.isCancelled && requestIsCurrent() && pasteboard.changeCount == clipboardSnapshot
+                && presentationID == presentation && generation == queryGeneration && !isDebugMode
                 && (requestedIDs != nil || selectedIDs == selectionSnapshot)
         }
         var fullItems: [ClipboardItem] = []
@@ -454,10 +467,12 @@ final class ClipboardStore {
                 guard isCurrent() else { return false }
                 pasteboard.clearContents()
                 guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
+                copiedChangeCount = pasteboard.changeCount
             case .file:
                 try ClipboardFileAccess.withResolvedFiles(fullItems.flatMap(\.files)) { urls, updatedFiles in
                     pasteboard.clearContents()
                     guard pasteboard.writeObjects(urls as [NSURL]) else { throw CocoaError(.fileWriteUnknown) }
+                    copiedChangeCount = pasteboard.changeCount
                     var offset = 0
                     for item in fullItems {
                         let end = offset + item.files.count
@@ -469,6 +484,7 @@ final class ClipboardStore {
                 pasteboard.clearContents()
                 let text = fullItems.map(\.content).joined(separator: separator.value)
                 guard pasteboard.setString(text, forType: .string) else { throw CocoaError(.fileWriteUnknown) }
+                copiedChangeCount = pasteboard.changeCount
             }
             monitor.checkpoint()
             let now = Date()
@@ -648,6 +664,7 @@ final class ClipboardStore {
 
     private func enqueue(_ capture: ClipboardCapture) {
         guard !isDebugMode else { return }
+        pasteQueue.cancel()
         let previous = captureTask
         let generation = captureGeneration
         captureTask = Task { [weak self] in

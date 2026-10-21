@@ -9,6 +9,8 @@ struct ContentView: View {
     var onDismiss: () -> Void
     var onPasteCopiedItem: () -> Void
     var onOpenSettings: () -> Void
+    var onStartPasteQueue: ([ClipboardItem]) -> Void = { _ in }
+    var onPasteNext: () -> Void = {}
     var onRelaunch: () -> Void = {}
 
     private struct PreviewIdentity: Equatable {
@@ -69,8 +71,10 @@ struct ContentView: View {
                     Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismissMenus)
                         .accessibilityHidden(true)
                     ClipboardPasteActionsMenu(canCombine: store.canCombineSelection,
+                                              canPaste: store.canCopySelection && !store.isSearching && !store.pasteQueue.isPasting,
                                               separator: $textSeparator, reversed: $reversePasteOrder,
-                                              onPaste: { dismissMenus(); copySelection() },
+                                              onPaste: { dismissMenus(); pasteCombinedSelection() },
+                                              onQueue: { dismissMenus(); startPasteQueue() },
                                               onDismiss: dismissMenus)
                         .padding(.bottom, geometry.size.height - pasteControlFrame.minY + 4)
                         .padding(.trailing, geometry.size.width - pasteControlFrame.maxX)
@@ -83,6 +87,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             searchBar
             Divider().opacity(0.5)
+            if store.pasteQueue.isActive {
+                queueStatus
+                Divider().opacity(0.5)
+            }
             contentArea
             Divider().opacity(0.5)
             footer
@@ -653,28 +661,34 @@ struct ContentView: View {
                 requestDeletion(store.selectedIDs)
                 searchFocused = true
             } label: {
-                Label("Delete Selected", systemImage: "trash")
+                if store.selectedIDs.count > 1 {
+                    Image(systemName: "trash").frame(width: 16)
+                } else {
+                    Label("Delete Selected", systemImage: "trash")
+                }
             }
             .buttonStyle(PasketButtonStyle())
             .font(.system(size: 12))
             .focusable(false)
             .fixedSize()
-            .disabled(store.isDebugMode || store.selectedItem == nil || store.isLoading || store.isStorageBlocked)
+            .disabled(store.isDebugMode || store.selectedItem == nil || store.isLoading || store.isStorageBlocked
+                      || store.isCopying || store.pasteQueue.isPasting)
             .help(shortcuts.deletionShortcut.map { "Delete selected history entries (\($0.displayName))" }
                   ?? "Delete selected history entries")
             .accessibilityIdentifier("deleteSelectedClipboardItem")
+            .accessibilityLabel("Delete \(store.selectedIDs.count) selected items")
             Button(action: copySelection) {
                 HStack(spacing: 8) {
-                    Text(store.selectedIDs.count > 1 ? "Paste Together" : "Paste")
+                    Text(store.selectedIDs.count > 1 ? (store.canCombineSelection ? "Paste Together" : "Start Paste Queue") : "Paste")
                     Image(systemName: "return").foregroundStyle(.secondary)
                 }
                 .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(PasketButtonStyle(isProminent: true))
             .focusable(false)
-            .disabled(!store.canCopySelection || (store.selectedIDs.count > 1 && !store.canCombineSelection))
-            .help(store.selectedIDs.count > 1 && !store.canCombineSelection
-                  ? ClipboardBatch.unsupportedMessage : "Paste selected content into your previous app")
+            .fixedSize()
+            .disabled(!store.canCopySelection || store.pasteQueue.isPasting || store.isSearching)
+            .help("Paste selected content into your previous app")
             .accessibilityIdentifier("copyClipboardItem")
             if store.selectedIDs.count > 1 {
                 Button {
@@ -740,6 +754,17 @@ struct ContentView: View {
     }
 
     private func copySelection() {
+        if store.selectedIDs.count > 1 && !store.canCombineSelection {
+            startPasteQueue()
+        } else { pasteCombinedSelection() }
+    }
+
+    private func startPasteQueue() {
+        guard store.canCopySelection, !store.isSearching, !store.pasteQueue.isPasting else { return }
+        onStartPasteQueue(orderedSelectedItems)
+    }
+
+    private func pasteCombinedSelection() {
         guard store.selectedIDs.count == 1 || store.canCombineSelection else { return }
         let presentation = store.presentationID
         let separator = textSeparator
@@ -751,8 +776,31 @@ struct ContentView: View {
         }
     }
 
+    private var queueStatus: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "text.insert").foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Next: \(store.pasteQueue.next?.title ?? "")").lineLimit(1)
+                Text("\(store.pasteQueue.remainingCount) remaining" + (shortcuts.pasteNextShortcut.map { " · \($0.displayName) to paste next" }
+                     ?? " · Set a Paste Next shortcut in Settings"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if shortcuts.pasteNextShortcut == nil {
+                Button("Set Shortcut…") { onOpenSettings() }.buttonStyle(PasketButtonStyle())
+            }
+            Button("Paste Next", action: onPasteNext)
+                .buttonStyle(PasketButtonStyle(isProminent: true))
+                .disabled(store.pasteQueue.isPasting || store.isCopying)
+            Button("Cancel") { store.pasteQueue.cancel() }.buttonStyle(PasketButtonStyle())
+        }
+        .font(.system(size: 12)).padding(.horizontal, 14).padding(.vertical, 10)
+        .accessibilityElement(children: .contain).accessibilityLabel("Paste queue")
+    }
+
     private func requestDeletion(_ ids: Set<UUID>) {
-        guard !ids.isEmpty, !store.isDebugMode, !store.isStorageBlocked, !store.isLoading, !store.isCopying else { return }
+        guard !ids.isEmpty, !store.isDebugMode, !store.isStorageBlocked, !store.isLoading,
+              !store.isCopying, !store.pasteQueue.isPasting else { return }
         if ids.count == 1 {
             store.deleteItems(ids)
         } else {
@@ -923,7 +971,7 @@ private struct ClipboardMenuSurface: ViewModifier {
 
 private struct ClipboardPasteActionsMenu: View {
     private enum Row: Int, CaseIterable {
-        case together, newline, space, blankLine, none, reverse
+        case together, queue, newline, space, blankLine, none, reverse
         var separator: ClipboardTextSeparator? {
             switch self {
             case .newline: .newline
@@ -936,6 +984,7 @@ private struct ClipboardPasteActionsMenu: View {
         var title: String {
             switch self {
             case .together: "Paste Together"
+            case .queue: "Start Paste Queue"
             case .reverse: "Reverse Order"
             default: separator?.title ?? ""
             }
@@ -943,13 +992,17 @@ private struct ClipboardPasteActionsMenu: View {
     }
 
     let canCombine: Bool
+    let canPaste: Bool
     @Binding var separator: ClipboardTextSeparator
     @Binding var reversed: Bool
     var onPaste: () -> Void
+    var onQueue: () -> Void
     var onDismiss: () -> Void
     @State private var highlighted: Row = .together
     @FocusState private var isFocused: Bool
-    private var enabledRows: [Row] { Row.allCases.filter { $0 != .together || canCombine } }
+    private var enabledRows: [Row] {
+        Row.allCases.filter { ($0 != .together || (canCombine && canPaste)) && ($0 != .queue || canPaste) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -966,9 +1019,9 @@ private struct ClipboardPasteActionsMenu: View {
                 if row == .reverse { Divider().padding(.vertical, 4) }
                 Button { choose(row) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: row == .together ? "doc.on.clipboard" : "checkmark")
+                        Image(systemName: row == .together ? "doc.on.clipboard" : row == .queue ? "text.insert" : "checkmark")
                             .frame(width: 16)
-                            .opacity(row == .together || row.separator == separator || (row == .reverse && reversed) ? 1 : 0)
+                            .opacity(row == .together || row == .queue || row.separator == separator || (row == .reverse && reversed) ? 1 : 0)
                         Text(row.title).frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .font(.system(size: 13, weight: .medium))
@@ -1002,6 +1055,7 @@ private struct ClipboardPasteActionsMenu: View {
         guard enabledRows.contains(row) else { return }
         if let value = row.separator { separator = value }
         else if row == .reverse { reversed.toggle() }
+        else if row == .queue { onQueue() }
         else { onPaste() }
     }
 }

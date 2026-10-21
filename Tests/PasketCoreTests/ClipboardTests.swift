@@ -5,6 +5,62 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func pasteQueueKeepsItsOrderAcrossSearchAndRecencyChanges() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for text in ["Queue Alpha 71927", "Queue Beta 83291", "Queue Gamma 90123"] { await fixture.copy(text) }
+        let ordered = Array(fixture.store.items.reversed())
+        let queue = fixture.store.pasteQueue
+        #expect(queue.start(ordered))
+        for item in ordered {
+            fixture.store.query = item.id == ordered[0].id ? ordered[2].content : ordered[0].content
+            await fixture.store.flush()
+            #expect(!fixture.store.filteredItems.contains { $0.id == item.id })
+            #expect(await queue.advance(copy: { id, valid in
+                let copied = await fixture.store.copyItem(id, isCurrent: valid)
+                return copied ? fixture.store.copiedChangeCount : nil
+            }, paste: { _ in true }))
+            #expect(fixture.pasteboard.string(forType: .string) == item.content)
+            await fixture.store.flush()
+        }
+        #expect(!queue.isActive)
+        await fixture.cleanUp()
+    }
+
+    @Test func cancellingAQueueOrDeletingItsNextItemPreventsFurtherWrites() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for text in ["A", "B"] { await fixture.copy(text) }
+        let ordered = fixture.store.items
+        let queue = fixture.store.pasteQueue
+        queue.start(ordered)
+        fixture.store.delete(ordered[0].id)
+        #expect(!queue.isActive)
+        await fixture.store.flush()
+        fixture.write("Keep this clipboard")
+        #expect(await fixture.store.copyItem(ordered[1].id, isCurrent: { false }) == false)
+        #expect(fixture.pasteboard.string(forType: .string) == "Keep this clipboard")
+        await fixture.cleanUp()
+    }
+
+    @Test func shiftNavigationExtendsTheRangeAcrossLoadedPages() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for index in 0..<55 { await fixture.copy("Item \(index)") }
+        fixture.store.prepareForPresentation()
+        await fixture.store.flush()
+        #expect(fixture.store.items.count == 50)
+        let anchor = fixture.store.items[48].id
+        fixture.store.select(anchor)
+        fixture.store.moveSelection(by: 1, extending: true)
+        fixture.store.moveSelection(by: 1, extending: true)
+        await fixture.store.flush()
+        #expect(fixture.store.selectedIDs == Set(fixture.store.items[48...50].map(\.id)))
+        fixture.store.moveSelection(by: -1, extending: true)
+        #expect(fixture.store.selectedIDs == Set(fixture.store.items[48...49].map(\.id)))
+        await fixture.cleanUp()
+    }
+
     @Test(arguments: ClipboardTextSeparator.allCases)
     func combinedTextUsesFullContentAndListOrder(separator: ClipboardTextSeparator) async throws {
         let fixture = try Fixture()

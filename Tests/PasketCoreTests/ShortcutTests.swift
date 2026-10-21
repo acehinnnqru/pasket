@@ -5,6 +5,70 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ShortcutTests {
+    @Test func failedActiveQueueRegistrationDoesNotSaveTheShortcutDraft() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        #expect(manager.setPasteQueueActive(true))
+        manager.beginRecording(.pasteNext)
+        manager.record(try keyEvent(code: kVK_ANSI_V, modifiers: [.command, .option], characters: "v"))
+        #expect(!manager.saveRecording())
+        #expect(manager.isRecording)
+        #expect(manager.errorMessage != nil)
+        #expect(manager.pasteNextShortcut == nil)
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
+        manager.cancelRecording()
+        manager.setPasteQueueActive(false)
+    }
+
+    @Test func pasteNextIsOptionalAndOnlySavesARecordedDraftOnConfirmation() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let manager = GlobalShortcutManager(defaults: defaults)
+        #expect(manager.pasteNextShortcut == nil)
+        manager.beginRecording(.pasteNext)
+        manager.record(try keyEvent(code: kVK_ANSI_V, modifiers: [.command, .option], characters: "v"))
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
+        #expect(manager.saveRecording())
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut?.displayName == "⌥⌘V")
+        manager.beginRecording(.pasteNext)
+        manager.stageShortcut(nil)
+        manager.cancelRecording()
+        #expect(manager.pasteNextShortcut != nil)
+        manager.beginRecording(.pasteNext)
+        manager.stageShortcut(nil)
+        #expect(manager.saveRecording())
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
+    }
+
+    @Test func pasteNextPreservesNormalPasteAndRejectsEveryPasketConflict() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let history = GlobalShortcut(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | optionKey), keyLabel: "P")
+        defaults.set(try JSONEncoder().encode(history), forKey: "globalInvocationShortcut")
+        let manager = GlobalShortcutManager(defaults: defaults)
+        let deletion = GlobalShortcut(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey | optionKey), keyLabel: "⌫")
+        #expect(manager.setDeletionShortcut(deletion))
+        for candidate in [history, deletion, .defaultSettings,
+                          GlobalShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey), keyLabel: "V")] {
+            #expect(!manager.setPasteNextShortcut(candidate))
+            #expect(manager.pasteNextShortcut == nil)
+        }
+        let next = GlobalShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | optionKey), keyLabel: "V")
+        #expect(manager.setPasteNextShortcut(next))
+        #expect(!manager.setSettingsShortcut(next))
+        #expect(!manager.setDeletionShortcut(next))
+        manager.beginRecording(.showHistory)
+        manager.stageShortcut(next)
+        #expect(!manager.saveRecording())
+        #expect(manager.errorMessage?.contains("Paste Next") == true)
+        manager.cancelRecording()
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == next)
+    }
+
     @Test func shortcutMatchesKeysAndModifiersInsteadOfDisplayLabels() throws {
         let shortcut = GlobalShortcut(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(cmdKey), keyLabel: "Custom Label")
         let event = try keyEvent(code: kVK_ANSI_D, modifiers: [.command, .capsLock], characters: "d")

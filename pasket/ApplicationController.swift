@@ -93,11 +93,20 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         pasteController = ClipboardPasteController(toasts: store.toasts, systemAccess: store.systemAccess)
         super.init()
         dockIcon.onChange = { [weak self] in self?.applyDockPreferences() }
+        store.pasteQueue.onActiveChange = { [weak self] active in
+            guard let self else { return }
+            if !shortcuts.setPasteQueueActive(active) {
+                store.pasteQueue.cancel()
+                store.toasts.show(shortcuts.errorMessage, source: .notice, title: "Paste Queue Could Not Start", style: .warning)
+            }
+            if !active { pasteController.cancel() }
+        }
     }
 
     func start() {
         applyDockPreferences()
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
+        shortcuts.onPasteNext = { [weak self] in self?.pasteNextQueuedItem() }
         shortcuts.start()
         setup.refresh(hasShortcut: shortcuts.shortcut != nil)
         if setup.step == .complete {
@@ -162,6 +171,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 onDismiss: { [weak self] in self?.hidePanel() },
                 onPasteCopiedItem: { [weak self] in self?.pasteCopiedItem() },
                 onOpenSettings: { [weak self] in self?.showSettings() },
+                onStartPasteQueue: { [weak self] items in self?.startPasteQueue(items) },
+                onPasteNext: { [weak self] in self?.pasteNextQueuedItem() },
                 onRelaunch: { [weak self] in self?.requestRelaunch() }
             ).modifier(PasketAccentColor(preferences: accentColor)))
             self.panel = panel
@@ -195,9 +206,54 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private func pasteCopiedItem() {
         let target = previousApplication.map { ClipboardPasteController.Target(application: $0) }
         let presentation = store.presentationID
+        guard let changeCount = store.copiedChangeCount else { return }
         Task {
             guard store.presentationID == presentation, panel?.isVisible == true else { return }
-            await pasteController.paste(to: target) { [weak self] in self?.hidePanel() }
+            await pasteController.paste(to: target, expectedChangeCount: changeCount) { [weak self] in self?.hidePanel() }
+        }
+    }
+
+    private func startPasteQueue(_ items: [ClipboardItem]) {
+        guard !store.isDebugMode, !store.isCopying, !store.isSearching,
+              store.pasteQueue.start(items) else { return }
+        pasteNextQueuedItem()
+    }
+
+    func pasteNextQueuedItem() {
+        guard !shortcuts.isRecording, !store.pasteQueue.isPasting,
+              store.pasteQueue.checkClipboard(), store.systemAccess.request == nil else { return }
+        let application = panel?.isVisible == true ? previousApplication : NSWorkspace.shared.frontmostApplication
+        guard let application, application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              !application.isTerminated, application.isActive else {
+            store.toasts.show("Open history from the app where you want to paste, then choose Paste Next.",
+                              source: .notice, title: "Choose a Paste Destination", style: .information)
+            return
+        }
+        let target = ClipboardPasteController.Target(application: application)
+        let presentation = store.presentationID
+        Task {
+            let delivered = await store.pasteQueue.advance(copy: { [self] id, isCurrent in
+                guard target.isActive(), !target.isTerminated(), store.presentationID == presentation else { return nil }
+                let copied = await store.copyItem(id, isCurrent: {
+                    isCurrent() && target.isActive() && !target.isTerminated()
+                        && store.presentationID == presentation
+                })
+                return copied ? store.copiedChangeCount : nil
+            }, paste: { [self] changeCount in
+                await pasteController.paste(to: target, expectedChangeCount: changeCount) { [weak self] in
+                    if self?.panel?.isVisible == true { self?.hidePanel() }
+                }
+            })
+            if !delivered, panel?.isVisible != true,
+               pasteController.needsPermission || store.copyError != nil {
+                let needsPermission = pasteController.needsPermission
+                let message = store.copyError
+                showPanel()
+                if needsPermission { store.systemAccess.present(.accessibility) }
+                else {
+                    store.toasts.show(message, source: .notice, title: "Paste Queue Stopped", style: .warning)
+                }
+            }
         }
     }
 

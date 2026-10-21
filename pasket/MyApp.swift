@@ -17,6 +17,16 @@ struct PasketApp: App {
             if let error = appDelegate.controller.shortcuts.errorMessage {
                 Text(error)
             }
+            if appDelegate.controller.store.pasteQueue.isActive {
+                Divider()
+                Text("Next: \(appDelegate.controller.store.pasteQueue.next?.title ?? "")")
+                Text("\(appDelegate.controller.store.pasteQueue.remainingCount) remaining")
+                Button("Paste Next" + (appDelegate.controller.shortcuts.pasteNextShortcut.map { " (\($0.displayName))" } ?? "")) {
+                    appDelegate.controller.pasteNextQueuedItem()
+                }
+                .disabled(appDelegate.controller.store.pasteQueue.isPasting)
+                Button("Cancel Paste Queue") { appDelegate.controller.store.pasteQueue.cancel() }
+            }
             Divider()
             Button(appDelegate.controller.store.clipboardAccessDenied ? "Allow Clipboard Access…"
                    : appDelegate.controller.store.isPaused ? "Resume Collection" : "Pause Collection") {
@@ -40,8 +50,12 @@ struct PasketApp: App {
             }
             .keyboardShortcut("q")
         } label: {
-            Image(nsImage: PasketMenuIcon.image)
-                .accessibilityLabel("Pasket")
+            HStack(spacing: 3) {
+                Image(nsImage: PasketMenuIcon.image)
+                if appDelegate.controller.store.pasteQueue.isActive {
+                    Text("\(appDelegate.controller.store.pasteQueue.remainingCount)")
+                }
+            }.accessibilityLabel("Pasket")
         }
         .menuBarExtraStyle(.menu)
     }

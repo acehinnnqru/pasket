@@ -65,8 +65,9 @@ final class ClipboardPasteController {
     }
 
     @discardableResult
-    func paste(to target: Target?, dismiss: () -> Void) async -> Bool {
+    func paste(to target: Target?, expectedChangeCount: Int? = nil, dismiss: () -> Void) async -> Bool {
         guard !Task.isCancelled else { return false }
+        if let expectedChangeCount, clipboardChangeCount() != expectedChangeCount { return false }
         prepareForPresentation()
         guard let target, !target.isTerminated(), target.isActive() else {
             errorMessage = "Item copied. Open history from the app where you want to paste, or press Command + V there."
@@ -80,6 +81,7 @@ final class ClipboardPasteController {
         }
 
         let changeCount = clipboardChangeCount()
+        guard expectedChangeCount == nil || expectedChangeCount == changeCount else { return false }
         let request = UUID()
         requestID = request
         for _ in 0..<50 {

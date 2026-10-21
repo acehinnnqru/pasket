@@ -124,7 +124,10 @@ final class ClipboardStore {
         return !isDebugMode && selectedDetail?.id == item.id ? selectedDetail : item
     }
     var isStorageBlocked: Bool { storageBlocked }
-    var canCopySelection: Bool { !isDebugMode && selectedItem.map { !unavailableItems.contains($0.id) } == true && !isLoading && !isCopying }
+    var canCopySelection: Bool {
+        !isDebugMode && !selectedIDs.isEmpty && selectedIDs.isDisjoint(with: unavailableItems) && !isLoading && !isCopying
+    }
+    var canCombineSelection: Bool { ClipboardBatch.canCombine(selectedItems) }
     var hasMoreItems: Bool { !isDebugMode && items.count < matchingCount }
 
     func start() async {
@@ -389,7 +392,17 @@ final class ClipboardStore {
     }
 
     @discardableResult
-    func copySelection() async -> Bool {
+    func copySelection(separator: ClipboardTextSeparator = .newline, reversed: Bool = false) async -> Bool {
+        await copyItems(separator: separator, reversed: reversed)
+    }
+
+    @discardableResult
+    func copyItem(_ id: UUID) async -> Bool {
+        await copyItems([id])
+    }
+
+    private func copyItems(_ requestedIDs: [UUID]? = nil, separator: ClipboardTextSeparator = .newline,
+                           reversed: Bool = false) async -> Bool {
         guard !isDebugMode, !isCopying, !isLoading else { return false }
         isCopying = true
         defer { isCopying = false }
@@ -402,51 +415,87 @@ final class ClipboardStore {
             guard !Task.isCancelled, presentationID == presentation, !isDebugMode, storageError == nil else { return false }
             if generation == queryGeneration && isSearching { return false }
         }
-        guard let summary = selectedItem, !Task.isCancelled, presentationID == presentation, !isDebugMode else { return false }
+        guard !Task.isCancelled, presentationID == presentation, !isDebugMode else { return false }
+        let selectionSnapshot = selectedIDs
+        var ids = requestedIDs ?? selectedItems.map(\.id)
+        if reversed { ids.reverse() }
+        guard !ids.isEmpty else { return false }
         let generation = queryGeneration
-        var item = summary
+        func isCurrent() -> Bool {
+            !Task.isCancelled && presentationID == presentation && generation == queryGeneration && !isDebugMode
+                && (requestedIDs != nil || selectedIDs == selectionSnapshot)
+        }
+        var fullItems: [ClipboardItem] = []
+        var failingItem: ClipboardItem?
         do {
             await saveTask?.value
-            let fullItem: ClipboardItem?
-            if let pending = pendingItem(summary.id) { fullItem = pending }
-            else { fullItem = try await persistence.item(summary.id) }
-            guard let fullItem, presentationID == presentation,
-                  generation == queryGeneration, !Task.isCancelled,
-                  items.contains(where: { $0.id == summary.id }) else { return false }
-            item = fullItem
-            switch item.kind {
+            guard isCurrent() else { return false }
+            for id in ids {
+                let fullItem: ClipboardItem?
+                if let pending = pendingItem(id) { fullItem = pending }
+                else { fullItem = try await persistence.item(id) }
+                guard isCurrent() else { return false }
+                guard let fullItem else {
+                    copyError = "An item is no longer available. Select the items again."
+                    return false
+                }
+                fullItems.append(fullItem)
+            }
+            guard let first = fullItems.first else { return false }
+            if fullItems.count > 1 && !ClipboardBatch.canCombine(fullItems) {
+                copyError = ClipboardBatch.unsupportedMessage
+                return false
+            }
+            failingItem = first
+            switch first.kind {
             case .image:
-                guard let image = item.image else { return false }
+                guard let image = first.image else { return false }
                 let data = try await persistence.imageData(image)
-                guard presentationID == presentation, generation == queryGeneration, !Task.isCancelled,
-                      items.contains(where: { $0.id == item.id }) else { return false }
+                guard isCurrent() else { return false }
                 pasteboard.clearContents()
                 guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
             case .file:
-                try ClipboardFileAccess.withResolvedFiles(item.files) { urls, updatedFiles in
+                try ClipboardFileAccess.withResolvedFiles(fullItems.flatMap(\.files)) { urls, updatedFiles in
                     pasteboard.clearContents()
                     guard pasteboard.writeObjects(urls as [NSURL]) else { throw CocoaError(.fileWriteUnknown) }
-                    updateFiles(updatedFiles, for: item.id, replacing: item.files)
+                    var offset = 0
+                    for item in fullItems {
+                        let end = offset + item.files.count
+                        updateFiles(Array(updatedFiles[offset..<end]), for: item.id, replacing: item.files)
+                        offset = end
+                    }
                 }
             default:
                 pasteboard.clearContents()
-                guard pasteboard.setString(item.content, forType: .string) else { throw CocoaError(.fileWriteUnknown) }
+                let text = fullItems.map(\.content).joined(separator: separator.value)
+                guard pasteboard.setString(text, forType: .string) else { throw CocoaError(.fileWriteUnknown) }
             }
             monitor.checkpoint()
-            if let index = items.firstIndex(where: { $0.id == item.id }) {
-                var recent = items.remove(at: index)
-                recent.copiedAt = Date()
-                items.insert(recent, at: 0)
-                persist([.touch(item.id, recent.copiedAt)])
+            let now = Date()
+            var mutations: [ClipboardMutation] = []
+            var recents: [ClipboardItem] = []
+            for (index, item) in fullItems.enumerated() {
+                let copiedAt = now.addingTimeInterval(-Double(index) * 0.001)
+                if var recent = items.first(where: { $0.id == item.id }) {
+                    recent.copiedAt = copiedAt
+                    recents.append(recent)
+                }
+                mutations.append(.touch(item.id, copiedAt))
+                unavailableItems.remove(item.id)
             }
-            unavailableItems.remove(item.id)
+            let copiedIDs = Set(ids)
+            items.removeAll { copiedIDs.contains($0.id) }
+            items.insert(contentsOf: recents, at: 0)
+            persist(mutations)
             copyError = nil
             return true
         } catch {
             monitor.checkpoint()
-            if item.kind == .file || item.kind == .image { unavailableItems.insert(item.id) }
-            copyError = item.kind == .file
-                ? "File unavailable. Copy the original file again or delete this entry."
+            if fullItems.count == 1, let item = failingItem, item.kind == .file || item.kind == .image {
+                unavailableItems.insert(item.id)
+            }
+            copyError = failingItem?.kind == .file
+                ? "A file is unavailable. Copy the original files again or remove the unavailable entry."
                 : "Could not copy this item. \(error.localizedDescription)"
             return false
         }

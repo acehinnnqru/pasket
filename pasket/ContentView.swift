@@ -31,8 +31,15 @@ struct ContentView: View {
     @State private var pendingDeletion: Set<UUID> = []
     @State private var isConfirmingDeletion = false
     @State private var isInspectingSelection = false
+    @State private var isPasteMenuPresented = false
+    @State private var pasteControlFrame: CGRect = .zero
+    @State private var textSeparator: ClipboardTextSeparator = .newline
+    @State private var reversePasteOrder = false
 
-    private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented }
+    private var isMenuPresented: Bool { isFilterMenuPresented || isMoreMenuPresented || isPasteMenuPresented }
+    private var orderedSelectedItems: [ClipboardItem] {
+        reversePasteOrder ? Array(store.selectedItems.reversed()) : store.selectedItems
+    }
     private var isDialogPresented: Bool { isConfirmingClear || isConfirmingDeletion || store.systemAccess.request != nil }
 
     private var canClearHistory: Bool {
@@ -42,6 +49,7 @@ struct ContentView: View {
 
     var body: some View {
         historySurface
+            .overlay(alignment: .bottomTrailing) { pasteMenuOverlay }
             .alert("Delete \(pendingDeletion.count) Selected Items?", isPresented: $isConfirmingDeletion) {
                 Button("Cancel", role: .cancel) { pendingDeletion = [] }
                 Button("Delete \(pendingDeletion.count) Items", role: .destructive) {
@@ -51,6 +59,24 @@ struct ContentView: View {
             } message: {
                 Text("These history entries and their saved image copies will be deleted. This cannot be undone. Your original files and current clipboard will be kept.")
             }
+    }
+
+    @ViewBuilder
+    private var pasteMenuOverlay: some View {
+        if isPasteMenuPresented {
+            GeometryReader { geometry in
+                ZStack(alignment: .bottomTrailing) {
+                    Color.clear.contentShape(Rectangle()).onTapGesture(perform: dismissMenus)
+                        .accessibilityHidden(true)
+                    ClipboardPasteActionsMenu(canCombine: store.canCombineSelection,
+                                              separator: $textSeparator, reversed: $reversePasteOrder,
+                                              onPaste: { dismissMenus(); copySelection() },
+                                              onDismiss: dismissMenus)
+                        .padding(.bottom, geometry.size.height - pasteControlFrame.minY + 4)
+                        .padding(.trailing, geometry.size.width - pasteControlFrame.maxX)
+                }
+            }
+        }
     }
 
     private var historyLayout: some View {
@@ -162,6 +188,9 @@ struct ContentView: View {
         .onChange(of: store.presentationID) {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
+            isPasteMenuPresented = false
+            reversePasteOrder = false
+            textSeparator = .newline
             isInspectingSelection = false
             isConfirmingDeletion = false
             pendingDeletion = []
@@ -249,6 +278,7 @@ struct ContentView: View {
             }
             Button {
                 isMoreMenuPresented = false
+                isPasteMenuPresented = false
                 searchFocused = false
                 isFilterMenuPresented.toggle()
                 if !isFilterMenuPresented { searchFocused = true }
@@ -405,11 +435,12 @@ struct ContentView: View {
                 } else {
                     Text("\(store.selectedIDs.count) Items Selected")
                         .font(.system(size: 17, weight: .semibold))
-                    Text("Items are ordered from top to bottom. Select an item below to inspect it.")
+                    Text(reversePasteOrder ? "Items will paste from bottom to top. Select an item below to inspect it."
+                         : "Items will paste from top to bottom. Select an item below to inspect it.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(store.selectedItems.enumerated()), id: \.element.id) { index, item in
+                            ForEach(Array(orderedSelectedItems.enumerated()), id: \.element.id) { index, item in
                                 Button {
                                     store.focusSelection(item.id)
                                     isInspectingSelection = true
@@ -634,18 +665,36 @@ struct ContentView: View {
             .accessibilityIdentifier("deleteSelectedClipboardItem")
             Button(action: copySelection) {
                 HStack(spacing: 8) {
-                    Text("Paste")
+                    Text(store.selectedIDs.count > 1 ? "Paste Together" : "Paste")
                     Image(systemName: "return").foregroundStyle(.secondary)
                 }
                 .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(PasketButtonStyle(isProminent: true))
             .focusable(false)
-            .disabled(!store.canCopySelection || store.selectedIDs.count > 1)
-            .help("Paste the complete item into your previous app")
+            .disabled(!store.canCopySelection || (store.selectedIDs.count > 1 && !store.canCombineSelection))
+            .help(store.selectedIDs.count > 1 && !store.canCombineSelection
+                  ? ClipboardBatch.unsupportedMessage : "Paste selected content into your previous app")
             .accessibilityIdentifier("copyClipboardItem")
+            if store.selectedIDs.count > 1 {
+                Button {
+                    let wasPresented = isPasteMenuPresented
+                    dismissMenus()
+                    isPasteMenuPresented = !wasPresented
+                    searchFocused = !isPasteMenuPresented
+                } label: {
+                    Image(systemName: "chevron.down").frame(width: 12, height: 16)
+                }
+                .buttonStyle(PasketButtonStyle(isProminent: true, isActive: isPasteMenuPresented))
+                .focusable(false)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("clipboardPanel")) } action: { pasteControlFrame = $0 }
+                .help("Paste actions and options")
+                .accessibilityLabel("Paste actions and options")
+                .accessibilityIdentifier("clipboardPasteActions")
+            }
             Button {
                 isFilterMenuPresented = false
+                isPasteMenuPresented = false
                 isMoreMenuPresented.toggle()
                 searchFocused = !isMoreMenuPresented
             } label: {
@@ -691,10 +740,14 @@ struct ContentView: View {
     }
 
     private func copySelection() {
-        guard store.selectedIDs.count == 1 else { return }
+        guard store.selectedIDs.count == 1 || store.canCombineSelection else { return }
         let presentation = store.presentationID
+        let separator = textSeparator
+        let reversed = reversePasteOrder
         Task {
-            if await store.copySelection(), store.presentationID == presentation { onPasteCopiedItem() }
+            if await store.copySelection(separator: separator, reversed: reversed), store.presentationID == presentation {
+                onPasteCopiedItem()
+            }
         }
     }
 
@@ -718,6 +771,7 @@ struct ContentView: View {
     private func dismissMenus() {
         isFilterMenuPresented = false
         isMoreMenuPresented = false
+        isPasteMenuPresented = false
         searchFocused = true
     }
 }
@@ -864,6 +918,91 @@ private struct ClipboardMenuSurface: ViewModifier {
                     .allowsHitTesting(false)
             }
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.12), radius: 12, x: 0, y: 5)
+    }
+}
+
+private struct ClipboardPasteActionsMenu: View {
+    private enum Row: Int, CaseIterable {
+        case together, newline, space, blankLine, none, reverse
+        var separator: ClipboardTextSeparator? {
+            switch self {
+            case .newline: .newline
+            case .space: .space
+            case .blankLine: .blankLine
+            case .none: ClipboardTextSeparator.none
+            default: nil
+            }
+        }
+        var title: String {
+            switch self {
+            case .together: "Paste Together"
+            case .reverse: "Reverse Order"
+            default: separator?.title ?? ""
+            }
+        }
+    }
+
+    let canCombine: Bool
+    @Binding var separator: ClipboardTextSeparator
+    @Binding var reversed: Bool
+    var onPaste: () -> Void
+    var onDismiss: () -> Void
+    @State private var highlighted: Row = .together
+    @FocusState private var isFocused: Bool
+    private var enabledRows: [Row] { Row.allCases.filter { $0 != .together || canCombine } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Row.allCases, id: \.self) { row in
+                if row == .newline {
+                    if !canCombine {
+                        Text(ClipboardBatch.unsupportedMessage)
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true).padding(8)
+                    }
+                    Divider().padding(.vertical, 4)
+                    Text("Separate Text With").font(.system(size: 11)).foregroundStyle(.secondary).padding(8)
+                }
+                if row == .reverse { Divider().padding(.vertical, 4) }
+                Button { choose(row) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: row == .together ? "doc.on.clipboard" : "checkmark")
+                            .frame(width: 16)
+                            .opacity(row == .together || row.separator == separator || (row == .reverse && reversed) ? 1 : 0)
+                        Text(row.title).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 8).frame(minHeight: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(highlighted == row ? 0.05 : 0)))
+                }
+                .buttonStyle(.plain).focusable(false)
+                .disabled(!enabledRows.contains(row))
+                .onHover { if $0, enabledRows.contains(row) { highlighted = row } }
+            }
+        }
+        .padding(6).frame(width: 272)
+        .modifier(ClipboardMenuSurface())
+        .focusable().focusEffectDisabled().focused($isFocused)
+        .onAppear { highlighted = enabledRows.first ?? .newline; isFocused = true }
+        .onKeyPress(.downArrow) { move(by: 1); return .handled }
+        .onKeyPress(.upArrow) { move(by: -1); return .handled }
+        .onKeyPress(.return) { choose(highlighted); return .handled }
+        .onExitCommand(perform: onDismiss)
+        .accessibilityElement(children: .contain).accessibilityLabel("Paste actions and options")
+    }
+
+    private func move(by offset: Int) {
+        let rows = enabledRows
+        let index = rows.firstIndex(of: highlighted) ?? 0
+        highlighted = rows[(index + offset + rows.count) % rows.count]
+    }
+
+    private func choose(_ row: Row) {
+        guard enabledRows.contains(row) else { return }
+        if let value = row.separator { separator = value }
+        else if row == .reverse { reversed.toggle() }
+        else { onPaste() }
     }
 }
 

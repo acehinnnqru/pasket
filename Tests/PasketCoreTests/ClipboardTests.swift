@@ -5,6 +5,71 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test(arguments: ClipboardTextSeparator.allCases)
+    func combinedTextUsesFullContentAndListOrder(separator: ClipboardTextSeparator) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let longText = String(repeating: "A", count: 1_500)
+        for text in [longText, "https://example.com", "hello@example.com"] { await fixture.copy(text) }
+        let ids = fixture.store.items.map(\.id)
+        fixture.store.select(ids[2])
+        fixture.store.select(ids[0], command: true)
+        #expect(fixture.store.canCombineSelection)
+        #expect(await fixture.store.copySelection(separator: separator))
+        #expect(fixture.pasteboard.string(forType: .string) == ["hello@example.com", longText].joined(separator: separator.value))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        #expect(fixture.store.totalCount == 3)
+        #expect(fixture.store.selectedIDs == [ids[0], ids[2]])
+        #expect(await fixture.store.copySelection(separator: separator, reversed: true))
+        #expect(fixture.pasteboard.string(forType: .string) == [longText, "hello@example.com"].joined(separator: separator.value))
+        await fixture.cleanUp()
+    }
+
+    @Test func mixedSelectionDoesNotOverwriteTheClipboard() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        await fixture.copy("Text")
+        fixture.pasteboard.clearContents()
+        fixture.pasteboard.setData(try Self.smallPNG(), forType: .png)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let ids = fixture.store.items.map(\.id)
+        fixture.store.select(ids[0])
+        fixture.store.select(ids[1], command: true)
+        fixture.write("Keep this clipboard")
+        #expect(!fixture.store.canCombineSelection)
+        #expect(await fixture.store.copySelection() == false)
+        #expect(fixture.pasteboard.string(forType: .string) == "Keep this clipboard")
+        await fixture.cleanUp()
+    }
+
+    @Test func combinedFileEntriesKeepTheirFilesAndFailBeforeWritingIfOneIsMissing() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let urls = ["a.txt", "b.txt", "c.txt"].map { fixture.directory.appendingPathComponent($0) }
+        for url in urls { try Data(url.lastPathComponent.utf8).write(to: url) }
+        for group in [Array(urls[0...1]), [urls[2]]] {
+            fixture.pasteboard.clearContents()
+            fixture.pasteboard.writeObjects(group as [NSURL])
+            fixture.store.pollClipboard()
+            await fixture.store.flush()
+        }
+        let ids = fixture.store.items.map(\.id)
+        fixture.store.select(ids[0])
+        fixture.store.select(ids[1], command: true)
+        #expect(await fixture.store.copySelection())
+        let copied = fixture.pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL]
+        #expect(copied?.map(\.lastPathComponent) == ["c.txt", "a.txt", "b.txt"])
+        await fixture.store.flush()
+        try FileManager.default.removeItem(at: urls[1])
+        fixture.write("Keep this clipboard")
+        #expect(await fixture.store.copySelection() == false)
+        #expect(fixture.pasteboard.string(forType: .string) == "Keep this clipboard")
+        #expect(FileManager.default.fileExists(atPath: urls[0].path))
+        await fixture.cleanUp()
+    }
+
     @Test func batchDeletionRemovesOnlySelectedEntriesAndPersistsOnce() async throws {
         let fixture = try Fixture()
         await fixture.start()

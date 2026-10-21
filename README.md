@@ -56,6 +56,12 @@ save automatically for the next launch.
   Multiple selections show a numbered summary; inspect an entry without changing the selection.
   **Delete Selected** and the deletion shortcut affect the selection, with confirmation for multiple
   entries. A selected row's Delete context menu uses the full selection; an unselected row uses itself.
+- With multiple entries selected, **Paste Together** combines text, links, and emails using a new
+  line by default, or writes file entries as one group of file references. The adjacent arrow opens
+  paste options: choose New Line, Space, Blank Line, or None as the text separator, and toggle
+  **Reverse Order**. The numbered summary reflects that order. Images and mixed text/file selections
+  cannot be combined. All selected content is loaded and all files are resolved before writing;
+  an unavailable item stops the action instead of silently pasting a partial selection.
 - Selecting a specific content type shows a return arrow and **Reset** to the left of the type selector.
   Click it to return to **All Types** while keeping your search text.
   The selector and its menu keep the same width across all content types.

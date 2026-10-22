@@ -13,7 +13,7 @@ struct ContentView: View {
     var onPasteNext: () -> Void = {}
     var onRelaunch: () -> Void = {}
 
-    private struct PreviewIdentity: Equatable {
+    private struct PreviewIdentity: Hashable {
         let id: UUID
         let copiedAt: Date
     }
@@ -226,8 +226,8 @@ struct ContentView: View {
     private var historySurface: some View {
         historyLayout
         .task(id: previewIdentity) {
-            await store.loadSelection()
             await store.loadPreview(for: store.selectedItem)
+            await store.loadSelection()
         }
         .task(id: store.isSearching) {
             showsSearchProgress = false
@@ -587,25 +587,13 @@ struct ContentView: View {
     }
 
     private func imagePreview(for item: ClipboardItem) -> some View {
-        GeometryReader { geometry in
-            Group {
-                if store.previewID == item.id, let image = store.previewImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                } else if store.missingPreviews.contains(item.id) {
-                    Label(store.unavailableItems.contains(item.id)
-                          ? (item.kind == .file ? "File unavailable" : "Image unavailable") : "Preview unavailable",
-                          systemImage: "photo")
-                } else {
-                    ProgressView("Loading preview…")
-                }
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height)
-        }
-        .padding(12)
-        .foregroundStyle(.secondary)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        let isMissing = store.missingPreviews.contains(item.id)
+        let image = store.previewID == item.id ? store.previewImage : nil
+        let unavailableMessage = store.unavailableItems.contains(item.id)
+            ? (item.kind == .file ? "File unavailable" : "Image unavailable") : "Preview unavailable"
+        return ClipboardImagePreview(image: isMissing ? nil : image,
+                                     unavailableMessage: isMissing ? unavailableMessage : nil)
+            .id(PreviewIdentity(id: item.id, copiedAt: item.copiedAt))
     }
 
     private func information(for item: ClipboardItem) -> some View {
@@ -1350,6 +1338,46 @@ private struct HistoryRow: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { isHovered = $0 }
+    }
+}
+
+private struct ClipboardImagePreview: View {
+    var image: NSImage?
+    var unavailableMessage: String?
+    @State private var showsProgress = false
+
+    private var isLoading: Bool { image == nil && unavailableMessage == nil }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                ClipboardImageCanvas(image: image)
+                if image == nil {
+                    if let unavailableMessage {
+                        Label(unavailableMessage, systemImage: "photo")
+                    } else if showsProgress {
+                        ProgressView("Loading preview…")
+                    }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .padding(12)
+        .foregroundStyle(.secondary)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .task(id: isLoading) {
+            showsProgress = false
+            guard isLoading else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                try Task.checkCancellation()
+                showsProgress = true
+            } catch {}
+        }
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
     }
 }
 

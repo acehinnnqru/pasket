@@ -23,6 +23,11 @@ on:
           - patch
           - minor
           - major
+      upload_testflight:
+        description: Upload this release to TestFlight as well
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -161,3 +166,12 @@ jobs:
             printf '## Version pushed: %s\n\n' "$TAG"
             printf 'The SSH tag push automatically starts **Release macOS app** as a separate workflow run.\n'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  testflight:
+    name: Upload the requested version to TestFlight
+    needs: [prepare, commit]
+    if: inputs.upload_testflight
+    uses: ./.github/workflows/testflight.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit

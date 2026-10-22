@@ -54,9 +54,11 @@ has moved since the run started, the job stops; start a new run on the latest
 code. It never force-pushes or moves existing tags. This unsigned-commit exception
 applies only to this manually requested CI version update.
 
-[Bump version and release](../.github/workflows/bump-version.yml) then calls
-[Release macOS app](../.github/workflows/release.yml) automatically. The release
-workflow checks that the tag matches the version stored in the project, runs
+[Bump version and release](../.github/workflows/bump-version.yml) pushes over SSH
+using a dedicated writable deploy key. Its tag push automatically starts
+[Release macOS app](../.github/workflows/release.yml) as a separate workflow run.
+There is no additional direct workflow call, so a bump starts only one release.
+The release workflow checks that the tag matches the version stored in the project, runs
 tests, builds a universal Release app for Apple Silicon and Intel, signs with
 Developer ID, submits it to Apple's notary service, staples the ticket, and
 publishes these GitHub Release assets (using `v1.2.4` as an example):
@@ -75,6 +77,7 @@ Add these **repository secrets** under **Settings → Secrets and variables → 
 
 | Secret | Value |
 | --- | --- |
+| `RELEASE_DEPLOY_KEY` | Complete private SSH key for the repository's writable release deploy key, including its header/footer and real line breaks. This is separate from Apple's `.p8` API key and P12 signing certificate. |
 | `DEVELOPER_ID_CERTIFICATE_BASE64` | Base64-encoded `.p12` export containing one **Developer ID Application** certificate and its private key. |
 | `DEVELOPER_ID_CERTIFICATE_PASSWORD` | The nonempty password chosen when exporting the `.p12`. |
 | `APPLE_TEAM_ID` | The Apple Developer team ID associated with the certificate. |
@@ -97,12 +100,42 @@ ID shown there. Use credentials from the same Apple Developer team as the signin
 certificate. This workflow expects a team key with an issuer ID.
 
 Merge these workflows into the default branch before using the manual action.
-GitHub supplies `GITHUB_TOKEN` automatically; no personal access token or GPG
-key is needed. The bot needs permission to push to the default branch and create
-tags. If repository rules require signed commits or pull requests, they must
-allow this intended automation; the workflow does not bypass those rules.
-The bump workflow calls the release workflow directly because
-[pushes made with `GITHUB_TOKEN` do not trigger another push workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow-run).
+Configure the release deploy key before dispatching a bump:
+
+1. Generate a dedicated SSH key pair for this repository outside the checkout.
+   Use a key without a passphrase for this unattended checkout action.
+2. Add its public key under **Settings → Deploy keys → Add deploy key** and enable
+   **Allow write access**. Store the complete private key in the
+   `RELEASE_DEPLOY_KEY` Actions Secret; do not Base64-encode it.
+3. If main is protected, use **Settings → Rules → Rulesets** and configure the
+   ruleset targeting main to allow **Deploy keys** in its bypass list with
+   **Always allow**. The bypass must cover rules that prevent the intended direct
+   unsigned version commit, such as required PRs, signed commits, and status
+   checks. If another ruleset or legacy branch protection rule still blocks the
+   push, that rule also needs to permit this automation. Protected release tags
+   must likewise permit creation by the deploy key.
+
+Ruleset bypass is granted to the **Deploy keys** actor category, not an individual
+key or a specific version file. Other writable deploy keys on this repository
+share that bypass. The workflow itself stages only the version project file,
+compares it with the validated tree, checks that main has not moved, and performs
+one atomic push without force. The deploy key is used only by the commit job;
+tests and app builds do not receive it. Checkout removes its SSH credentials
+in the post-job cleanup.
+
+GitHub supplies `GITHUB_TOKEN` automatically for publishing release assets; no
+personal access token or GPG key is needed. The commit job's token has read-only
+contents permission and Git pushes use the SSH deploy key. A missing deploy key
+fails the job instead of falling back to token authentication. Unlike
+[pushes made with `GITHUB_TOKEN`](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow-run),
+SSH tag pushes trigger the normal release workflow. A successful bump run confirms
+the commit and tag were pushed; inspect the separate **Release macOS app** run
+for packaging and publication status.
+
+See GitHub's [deploy key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
+and [ruleset bypass actor reference](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
+for the repository-side setup. These settings are configured by the repository
+owner; the workflows do not change protection rules or register deploy keys.
 
 You can also push a tag manually, but its committed project version and build
 number must follow the same progression rules. With no existing tags, project

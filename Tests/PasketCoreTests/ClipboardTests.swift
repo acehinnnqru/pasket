@@ -581,6 +581,25 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
+    @Test func whitespaceOnlyCopiesAreSkippedAndTextWhitespaceIsPreserved() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let text = " \t\n  Keep this indentation  \r\n "
+        await fixture.copy(text)
+        let original = try #require(fixture.store.selectedItem)
+        for whitespace in ["", "   ", "\t", "\n\r\n", " \t\r\n ", "\u{00A0}\u{2003}\u{3000}"] {
+            await fixture.copy(whitespace)
+            #expect(fixture.store.totalCount == 1)
+            #expect(fixture.store.selectedItem?.id == original.id)
+            #expect(fixture.pasteboard.string(forType: .string) == whitespace)
+            #expect(fixture.store.notice == nil)
+        }
+        await fixture.restart()
+        #expect(fixture.store.totalCount == 1)
+        #expect(fixture.store.selectedItem?.content == text)
+        await fixture.cleanUp()
+    }
+
     @Test func textLimitsCountCharactersAndLeaveTheClipboardUntouched() async throws {
         let fixture = try Fixture()
         await fixture.start()

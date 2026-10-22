@@ -280,6 +280,14 @@ by a fallback import from JSON.
 
 ## Validation
 
+[CI](../.github/workflows/ci.yml) runs on every pull request and push to `main`,
+and can also be started manually. It checks release tooling, runs the core suite,
+and compiles the complete Debug app without signing using Xcode 27.1. New commits
+cancel older runs for the same pull request or branch. The workflow uses read-only
+repository permissions and does not require signing credentials. To require a
+passing CI result before merging, select **Build and test** as a required status
+check in the default branch's protection rule or ruleset.
+
 Run `swift test` for the core suite. Tests use isolated named pasteboards and temporary fixtures;
 they do not read or overwrite the real clipboard. They cover text boundaries, deduplication,
 full-body search and copy, classification, source persistence, pause/resume, restart, deletion,

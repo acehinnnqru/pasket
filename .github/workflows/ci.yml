@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build and test
+    runs-on: xcode-27
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Show the build environment
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Check release tooling
+        run: |
+          python3 -B .github/scripts/test_version.py
+          python3 -B .github/scripts/test_testflight.py
+          bash -n .github/scripts/release-macos.sh
+          bash -n .github/scripts/upload-testflight.sh
+
+      - name: Run core tests
+        run: swift test
+
+      - name: Compile the complete app without signing
+        run: |
+          xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Debug \
+            -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO build

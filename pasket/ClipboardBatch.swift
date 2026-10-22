@@ -24,8 +24,9 @@ nonisolated enum ClipboardTextSeparator: String, CaseIterable, Identifiable {
 nonisolated enum ClipboardBatch {
     static func canCombine(_ items: [ClipboardItem]) -> Bool {
         !items.isEmpty && (items.allSatisfy { [.text, .link, .email].contains($0.kind) }
-            || items.allSatisfy { $0.kind == .file })
+            || items.allSatisfy { $0.kind == .file }
+            || items.allSatisfy { $0.kind == .image })
     }
 
-    static let unsupportedMessage = "Paste Together supports text, links, and emails together, or a group of files. Use a paste queue for images or mixed content."
+    static let unsupportedMessage = "Paste Together supports text, links, and emails together, a group of images, or a group of files. Use a paste queue for mixed content."
 }

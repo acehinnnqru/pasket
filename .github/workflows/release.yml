@@ -1,0 +1,96 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build or retry
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+
+      - name: Validate the release tag
+        run: |
+          python3 .github/scripts/version.py check "$RELEASE_TAG"
+
+      - name: Check version tooling
+        run: python3 .github/scripts/test_version.py
+
+      - name: Show the build environment
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run core tests
+        run: swift test
+
+      - name: Build, sign, notarize, and package
+        id: package
+        env:
+          DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: bash .github/scripts/release-macos.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ASSET_DIRECTORY: ${{ steps.package.outputs.asset-directory }}
+        run: |
+          release_flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+
+          # Resume an interrupted upload only while the release is still a draft.
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/pasket-release.json"; then
+            if [[ "$(plutil -extract isDraft raw -o - "$RUNNER_TEMP/pasket-release.json")" != true ]]; then
+              echo '::error::This release is already published. Create a new version tag.'
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes \
+              --title "Pasket $RELEASE_TAG" "${release_flags[@]}"
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            "$ASSET_DIRECTORY/pasket-$RELEASE_TAG-universal.zip" \
+            "$ASSET_DIRECTORY/pasket-$RELEASE_TAG-universal.dmg" --clobber
+          gh release edit "$RELEASE_TAG" --draft=false "${release_flags[@]}"

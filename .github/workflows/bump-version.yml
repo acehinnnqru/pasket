@@ -1,0 +1,150 @@
+name: Bump version and release
+run-name: Bump ${{ inputs.bump }} version and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version component to increment
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+env:
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  BUMP: ${{ inputs.bump }}
+
+jobs:
+  prepare:
+    name: Prepare and validate the version change
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      message: ${{ steps.version.outputs.message }}
+      tree: ${{ steps.preview.outputs.tree }}
+    steps:
+      - name: Require the default branch
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo '::error::Run this workflow on the repository default branch.'
+            exit 1
+          fi
+
+      - name: Check out the selected commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Calculate and apply the version bump
+        id: version
+        run: python3 .github/scripts/version.py bump "$BUMP" --github-output "$GITHUB_OUTPUT"
+
+      - name: Preview the exact commit
+        id: preview
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT_MESSAGE: ${{ steps.version.outputs.message }}
+        run: |
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+          git add pasket.xcodeproj/project.pbxproj
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          {
+            printf '## Proposed release %s\n\n' "$TAG"
+            printf 'Base commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Commit message: `%s`\n\n' "$COMMIT_MESSAGE"
+            printf 'The manual workflow dispatch authorizes this one unsigned CI version commit and its tag.\n\n'
+            printf '```text\n'
+            git status --short
+            printf '```\n\n```diff\n'
+            git diff --cached
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check version tooling
+        run: python3 .github/scripts/test_version.py
+
+      - name: Run core tests
+        run: swift test
+
+      - name: Compile the complete universal app without signing
+        run: |
+          xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+
+  commit:
+    name: Commit and tag the requested version
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+    steps:
+      - name: Check out the validated base commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Recreate the validated change
+        run: python3 .github/scripts/version.py bump "$BUMP"
+
+      - name: Commit and push the version and tag together
+        id: push
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT_MESSAGE: ${{ needs.prepare.outputs.message }}
+          EXPECTED_TREE: ${{ needs.prepare.outputs.tree }}
+        run: |
+          python3 .github/scripts/version.py check "$TAG"
+          git add pasket.xcodeproj/project.pbxproj
+          if [[ "$(git write-tree)" != "$EXPECTED_TREE" ]]; then
+            echo '::error::The staged content differs from the validated preview.'
+            exit 1
+          fi
+          remote_head=$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | cut -f1)
+          if [[ "$remote_head" != "$GITHUB_SHA" ]]; then
+            echo '::error::The default branch changed. Start a new workflow run to validate the latest code.'
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # The user explicitly permits unsigned commits for this CI version bump only.
+          git -c commit.gpgsign=false commit -m "$COMMIT_MESSAGE"
+          git tag "$TAG"
+          git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$TAG:refs/tags/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish the new tag
+    needs: commit
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.commit.outputs.tag }}
+    secrets: inherit

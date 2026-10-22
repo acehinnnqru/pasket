@@ -37,7 +37,8 @@ struct ContentView: View {
     @State private var isOptionHeld = false
     @State private var pasteControlFrame: CGRect = .zero
     @State private var textSeparator: ClipboardTextSeparator = .newline
-    @State private var reversePasteOrder = false
+    @State private var reversePasteOrder = true
+    @AppStorage("hasShownReversePasteOrderHint") private var hasShownReversePasteOrderHint = false
     @State private var isShowingQueueSetup = false
     @State private var pendingQueueItems: [ClipboardItem] = []
     @State private var pendingQueuePresentationID: UUID?
@@ -242,7 +243,7 @@ struct ContentView: View {
             isFilterMenuPresented = false
             isMoreMenuPresented = false
             isPasteMenuPresented = false
-            reversePasteOrder = false
+            reversePasteOrder = true
             textSeparator = .newline
             isInspectingSelection = false
             isConfirmingDeletion = false
@@ -258,6 +259,12 @@ struct ContentView: View {
         .onChange(of: store.selectedIDs) {
             isInspectingSelection = false
             if store.selectedIDs.count < 2, isPasteMenuPresented { dismissMenus() }
+            if store.selectedIDs.count > 1, reversePasteOrder, !hasShownReversePasteOrderHint,
+               !store.isDebugMode, store.toasts.current == nil {
+                store.toasts.show("Selected items paste from bottom to top. Change this in the paste options menu.",
+                                  source: .pasteOrderHint, title: "Reverse Order Is On by Default", style: .information)
+                hasShownReversePasteOrderHint = true
+            }
         }
         .onChange(of: store.query) { store.reconcileSelection() }
         .onChange(of: store.filter) { store.reconcileSelection() }

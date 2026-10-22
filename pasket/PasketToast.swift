@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 struct PasketToast: Identifiable, Equatable {
-    enum Source { case notice, copy, paste, storage, retention }
+    enum Source { case notice, copy, paste, storage, retention, pasteOrderHint }
     enum Style { case success, information, warning, error }
     enum Action {
         case retryStorage, reviewHistory
@@ -25,7 +25,7 @@ struct PasketToast: Identifiable, Equatable {
     // Actionable problems stay available until dismissed or resolved.
     var duration: Duration? {
         if action != nil { return nil }
-        return style == .success ? .seconds(4) : .seconds(8)
+        return style == .success || source == .pasteOrderHint ? .seconds(4) : .seconds(8)
     }
 }
 

@@ -35,9 +35,11 @@ were using. **Escape** closes history and takes you back to your work.
 
 Select multiple entries with **Command-click**, **Shift-click**, or **Tab**,
 then choose **Paste Together**. Combine text, links, and emails with a new line,
-space, blank line, or no separator. Reverse the order when you need to, or paste
-multiple file entries as a group. Select several images to paste them together
-in apps that support multiple clipboard images. For other apps, use a paste queue.
+space, blank line, or no separator. **Reverse Order** is on by default for both
+Paste Together and Paste Queue, so items paste from bottom to top. Turn it off
+in the paste options menu when needed. You can also paste multiple file entries
+as a group. Select several images to paste them together in apps that support
+multiple clipboard images. For other apps, use a paste queue.
 
 ![Pasket showing a numbered selection ready to paste together](docs/images/paste-together.png)
 

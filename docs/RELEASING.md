@@ -230,6 +230,34 @@ When renewing the app certificate, regenerate the matching profile and update
 both secrets. See Apple's [certificate types](https://developer.apple.com/help/account/certificates/certificates-overview/)
 and [App Store Connect profile guide](https://developer.apple.com/help/account/provisioning-profiles/create-an-app-store-provisioning-profile/).
 
+Here, a **signing identity** means a certificate paired with its matching private
+key. Both certificates must have their matching private key available in the
+export; neither the P12 password nor the App Store Connect `.p8` API key replaces
+these signing keys. The private key is created when generating the certificate
+signing request (CSR), and is not included in the `.cer` downloaded from Apple.
+
+To check the export in **Keychain Access**:
+
+1. On the Mac where the signing requests were created, open **My Certificates**
+   in the keychain containing the distribution certificates.
+2. Expand each of the two certificates and confirm that a private key appears
+   beneath it. If a key is missing, obtain the exported identity from the Mac or
+   person that created the CSR. Downloading the `.cer` again cannot recover it.
+3. Select both certificate entries and export them together as one
+   password-protected `.p12`, then update `APP_STORE_CERTIFICATES_BASE64` and
+   `APP_STORE_CERTIFICATES_PASSWORD`.
+
+The upload script reports the number of valid app and installer signing identities
+when either count is not one. Zero matches does not prove that a private key is
+missing: the certificate may also be absent, invalid (for example, expired or
+untrusted), or of the wrong type. More than one match means the export contains
+extra identities of that type; export only the intended pair. See Apple's
+[signing identity export guide](https://developer.apple.com/documentation/xcode/sharing-your-teams-signing-certificates).
+
+If the export contains only `Developer ID Application`, it is the credential for
+`DEVELOPER_ID_CERTIFICATE_BASE64`, not `APP_STORE_CERTIFICATES_BASE64`. Export the
+App Store app and installer distribution identities listed above for TestFlight.
+
 ### Actions Secrets
 
 Add these three **repository secrets** alongside the existing release secrets:

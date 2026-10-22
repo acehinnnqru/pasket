@@ -446,10 +446,10 @@ actor ClipboardPersistence {
         return try Data(contentsOf: url)
     }
 
-    func previewImage(_ image: ClipboardImage) throws -> CGImage {
+    func previewImage(_ image: ClipboardImage, thumbnail: Bool = false) throws -> CGImage {
         guard validImageNames(image) else { throw ClipboardStorageError.invalidHistory }
-        let url = mediaDirectory.appendingPathComponent(image.fileName)
-        return try previewImage(at: url, maxPixelSize: 1_600)
+        let url = mediaDirectory.appendingPathComponent(thumbnail ? image.thumbnailName : image.fileName)
+        return try previewImage(at: url, maxPixelSize: thumbnail ? 480 : 1_600)
     }
 
     func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws -> (image: CGImage, file: ClipboardFile) {

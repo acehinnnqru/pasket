@@ -9,8 +9,8 @@
 - Mark breaking changes with `!` before the colon or a `BREAKING CHANGE:` footer.
 - These message requirements do not waive individual commit approval or GPG signing requirements.
 - Exception: the user permits unsigned version-bump commits created by
-  `.github/workflows/bump-version.yml`. Manually selecting a bump type and
-  dispatching that workflow authorizes its one predictable version-bump commit
+  `.github/workflows/bump-version.yml`. Manually choosing the release channel
+  and bump type and dispatching that workflow authorizes its one predictable version-bump commit
   and corresponding tag, without a second approval. The workflow must display
   the exact change and commit message and pass validation before committing.
   All other commits still require individual approval and GPG signing.

@@ -1,11 +1,21 @@
 name: Bump version and release
-run-name: Bump ${{ inputs.bump }} version and release
+run-name: Release ${{ inputs.channel }} (${{ inputs.bump }} for a new cycle)
 
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: Release stage (continue the current cycle or start a new one)
+        type: choice
+        required: true
+        default: alpha
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
       bump:
-        description: Version component to increment
+        description: Version increment after a stable release (ignored within a prerelease cycle)
         type: choice
         required: true
         default: patch
@@ -24,6 +34,7 @@ concurrency:
 env:
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUMP: ${{ inputs.bump }}
+  CHANNEL: ${{ inputs.channel }}
 
 jobs:
   prepare:
@@ -52,7 +63,7 @@ jobs:
 
       - name: Calculate and apply the version bump
         id: version
-        run: python3 .github/scripts/version.py bump "$BUMP" --github-output "$GITHUB_OUTPUT"
+        run: python3 .github/scripts/version.py bump "$BUMP" --channel "$CHANNEL" --github-output "$GITHUB_OUTPUT"
 
       - name: Preview the exact commit
         id: preview
@@ -107,7 +118,7 @@ jobs:
           fetch-depth: 0
 
       - name: Recreate the validated change
-        run: python3 .github/scripts/version.py bump "$BUMP"
+        run: python3 .github/scripts/version.py bump "$BUMP" --channel "$CHANNEL"
 
       - name: Commit and push the version and tag together
         id: push

@@ -51,8 +51,10 @@ save automatically for the next launch.
   ago), and **30 Days** (8–30 days ago). Earlier entries appear under **Older**; empty groups are hidden.
 - Click to select one entry, Command-click to toggle individual entries, and Shift-click to select
   a range across date groups. Command-Shift-click adds a range to existing selections. Shift-Up/Down
-  extends or shrinks a range; plain arrows return to single selection. Search keeps keyboard focus,
-  including its normal Command-A behavior. Search and type filters remove hidden entries from selection.
+  extends or shrinks a range; plain arrows end the keyboard range while preserving mouse selections
+  and Tab marks. Tab toggles a mark on the focused entry; a plain click replaces the selection.
+  Search keeps keyboard focus, including its normal Command-A behavior. Search and type filters
+  remove hidden entries from selection.
   Multiple selections show a numbered summary; inspect an entry without changing the selection.
   **Delete Selected** and the deletion shortcut affect the selection, with confirmation for multiple
   entries. A selected row's Delete context menu uses the full selection; an unselected row uses itself.
@@ -359,8 +361,9 @@ For the desktop smoke test:
    history before releasing them; no stale paste should occur.
    Command-click separated rows, Shift-click across date groups, and Command-Shift-click to append
    a range. Extend and shrink with Shift-Up/Down, including across the first 50 loaded rows. Confirm
-   plain arrows restore single selection, filtering drops hidden selections, and the numbered summary
-   follows Reverse Order. Check every separator with text, links, and emails, and paste multiple file
+   plain arrows preserve mouse selections and Tab marks while moving focus, filtering drops hidden
+   selections, and the numbered summary follows Reverse Order. Check every separator with text,
+   links, and emails, and paste multiple file
    entries into Finder. A missing file must leave the clipboard unchanged. Mixed types must offer
    Start Paste Queue as the primary action and explain why Paste Together is disabled.
    Start a queue in a text editor without a Paste Next shortcut: verify a shortcut prompt appears

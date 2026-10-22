@@ -157,7 +157,14 @@ struct ClipboardTests {
         fixture.store.query = "Alpha"
         await fixture.store.flush()
         #expect(fixture.store.selectedIDs == [ids[0]])
+        #expect(fixture.store.markedIDs == [ids[0]])
         fixture.store.moveSelection(by: 1)
+        #expect(fixture.store.selectedIDs == [ids[0], ids[2]])
+        #expect(fixture.store.markedIDs == [ids[0]])
+        #expect(fixture.store.selectedID == ids[2])
+        fixture.store.moveSelection(by: -1)
+        #expect(fixture.store.selectedIDs == [ids[0]])
+        fixture.store.select(ids[2])
         #expect(fixture.store.selectedIDs == [ids[2]])
         await fixture.cleanUp()
     }

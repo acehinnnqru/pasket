@@ -70,8 +70,8 @@ final class ClipboardPasteController {
     }
 
     @discardableResult
-    func paste(to target: Target?, using shortcut: GlobalShortcut = .defaultPaste,
-               invocationKeyCode: UInt32? = nil, expectedChangeCount: Int? = nil, dismiss: () -> Void) async -> Bool {
+    func paste(to target: Target?, invocationKeyCode: UInt32? = nil,
+               expectedChangeCount: Int? = nil, dismiss: () -> Void) async -> Bool {
         guard !Task.isCancelled else { return false }
         if let expectedChangeCount, clipboardChangeCount() != expectedChangeCount { return false }
         prepareForPresentation()
@@ -81,7 +81,7 @@ final class ClipboardPasteController {
         }
         guard hasAccess() else {
             needsPermission = true
-            errorMessage = "Item copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically. You can also press Escape, then use the app's Paste command (\(shortcut.displayName))."
+            errorMessage = "Item copied. Allow Pasket in System Settings > Privacy & Security > Accessibility to paste automatically. You can also press Escape, then use the app's Paste command."
             systemAccess.present(.accessibility)
             return false
         }
@@ -100,12 +100,12 @@ final class ClipboardPasteController {
             // Keep held Return repeats in the panel, then give AppKit time to release key focus.
             dismiss()
             requestID = request
-            // A setup sheet can activate Pasket. Wait for dismissal to restore the original app.
+            // Wait for dismissal to restore the original app's focus before posting the paste.
             for _ in 0..<50 {
                 do { try await wait() } catch { return false }
                 guard !Task.isCancelled, requestID == request, target.canPrepareForPaste,
                       clipboardChangeCount() == changeCount, hasAccess() else { return false }
-                if target.isActive() { return postPaste(target.processIdentifier, shortcut) }
+                if target.isActive() { return postPaste(target.processIdentifier, .defaultPaste) }
             }
             return false
         }

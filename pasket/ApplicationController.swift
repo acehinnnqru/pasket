@@ -86,7 +86,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     private var startupTask: Task<Void, Never>?
     private var settingsFieldEditor = SettingsFieldEditor()
     private var isHidingPanel = false
-    private var pasteDestinationObserver: NSObjectProtocol?
+    private var queueShortcutObserver: NSObjectProtocol?
 
     override init() {
         let store = ClipboardStore()
@@ -109,8 +109,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.onPasteNext = { [weak self] in self?.pasteNextQueuedItem() }
         shortcuts.start()
-        if pasteDestinationObserver == nil {
-            pasteDestinationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        if queueShortcutObserver == nil {
+            queueShortcutObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
             ) { [weak self] notification in
                 MainActor.assumeIsolated {
@@ -120,7 +120,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                         self.shortcuts.suspendPasteQueueShortcut()
                         return
                     }
-                    self.updatePasteDestination(app)
+                    self.resumePasteQueueShortcut()
                 }
             }
         }
@@ -163,7 +163,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         if let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
             previousApplication = frontmost
-            updatePasteDestination(frontmost)
+            resumePasteQueueShortcut()
         }
         if panel == nil {
             let panel = ClipboardPanel(
@@ -221,19 +221,16 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     private func pasteCopiedItem() {
-        if let previousApplication { updatePasteDestination(previousApplication) }
         let target = previousApplication.map { pasteTarget($0) }
         let presentation = store.presentationID
         guard let changeCount = store.copiedChangeCount else { return }
-        let shortcut = shortcuts.resolvedPasteShortcut
         Task {
             guard store.presentationID == presentation, panel?.isVisible == true else { return }
-            await pasteController.paste(to: target, using: shortcut, expectedChangeCount: changeCount) { [weak self] in self?.hidePanel() }
+            await pasteController.paste(to: target, expectedChangeCount: changeCount) { [weak self] in self?.hidePanel() }
         }
     }
 
     private func startPasteQueue(_ items: [ClipboardItem]) {
-        if let previousApplication { updatePasteDestination(previousApplication) }
         guard !store.isDebugMode, !store.isCopying, !store.isSearching,
               store.pasteQueue.start(items) else { return }
         pasteNextQueuedItem()
@@ -251,9 +248,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             return
         }
         let target = pasteTarget(application)
-        guard updatePasteDestination(application) else { return }
-        let pasteShortcut = shortcuts.resolvedPasteShortcut
-        let invocationKeyCode = shortcuts.effectivePasteNextShortcut.keyCode
+        guard resumePasteQueueShortcut() else { return }
+        let invocationKeyCode = shortcuts.pasteNextShortcut?.keyCode
         let presentation = store.presentationID
         Task {
             let delivered = await store.pasteQueue.advance(copy: { [self] id, isCurrent in
@@ -264,7 +260,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 })
                 return copied ? store.copiedChangeCount : nil
             }, paste: { [self] changeCount in
-                await pasteController.paste(to: target, using: pasteShortcut, invocationKeyCode: invocationKeyCode,
+                await pasteController.paste(to: target, invocationKeyCode: invocationKeyCode,
                                             expectedChangeCount: changeCount) { [weak self] in
                     if self?.panel?.isVisible == true { self?.hidePanel() }
                 }
@@ -290,9 +286,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     @discardableResult
-    private func updatePasteDestination(_ application: NSRunningApplication) -> Bool {
-        let detected = PasteShortcutResolver.shortcut(for: application)
-        guard shortcuts.updatePasteDestination(detectedShortcut: detected) else {
+    private func resumePasteQueueShortcut() -> Bool {
+        guard shortcuts.resumePasteQueueShortcut() else {
             store.pasteQueue.cancel()
             store.toasts.show(shortcuts.errorMessage, source: .notice, title: "Paste Queue Stopped", style: .warning)
             return false

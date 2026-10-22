@@ -63,6 +63,11 @@ struct ContentView: View {
                 ShortcutRecordingView(shortcuts: shortcuts,
                                       onSave: { startsQueueAfterSetup = true; isShowingQueueSetup = false },
                                       onCancel: { isShowingQueueSetup = false },
+                                      onSkip: {
+                                          shortcuts.cancelRecording()
+                                          startsQueueAfterSetup = true
+                                          isShowingQueueSetup = false
+                                      },
                                       isPasteQueueSetup: true)
                     .presentationBackground(.clear)
             }
@@ -814,7 +819,7 @@ struct ContentView: View {
 
     private func startPasteQueue() {
         guard store.canCopySelection, !store.isSearching, !store.pasteQueue.isPasting else { return }
-        if shortcuts.needsPasteQueueShortcutSetup {
+        if shortcuts.pasteNextShortcut == nil {
             pendingQueueItems = orderedSelectedItems
             pendingQueuePresentationID = store.presentationID
             startsQueueAfterSetup = false
@@ -829,8 +834,7 @@ struct ContentView: View {
 
     private func finishQueueSetup() {
         let items = pendingQueueItems
-        let shouldStart = startsQueueAfterSetup && pendingQueuePresentationID == store.presentationID
-            && !items.isEmpty && !shortcuts.needsPasteQueueShortcutSetup
+        let shouldStart = startsQueueAfterSetup && pendingQueuePresentationID == store.presentationID && !items.isEmpty
         if shortcuts.isConfiguringPasteQueue { shortcuts.cancelRecording() }
         startsQueueAfterSetup = false
         pendingQueueItems = []
@@ -856,7 +860,7 @@ struct ContentView: View {
             Image(systemName: "text.insert").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Next: \(store.pasteQueue.next?.title ?? "")").lineLimit(1)
-                Text("\(store.pasteQueue.remainingCount) remaining · \(shortcuts.effectivePasteNextShortcut.displayName) to paste next")
+                Text("\(store.pasteQueue.remainingCount) remaining · \(shortcuts.pasteNextShortcut.map { "\($0.displayName) to paste next" } ?? "Choose Paste Next when ready")")
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)

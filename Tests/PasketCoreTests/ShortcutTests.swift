@@ -5,7 +5,27 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ShortcutTests {
-    @Test func firstQueueSetupDoesNotConfirmOrCaptureAKeyUntilSaved() throws {
+    @Test func startingAQueueWithoutAShortcutDoesNotRegisterOrInvokePaste() throws {
+        let suite = "PasketShortcutTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var registrations = 0
+        var invocations = 0
+        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { _, _ in
+            registrations += 1
+            return noErr
+        })
+        manager.onPasteNext = { invocations += 1 }
+        #expect(manager.pasteNextShortcut == nil)
+        #expect(manager.setPasteQueueActive(true))
+        #expect(manager.resumePasteQueueShortcut())
+        #expect(registrations == 0)
+        #expect(invocations == 0)
+        #expect(!manager.handleHotKey(id: 1, pressed: true))
+        manager.setPasteQueueActive(false)
+    }
+
+    @Test func queueShortcutPromptRequiresARecordedShortcutAndCancelKeepsItUnset() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -14,77 +34,72 @@ struct ShortcutTests {
             registrations += 1
             return noErr
         })
-        #expect(manager.needsPasteQueueShortcutSetup)
         manager.beginPasteQueueSetup()
         #expect(manager.isConfiguringPasteQueue)
         #expect(manager.recordingAction == .pasteNext)
-        #expect(manager.canSaveRecording)
-        #expect(manager.isClearingShortcut)
+        #expect(!manager.canSaveRecording)
+        #expect(!manager.saveRecording())
         #expect(registrations == 0)
+        manager.stageShortcut(.defaultPaste)
         manager.cancelRecording()
         #expect(!manager.isConfiguringPasteQueue)
-        #expect(manager.needsPasteQueueShortcutSetup)
-        #expect(GlobalShortcutManager(defaults: defaults).needsPasteQueueShortcutSetup)
+        #expect(registrations == 0)
+        #expect(manager.pasteNextShortcut == nil)
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
     }
 
-    @Test func firstQueueSetupCanConfirmCommandVAndRememberFollowingTheApp() throws {
+    @Test func queueShortcutPromptChecksRegistrationBeforeSavingAndReleasesTheTemporaryBinding() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         var registrations: [GlobalShortcut] = []
-        var removals = 0
         var registeredID: UInt32 = 0
+        var removals = 0
         let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { shortcut, id in
             registrations.append(shortcut)
             registeredID = id
             return noErr
         }, queueUnregistration: { removals += 1 })
+        let custom = GlobalShortcut(keyCode: UInt32(kVK_ANSI_N), modifiers: UInt32(cmdKey | optionKey), keyLabel: "N")
         manager.beginPasteQueueSetup()
+        manager.stageShortcut(custom)
         #expect(manager.saveRecording())
-        #expect(registrations == [.defaultPaste])
+        #expect(registrations == [custom])
         #expect(removals == 1)
+        #expect(!manager.isRecording)
         #expect(!manager.handleHotKey(id: registeredID, pressed: true))
-        #expect(!manager.needsPasteQueueShortcutSetup)
-        #expect(manager.pasteNextShortcut == nil)
-        #expect(!GlobalShortcutManager(defaults: defaults).needsPasteQueueShortcutSetup)
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == custom)
     }
 
-    @Test func firstQueueSetupKeepsTheDialogAndPreferencesUnchangedOnConflicts() throws {
+    @Test func queueShortcutPromptStaysOpenWithoutSavingWhenRegistrationConflicts() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        var registrationStatus = OSStatus(eventHotKeyExistsErr)
-        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { _, _ in registrationStatus })
+        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { _, _ in OSStatus(eventHotKeyExistsErr) })
         manager.beginPasteQueueSetup()
-        #expect(!manager.saveRecording())
-        #expect(manager.isRecording)
-        #expect(manager.errorMessage?.contains("already be in use") == true)
-        #expect(manager.needsPasteQueueShortcutSetup)
-        #expect(GlobalShortcutManager(defaults: defaults).needsPasteQueueShortcutSetup)
         manager.stageShortcut(.defaultSettings)
         #expect(!manager.saveRecording())
         #expect(manager.errorMessage?.contains("conflicts") == true)
-        registrationStatus = noErr
-        let candidate = GlobalShortcut(keyCode: UInt32(kVK_ANSI_N), modifiers: UInt32(cmdKey | optionKey), keyLabel: "N")
-        manager.stageShortcut(candidate)
-        #expect(manager.saveRecording())
-        #expect(manager.pasteNextShortcut == candidate)
-        #expect(!manager.needsPasteQueueShortcutSetup)
-        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == candidate)
+        manager.stageShortcut(.defaultPaste)
+        #expect(!manager.saveRecording())
+        #expect(manager.errorMessage?.contains("already be in use") == true)
+        #expect(manager.isRecording)
+        #expect(manager.isConfiguringPasteQueue)
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
+        manager.cancelRecording()
     }
 
-    @Test func existingCustomQueueShortcutsDoNotRequireFirstUseSetup() throws {
+    @Test func savedCustomQueueShortcutsArePreserved() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let candidate = GlobalShortcut(keyCode: UInt32(kVK_ANSI_N), modifiers: UInt32(cmdKey | optionKey), keyLabel: "N")
         defaults.set(try JSONEncoder().encode(candidate), forKey: "pasteNextShortcut")
         let manager = GlobalShortcutManager(defaults: defaults)
-        #expect(!manager.needsPasteQueueShortcutSetup)
         #expect(manager.pasteNextShortcut == candidate)
     }
 
-    @Test func commandVIsRegisteredOnlyForAnActiveQueueAndEachPressInvokesOnce() throws {
+    @Test func explicitCommandVShortcutIsRegisteredOnlyForAnActiveQueueAndEachPressInvokesOnce() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -98,10 +113,11 @@ struct ShortcutTests {
         }, queueUnregistration: { removals += 1 })
         var invocations = 0
         manager.onPasteNext = { invocations += 1 }
-        #expect(manager.effectivePasteNextShortcut == .defaultPaste)
+        #expect(manager.setPasteNextShortcut(.defaultPaste))
         #expect(registrations.isEmpty)
         #expect(manager.setPasteQueueActive(true))
         #expect(registrations == [.defaultPaste])
+        #expect(invocations == 0)
         #expect(manager.handleHotKey(id: activeID, pressed: true))
         #expect(manager.handleHotKey(id: activeID, pressed: true))
         #expect(invocations == 1)
@@ -114,54 +130,32 @@ struct ShortcutTests {
         #expect(invocations == 2)
     }
 
-    @Test func queueFollowsDestinationChangesWhilePreservingACustomTrigger() throws {
+    @Test func clearingAnActiveQueueShortcutReleasesItWithoutRegisteringADefault() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        var registered: [GlobalShortcut] = []
-        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { shortcut, _ in
-            registered.append(shortcut)
+        var registrations: [GlobalShortcut] = []
+        var activeID: UInt32 = 0
+        var removals = 0
+        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { shortcut, id in
+            registrations.append(shortcut)
+            activeID = id
             return noErr
-        })
-        let remapped = GlobalShortcut(keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(controlKey), keyLabel: "Y")
-        #expect(manager.updatePasteDestination(detectedShortcut: remapped))
-        #expect(manager.effectivePasteNextShortcut == remapped)
-        #expect(registered.isEmpty)
-        #expect(manager.setPasteQueueActive(true))
-        #expect(registered == [remapped])
-        #expect(manager.updatePasteDestination(detectedShortcut: .defaultPaste))
-        #expect(registered == [remapped, .defaultPaste])
+        }, queueUnregistration: { removals += 1 })
         let custom = GlobalShortcut(keyCode: UInt32(kVK_ANSI_N), modifiers: UInt32(cmdKey | optionKey), keyLabel: "N")
         #expect(manager.setPasteNextShortcut(custom))
-        #expect(manager.updatePasteDestination(detectedShortcut: remapped))
-        #expect(manager.resolvedPasteShortcut == remapped)
-        #expect(manager.effectivePasteNextShortcut == custom)
-        #expect(registered.last == custom)
-        #expect(registered.count == 3)
-        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == custom)
+        #expect(manager.setPasteQueueActive(true))
+        #expect(registrations == [custom])
         #expect(manager.setPasteNextShortcut(nil))
-        #expect(registered.last == remapped)
+        #expect(removals == 1)
+        #expect(!manager.handleHotKey(id: activeID, pressed: true))
+        #expect(manager.resumePasteQueueShortcut())
+        #expect(registrations == [custom])
+        #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
         manager.setPasteQueueActive(false)
     }
 
-    @Test func configuredFallbackIsUsedOnlyWhenMenuDetectionIsUnavailable() throws {
-        let suite = "PasketShortcutTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let manager = GlobalShortcutManager(defaults: defaults)
-        let fallback = GlobalShortcut(keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(controlKey), keyLabel: "Y")
-        #expect(manager.setPasteFallbackShortcut(fallback))
-        #expect(manager.updatePasteDestination(detectedShortcut: nil))
-        #expect(manager.resolvedPasteShortcut == fallback)
-        #expect(GlobalShortcutManager(defaults: defaults).pasteFallbackShortcut == fallback)
-        #expect(manager.updatePasteDestination(detectedShortcut: .defaultPaste))
-        #expect(manager.resolvedPasteShortcut == .defaultPaste)
-        #expect(manager.setPasteFallbackShortcut(nil))
-        #expect(manager.updatePasteDestination(detectedShortcut: nil))
-        #expect(manager.resolvedPasteShortcut == .defaultPaste)
-    }
-
-    @Test func settingsCanUseNormalPasteWhileTheQueueRemainsActive() throws {
+    @Test func settingsReleaseTheConfiguredShortcutUntilAnotherAppIsActive() throws {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -171,6 +165,7 @@ struct ShortcutTests {
             registrations += 1
             return noErr
         }, queueUnregistration: { removals += 1 })
+        #expect(manager.setPasteNextShortcut(.defaultPaste))
         #expect(manager.setPasteQueueActive(true))
         manager.suspendPasteQueueShortcut()
         #expect(removals == 1)
@@ -178,7 +173,7 @@ struct ShortcutTests {
         manager.stageShortcut(.defaultPaste)
         #expect(manager.saveRecording())
         #expect(registrations == 1)
-        #expect(manager.updatePasteDestination(detectedShortcut: .defaultPaste))
+        #expect(manager.resumePasteQueueShortcut())
         #expect(registrations == 2)
         manager.setPasteQueueActive(false)
         #expect(removals == 2)
@@ -188,13 +183,13 @@ struct ShortcutTests {
         let suite = "PasketShortcutTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let manager = GlobalShortcutManager(defaults: defaults)
-        #expect(!manager.setPasteQueueActive(true))
+        let manager = GlobalShortcutManager(defaults: defaults, queueRegistration: { _, _ in OSStatus(eventHotKeyExistsErr) })
+        #expect(manager.setPasteQueueActive(true))
         manager.beginRecording(.pasteNext)
         manager.record(try keyEvent(code: kVK_ANSI_V, modifiers: [.command, .option], characters: "v"))
         #expect(!manager.saveRecording())
         #expect(manager.isRecording)
-        #expect(manager.errorMessage != nil)
+        #expect(manager.errorMessage?.contains("already be in use") == true)
         #expect(manager.pasteNextShortcut == nil)
         #expect(GlobalShortcutManager(defaults: defaults).pasteNextShortcut == nil)
         manager.cancelRecording()
@@ -236,7 +231,7 @@ struct ShortcutTests {
             #expect(manager.pasteNextShortcut == nil)
         }
         #expect(manager.setPasteNextShortcut(.defaultPaste))
-        #expect(manager.effectivePasteNextShortcut == .defaultPaste)
+        #expect(manager.pasteNextShortcut == .defaultPaste)
         let next = GlobalShortcut(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | optionKey), keyLabel: "V")
         #expect(manager.setPasteNextShortcut(next))
         #expect(!manager.setSettingsShortcut(next))

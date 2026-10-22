@@ -63,27 +63,19 @@ save automatically for the next launch.
   cannot be combined. All selected content is loaded and all files are resolved before writing;
   an unavailable item stops the action instead of silently pasting a partial selection.
 - **Start Paste Queue** freezes the selection in the displayed order and pastes the first item.
-  On first use, a setup dialog explains Paste Next and asks you to record a shortcut or confirm
-  **Follow App**. Nothing is pasted before **Save & Start Queue**. Cancel keeps the selection and
-  shows setup again next time; confirming is remembered, and existing custom shortcuts skip setup.
-  Saving checks that the shortcut can be registered. Conflicts keep the dialog open without saving
-  or starting the queue. Using the same shortcut as normal paste is allowed: it advances the queue
-  only while active. Combinations assigned to other Pasket actions or unavailable global hotkeys
-  require another choice. Closing or reopening history during setup never starts a pending queue.
-  If setup activates Pasket, starting the queue dismisses history and waits for the original app
-  to regain focus before sending the first paste. Switching to another app cancels that delivery.
-  Move the caret to the next destination, then press the destination app's paste shortcut (normally
-  **Command-V**) to paste the next item. Pasket reads the standard Paste menu's current keyboard
-  equivalent, including remapped shortcuts and common localized menu titles, and refreshes it when
-  switching apps. Both normal automatic paste and queue delivery send that destination shortcut.
-  Settings → **Paste Shortcut Fallback** provides a manual fallback for apps whose Paste menu cannot
-  be recognized; the fallback defaults to Command-V. Settings → **Paste Next** optionally overrides
-  the queue trigger independently of the shortcut sent to the destination. Existing custom triggers
-  are preserved; **Follow App** restores automatic following. The trigger is registered only while
-  a queue is active, temporarily released in Pasket Settings, then unregistered on completion or
-  cancellation so normal paste resumes. Pasket never changes macOS or another app's shortcut settings.
-  A held shortcut triggers only once per press. The menu bar shows the remaining count, and the
-  history panel and menu bar show the next item, actual trigger, Paste Next, and Cancel controls.
+  If no Paste Next shortcut is configured, a dialog first prompts you to record one.
+  **Save & Start Queue** checks and saves the shortcut, closes the dialog, and pastes the first item.
+  **Skip for Now** starts with no shortcut; **Cancel** keeps the selection without starting or pasting.
+  Move the caret to the next destination, then use **Paste Next** to paste each remaining item.
+  Settings → **Paste Next** provides an optional shortcut with no default binding. Existing custom
+  shortcuts skip the prompt. Clearing the shortcut leaves the menu and panel controls available
+  and shows the prompt again the next time you start a queue. It does not assign Command-V
+  or inspect the destination app's Paste menu.
+  A configured shortcut is registered only while a queue is active, temporarily released in Pasket
+  Settings, then unregistered on completion or cancellation. A held shortcut triggers only once per
+  press. Normal automatic paste and queue delivery send Command-V to the destination application.
+  The menu bar shows the remaining count, and the history panel and menu bar show the next item,
+  the configured shortcut when present, Paste Next, and Cancel controls.
   Queues support individual text, link, email, image, and file entries without combining their formats.
   Search, type filters, and recency changes do not change the queue order. Each invocation pastes
   into the app active at that invocation; it never inserts Tab or Return automatically.
@@ -103,7 +95,7 @@ save automatically for the next launch.
 - The history panel borrows keyboard focus without activating Pasket, preserving the previous
   application's input focus and caret when it closes.
 - **Return**, double-click, or **Paste** copies the complete item, closes the panel,
-  and sends the detected paste shortcut to the original application. Automatic paste requires event-posting
+  and sends Command-V to the original application. Automatic paste requires event-posting
   permission, shown in **System Settings → Privacy & Security → Accessibility**. If permission
   is missing, the item is still copied and a native permission dialog offers **Open System Settings…**;
   press **Escape**, then use the original app's Paste command or paste shortcut. After granting permission, reopen
@@ -364,14 +356,21 @@ For the desktop smoke test:
    follows Reverse Order. Check every separator with text, links, and emails, and paste multiple file
    entries into Finder. A missing file must leave the clipboard unchanged. Mixed types must offer
    Start Paste Queue as the primary action and explain why Paste Together is disabled.
-   Start a queue in a text editor, move between fields, and invoke Paste Next with Command-V,
-   the menu bar, and the reopened panel. Remap the editor's Paste menu through macOS App Shortcuts:
-   confirm the queue trigger, progress hint, and actual paste follow the remapping. Switch to an app
-   with another Paste shortcut and confirm the trigger changes. For an unrecognized menu, configure
-   Paste Shortcut Fallback and verify it is used only when detection is unavailable. Save a custom
-   Paste Next trigger, verify delivery still uses the target's paste command, then select Follow App.
-   Confirm completion and cancellation restore normal paste. Confirm one item per press, no repeats while held,
-   progress and the next title update, and changing search or selection does not reorder the queue.
+   Start a queue in a text editor without a Paste Next shortcut: verify a shortcut prompt appears
+   without changing the clipboard or editor. Cancel must preserve the selection without starting.
+   Record a shortcut and choose Save & Start Queue: history must close and the first item must paste
+   exactly once after the editor regains focus. Conflicts must keep the prompt open without saving
+   or pasting. Reopen or dismiss history during the prompt: no pending queue may start later.
+   Skip for Now must also paste the first item and leave the shortcut unset. With a saved shortcut,
+   Start Paste Queue must paste the first item directly without a prompt. Move between fields,
+   then use Paste Next from the shortcut, menu bar, or reopened panel to paste the second item.
+   Verify one item per press with no repeats while held. Switch apps and confirm the configured
+   trigger stays the same.
+   Clear the shortcut during an active queue: the old trigger must stop working, normal Command-V
+   must remain unchanged, and menu/panel Paste Next controls must still work. Verify Settings has
+   no automatic app-following or paste-fallback controls. Confirm completion and cancellation release
+   the configured shortcut, progress and the next title update, and changing search or selection does
+   not reorder the queue.
    Verify Cancel, copying new content while collection is paused, deleting a queued entry, quitting,
    missing files, and revoked Accessibility all stop the queue without skipping or delayed replay.
    Check multi-selection and paste-options layouts at minimum panel size in light and dark appearance.

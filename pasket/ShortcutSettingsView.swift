@@ -333,18 +333,10 @@ struct ShortcutSettingsView: View {
                 Divider().opacity(0.35).padding(.leading, 40)
                 shortcutRow(
                     title: "Paste Next",
-                    description: "Follows the app's paste shortcut while a queue is active",
+                    description: "Paste one queued item when pressed · Optional",
                     icon: Image(systemName: "text.insert"),
                     shortcut: shortcuts.pasteNextShortcut,
                     action: .pasteNext
-                )
-                Divider().opacity(0.35).padding(.leading, 40)
-                shortcutRow(
-                    title: "Paste Shortcut Fallback",
-                    description: "Used when an app's Paste menu cannot be detected · Default: ⌘V",
-                    icon: Image(systemName: "doc.on.clipboard"),
-                    shortcut: shortcuts.pasteFallbackShortcut,
-                    action: .pasteFallback
                 )
             }
             .modifier(SettingsCard())
@@ -382,7 +374,7 @@ struct ShortcutSettingsView: View {
                 } else {
                     HStack(spacing: 8) {
                         Image(systemName: "plus")
-                        Text(action == .pasteNext ? "Follow App" : action == .pasteFallback ? "Default (⌘V)" : "Set Shortcut")
+                        Text("Set Shortcut")
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -393,7 +385,7 @@ struct ShortcutSettingsView: View {
             .fixedSize()
             .help("Record a shortcut for \(title)")
             .accessibilityLabel("Record \(title) shortcut")
-            .accessibilityValue(shortcut?.displayName ?? (action == .pasteNext ? "Follow app's paste shortcut" : action == .pasteFallback ? "Default: Command V" : "Not set"))
+            .accessibilityValue(shortcut?.displayName ?? "Not set")
             if action == .openSettings {
                 Button {
                     shortcuts.beginRecording(.openSettings)
@@ -720,6 +712,7 @@ struct ShortcutRecordingView: View {
     @Bindable var shortcuts: GlobalShortcutManager
     var onSave: () -> Void = {}
     var onCancel: () -> Void = {}
+    var onSkip: () -> Void = {}
     var isPasteQueueSetup = false
 
     private var hasSavedShortcut: Bool {
@@ -728,7 +721,6 @@ struct ShortcutRecordingView: View {
         case .openSettings: shortcuts.settingsShortcut != nil
         case .deleteSelectedItem: shortcuts.deletionShortcut != nil
         case .pasteNext: shortcuts.pasteNextShortcut != nil
-        case .pasteFallback: shortcuts.pasteFallbackShortcut != nil
         }
     }
 
@@ -747,7 +739,7 @@ struct ShortcutRecordingView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isPasteQueueSetup ? "Set Up Paste Queue" : "Record a shortcut")
+                    Text(isPasteQueueSetup ? "Set Paste Next Shortcut" : "Record a shortcut")
                         .font(.system(size: 16, weight: .medium))
                     Text(shortcuts.recordingAction.title)
                         .font(.system(size: 12))
@@ -759,10 +751,8 @@ struct ShortcutRecordingView: View {
             Divider().opacity(0.5)
             VStack(alignment: .leading, spacing: 14) {
                 if isPasteQueueSetup {
-                    Text("Choose how to paste the next item without reopening history. Record a shortcut, or use the app's Paste shortcut (currently \(shortcuts.resolvedPasteShortcut.displayName)).")
-                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-                    Text("If the shortcuts match, that key pastes the next queued item while the queue is active. Normal paste resumes when the queue finishes or is canceled. Nothing is pasted until you save.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Starting the queue pastes the first item. Set a shortcut to paste each remaining item, or skip for now and use Paste Next in the menu or history panel.")
+                        .font(.system(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Group {
@@ -772,9 +762,7 @@ struct ShortcutRecordingView: View {
                         HStack(spacing: 8) {
                             Image(systemName: shortcuts.isClearingShortcut ? "minus.circle" : "record.circle")
                                 .foregroundStyle(.secondary)
-                            Text(shortcuts.isClearingShortcut
-                                 ? (shortcuts.recordingAction == .pasteNext ? "Follow App" : shortcuts.recordingAction == .pasteFallback ? "Default (⌘V)" : "No shortcut")
-                                 : "Press a key combination")
+                            Text(shortcuts.isClearingShortcut ? "No shortcut" : "Press a key combination")
                                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                         }
                     }
@@ -818,9 +806,10 @@ struct ShortcutRecordingView: View {
                 .accessibilityHidden(true)
             Divider().opacity(0.5)
             HStack {
-                if hasSavedShortcut || isPasteQueueSetup {
-                    Button(shortcuts.recordingAction == .pasteNext ? "Follow App" : shortcuts.recordingAction == .pasteFallback ? "Restore Default" : "Clear Shortcut",
-                           role: shortcuts.recordingAction == .pasteNext || shortcuts.recordingAction == .pasteFallback ? nil : .destructive) {
+                if isPasteQueueSetup {
+                    Button("Skip for Now", action: onSkip)
+                } else if hasSavedShortcut {
+                    Button("Clear Shortcut", role: .destructive) {
                         shortcuts.stageShortcut(nil)
                     }
                     .accessibilityLabel("Clear \(shortcuts.recordingAction.title) shortcut")

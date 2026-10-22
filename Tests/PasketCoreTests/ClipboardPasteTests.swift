@@ -4,7 +4,7 @@ import Testing
 
 @Suite @MainActor
 struct ClipboardPasteTests {
-    @Test func queueAfterSetupDismissesHistoryAndWaitsForTheOriginalAppToReactivate() async {
+    @Test func explicitQueueInvocationDismissesHistoryAndWaitsForTheOriginalAppToReactivate() async {
         let fixture = Fixture()
         fixture.active = false
         var pasketIsActive = true
@@ -59,16 +59,14 @@ struct ClipboardPasteTests {
         #expect(!queue.isActive)
     }
 
-    @Test func postsTheDestinationShortcutAndWaitsForTheInvocationKeyToBeReleased() async {
+    @Test func postsCommandVAndWaitsForTheInvocationKeyToBeReleased() async {
         let fixture = Fixture()
-        let shortcut = GlobalShortcut(keyCode: UInt32(kVK_ANSI_Y), modifiers: UInt32(controlKey), keyLabel: "Y")
         fixture.released = false
         fixture.onWait = { if fixture.waits == 3 { fixture.released = true } }
         let target = ClipboardPasteController.Target(processIdentifier: 42, isActive: { true }, isTerminated: { false })
-        let pasted = await fixture.controller.paste(to: target, using: shortcut,
-                                                     invocationKeyCode: UInt32(kVK_ANSI_N), dismiss: fixture.dismiss)
+        let pasted = await fixture.controller.paste(to: target, invocationKeyCode: UInt32(kVK_ANSI_N), dismiss: fixture.dismiss)
         #expect(pasted)
-        #expect(fixture.postedShortcut == shortcut)
+        #expect(fixture.postedShortcut == .defaultPaste)
         #expect(fixture.releaseKeyCode == UInt32(kVK_ANSI_N))
         #expect(fixture.waits == 4)
         #expect(fixture.events.filter { $0 == "paste:42" }.count == 1)

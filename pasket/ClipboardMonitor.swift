@@ -92,6 +92,7 @@ final class ClipboardMonitor {
                 onNotice?("Text not saved: the limit is 2,000 characters.")
                 return
             }
+            guard text.contains(where: { !$0.isWhitespace }) else { return }
             capture = .text(text, source, date)
         } else {
             return

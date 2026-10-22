@@ -576,7 +576,8 @@ final class ClipboardStore {
         do {
             let thumbnail: NSImage?
             if let image = item.image {
-                thumbnail = NSImage(data: try await persistence.imageData(image, thumbnail: true))
+                let bitmap = try await persistence.previewImage(image, thumbnail: true)
+                thumbnail = NSImage(cgImage: bitmap, size: NSSize(width: bitmap.width, height: bitmap.height))
             } else if let file = item.imageFile {
                 let preview = try await persistence.previewImageFile(file, thumbnail: true)
                 guard thumbnailRequests[item.id] == thumbnailRequest else { return }

@@ -1299,10 +1299,9 @@ private struct HistoryRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Group {
-                if let thumbnail {
-                    Image(nsImage: thumbnail).resizable().scaledToFit()
-                } else {
+            ZStack {
+                ClipboardImageCanvas(image: thumbnail)
+                if thumbnail == nil {
                     Image(systemName: item.hasImagePreview ? "photo" : isUnavailable ? "exclamationmark.triangle" : item.kind.symbol)
                 }
             }
@@ -1310,6 +1309,10 @@ private struct HistoryRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 30, height: 30)
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .transaction { transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.system(size: 13)).lineLimit(1)
                 Text("\(item.source.name) · \(item.copiedAt.formatted(date: .abbreviated, time: .shortened))")

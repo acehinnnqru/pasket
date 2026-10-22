@@ -44,32 +44,51 @@ struct ClipboardImageCanvasTests {
         #expect(try #require(bitmap.colorAt(x: 100, y: 120)).alphaComponent == 0)
     }
 
-    private func linedImage() throws -> NSImage {
-        let context = try #require(CGContext(data: nil, width: 800, height: 400, bitsPerComponent: 8,
+    @Test(arguments: [1, 2])
+    func thumbnailLinesRemainStableWhenRedisplayed(scale: Int) throws {
+        let view = ClipboardImageCanvasView(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        let image = try linedImage(width: 60, height: 30, spacing: 6)
+        view.setImage(image)
+        let first = try render(view, scale: scale)
+        let line = try #require(first.colorAt(x: 3 * scale, y: 15 * scale))
+        let background = try #require(first.colorAt(x: 5 * scale, y: 15 * scale))
+        #expect(line.alphaComponent == 1)
+        #expect(line.redComponent < background.redComponent)
+        for _ in 0..<5 {
+            view.setImage(nil)
+            _ = try render(view, scale: scale)
+            view.setImage(image)
+            #expect(try pixels(render(view, scale: scale)) == pixels(first))
+        }
+    }
+
+    private func linedImage(width: Int = 800, height: Int = 400, spacing: Int = 40) throws -> NSImage {
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                                             bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.setFillColor(NSColor.white.cgColor)
-        context.fill(CGRect(x: 0, y: 0, width: 800, height: 400))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         context.setFillColor(NSColor.black.cgColor)
-        for x in stride(from: 40, to: 800, by: 40) {
-            context.fill(CGRect(x: x, y: 0, width: 1, height: 400))
+        for x in stride(from: spacing, to: width, by: spacing) {
+            context.fill(CGRect(x: x, y: 0, width: 1, height: height))
         }
-        return NSImage(cgImage: try #require(context.makeImage()), size: NSSize(width: 800, height: 400))
+        return NSImage(cgImage: try #require(context.makeImage()), size: NSSize(width: width, height: height))
     }
 
-    private func render(_ view: ClipboardImageCanvasView) throws -> NSBitmapImageRep {
-        let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width),
-                                                  pixelsHigh: Int(view.bounds.height), bitsPerSample: 8,
+    private func render(_ view: ClipboardImageCanvasView, scale: Int = 1) throws -> NSBitmapImageRep {
+        let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width) * scale,
+                                                  pixelsHigh: Int(view.bounds.height) * scale, bitsPerSample: 8,
                                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        draw(view, into: bitmap)
+        draw(view, into: bitmap, scale: scale)
         return bitmap
     }
 
-    private func draw(_ view: ClipboardImageCanvasView, into bitmap: NSBitmapImageRep) {
+    private func draw(_ view: ClipboardImageCanvasView, into bitmap: NSBitmapImageRep, scale: Int = 1) {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        NSGraphicsContext.current?.cgContext.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
         view.draw(view.bounds)
     }
 

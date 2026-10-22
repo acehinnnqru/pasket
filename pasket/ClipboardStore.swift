@@ -485,11 +485,19 @@ final class ClipboardStore {
             failingItem = first
             switch first.kind {
             case .image:
-                guard let image = first.image else { return false }
-                let data = try await persistence.imageData(image)
+                var images: [NSPasteboardItem] = []
+                for item in fullItems {
+                    failingItem = item
+                    guard let image = item.image else { throw ClipboardStorageError.missingImage }
+                    let data = try await persistence.imageData(image)
+                    guard isCurrent() else { return false }
+                    let representation = NSPasteboardItem()
+                    guard representation.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
+                    images.append(representation)
+                }
                 guard isCurrent() else { return false }
                 pasteboard.clearContents()
-                guard pasteboard.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
+                guard pasteboard.writeObjects(images) else { throw CocoaError(.fileWriteUnknown) }
                 copiedChangeCount = pasteboard.changeCount
             case .file:
                 try ClipboardFileAccess.withResolvedFiles(fullItems.flatMap(\.files)) { urls, updatedFiles in

@@ -62,10 +62,12 @@ save automatically for the next launch.
   **Delete Selected** and the deletion shortcut affect the selection, with confirmation for multiple
   entries. A selected row's Delete context menu uses the full selection; an unselected row uses itself.
 - With multiple entries selected, **Paste Together** combines text, links, and emails using a new
-  line by default, or writes file entries as one group of file references. The adjacent arrow opens
+  line by default, writes images as separate PNG pasteboard items in one operation, or writes
+  file entries as one group of file references. Multiple-image paste requires destination app
+  support; the paste queue remains available for pasting images individually. The adjacent arrow opens
   paste options: choose New Line, Space, Blank Line, or None as the text separator, and toggle
-  **Reverse Order**. The numbered summary reflects that order. Images and mixed text/file selections
-  cannot be combined. All selected content is loaded and all files are resolved before writing;
+  **Reverse Order**. The numbered summary reflects that order. Mixed selections other than
+  text/links/emails cannot be combined. All selected content is loaded and all files are resolved before writing;
   an unavailable item stops the action instead of silently pasting a partial selection.
 - **Start Paste Queue** freezes the selection in the displayed order and pastes the first item.
   If no Paste Next shortcut is configured, a dialog first prompts you to record one.
@@ -375,7 +377,9 @@ For the desktop smoke test:
    plain arrows preserve mouse selections and Tab marks while moving focus, filtering drops hidden
    selections, and the numbered summary follows Reverse Order. Check every separator with text,
    links, and emails, and paste multiple file
-   entries into Finder. A missing file must leave the clipboard unchanged. Mixed types must offer
+   entries into Finder. Paste three images together into an app that supports multiple clipboard
+   images and check normal and reversed order; also verify Paste Queue remains available.
+   A missing file or image must leave the clipboard unchanged. Mixed types must offer
    Start Paste Queue as the primary action and explain why Paste Together is disabled.
    Start a queue in a text editor without a Paste Next shortcut: verify a shortcut prompt appears
    without changing the clipboard or editor. Cancel must preserve the selection without starting.

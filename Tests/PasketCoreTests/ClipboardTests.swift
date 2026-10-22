@@ -82,6 +82,68 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
+    @Test(arguments: [false, true])
+    func combinedImagesWriteEveryOriginalInSelectionOrder(reversed: Bool) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for width in [8, 12, 16] {
+            fixture.pasteboard.clearContents()
+            fixture.pasteboard.setData(try Self.smallPNG(width: width), forType: .png)
+            fixture.store.pollClipboard()
+            await fixture.store.flush()
+        }
+        await fixture.restart()
+        let items = fixture.store.items
+        #expect(items.count == 3)
+        fixture.store.select(items[2].id)
+        fixture.store.select(items[0].id, command: true)
+        fixture.store.select(items[1].id, command: true)
+        let ordered = reversed ? Array(items.reversed()) : items
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        var expected: [Data] = []
+        for item in ordered {
+            expected.append(try await persistence.imageData(try #require(item.image)))
+        }
+        #expect(fixture.store.canCombineSelection)
+        #expect(await fixture.store.copySelection(reversed: reversed))
+        let written = try #require(fixture.pasteboard.pasteboardItems)
+        #expect(written.count == 3)
+        #expect(written.compactMap { $0.data(forType: .png) } == expected)
+        #expect(fixture.store.copiedChangeCount == fixture.pasteboard.changeCount)
+        #expect(!fixture.store.pasteQueue.isActive)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        #expect(fixture.store.totalCount == 3)
+        #expect(fixture.store.selectedIDs == Set(items.map(\.id)))
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [0, 1, 2])
+    func missingImageInCombinedSelectionLeavesTheClipboardUntouched(missingIndex: Int) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for width in [8, 12, 16] {
+            fixture.pasteboard.clearContents()
+            fixture.pasteboard.setData(try Self.smallPNG(width: width), forType: .png)
+            fixture.store.pollClipboard()
+            await fixture.store.flush()
+        }
+        let items = fixture.store.items
+        fixture.store.select(items[0].id)
+        for item in items.dropFirst() { fixture.store.select(item.id, command: true) }
+        let image = try #require(items[missingIndex].image)
+        try FileManager.default.removeItem(at: fixture.directory.appendingPathComponent("Images")
+            .appendingPathComponent(image.fileName))
+        fixture.write("Keep this clipboard")
+        let changeCount = fixture.pasteboard.changeCount
+        #expect(await fixture.store.copySelection() == false)
+        #expect(fixture.pasteboard.changeCount == changeCount)
+        #expect(fixture.pasteboard.string(forType: .string) == "Keep this clipboard")
+        #expect(fixture.store.copyError != nil)
+        #expect(fixture.store.copiedChangeCount == nil)
+        await fixture.cleanUp()
+    }
+
     @Test func mixedSelectionDoesNotOverwriteTheClipboard() async throws {
         let fixture = try Fixture()
         await fixture.start()

@@ -280,8 +280,8 @@ by a fallback import from JSON.
 
 ## Validation
 
-[CI](../.github/workflows/ci.yml) runs on every pull request and push to `main`,
-and can also be started manually. It checks release tooling, runs the core suite,
+[CI](../.github/workflows/ci.yml) runs on every pull request and can also be
+started manually. It checks release tooling, runs the core suite,
 and compiles the complete Debug app without signing using Xcode 27.1. New commits
 cancel older runs for the same pull request or branch. The workflow uses read-only
 repository permissions and does not require signing credentials. To require a

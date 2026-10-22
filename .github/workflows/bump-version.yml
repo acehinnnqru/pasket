@@ -107,15 +107,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
-    outputs:
-      tag: ${{ steps.push.outputs.tag }}
+      contents: read
     steps:
+      - name: Require the release deploy key
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+        run: |
+          if [[ -z "$RELEASE_DEPLOY_KEY" ]]; then
+            echo '::error::Configure RELEASE_DEPLOY_KEY with the private SSH key for a writable repository deploy key.'
+            exit 1
+          fi
+
       - name: Check out the validated base commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          persist-credentials: true
 
       - name: Recreate the validated change
         run: python3 .github/scripts/version.py bump "$BUMP" --channel "$CHANNEL"
@@ -148,14 +157,7 @@ jobs:
           git -c commit.gpgsign=false commit -m "$COMMIT_MESSAGE"
           git tag "$TAG"
           git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$TAG:refs/tags/$TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-  release:
-    name: Build and publish the new tag
-    needs: commit
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.commit.outputs.tag }}
-    secrets: inherit
+          {
+            printf '## Version pushed: %s\n\n' "$TAG"
+            printf 'The SSH tag push automatically starts **Release macOS app** as a separate workflow run.\n'
+          } >> "$GITHUB_STEP_SUMMARY"

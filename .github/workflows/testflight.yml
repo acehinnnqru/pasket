@@ -1,0 +1,60 @@
+name: Upload macOS app to TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to upload or retry
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the release tag and tooling
+        run: |
+          python3 .github/scripts/version.py check "$RELEASE_TAG"
+          python3 .github/scripts/test_version.py
+          python3 -B .github/scripts/test_testflight.py
+          bash -n .github/scripts/upload-testflight.sh
+
+      - name: Run core tests
+        run: swift test
+
+      - name: Archive and upload to App Store Connect
+        env:
+          APP_STORE_CERTIFICATES_BASE64: ${{ secrets.APP_STORE_CERTIFICATES_BASE64 }}
+          APP_STORE_CERTIFICATES_PASSWORD: ${{ secrets.APP_STORE_CERTIFICATES_PASSWORD }}
+          APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: bash .github/scripts/upload-testflight.sh

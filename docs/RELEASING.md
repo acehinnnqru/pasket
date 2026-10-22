@@ -9,6 +9,11 @@ The channel defaults to `alpha`; the bump defaults to `patch`. The workflow
 calculates the exact next tag from existing Git tags instead of accepting a
 manually entered version.
 
+Select **Upload this release to TestFlight as well** (`upload_testflight`) to
+upload that version to App Store Connect after its commit and tag are pushed.
+The checkbox defaults to off; enable it after configuring the TestFlight signing
+secrets described below. This choice applies only to the current workflow run.
+
 For example, after releasing `1.0.0`:
 
 | Current tag | Channel | Bump | Next tag |
@@ -57,7 +62,9 @@ applies only to this manually requested CI version update.
 [Bump version and release](../.github/workflows/bump-version.yml) pushes over SSH
 using a dedicated writable deploy key. Its tag push automatically starts
 [Release macOS app](../.github/workflows/release.yml) as a separate workflow run.
-There is no additional direct workflow call, so a bump starts only one release.
+GitHub packaging is triggered only by that tag push, so a bump starts only one
+GitHub release. When `upload_testflight` is selected, the bump workflow also calls
+the reusable TestFlight workflow in its own run after the tag push succeeds.
 The release workflow checks that the tag matches the version stored in the project, runs
 tests, builds a universal Release app for Apple Silicon and Intel, signs with
 Developer ID, submits it to Apple's notary service, staples the ticket, and
@@ -167,3 +174,124 @@ and GitHub's [certificate handling guide](https://docs.github.com/en/actions/how
 for the underlying signing and notarization requirements. The first real signed
 release must be verified in Actions after these secrets are configured; local
 unsigned builds do not exercise Apple's notarization service or Gatekeeper.
+
+## TestFlight uploads
+
+[Upload macOS app to TestFlight](../.github/workflows/testflight.yml) is a reusable
+workflow that archives the universal macOS app and uploads it to App Store Connect
+using Xcode. Its upload job runs independently of GitHub ZIP/DMG packaging, so either
+channel can succeed or be retried independently. It uses the same release tag, numeric
+marketing version, and unique build number. Xcode's automatic build-number changes
+are disabled to preserve the version reserved by the tag.
+
+After configuring the credentials below, select **Upload this release to TestFlight
+as well** (`upload_testflight`) when running **Bump version and release**. The
+checkbox is available for every channel: alpha, beta, rc, and stable. It defaults
+to off, and no repository variable is required. The upload starts automatically
+after the requested version's commit and tag are pushed successfully.
+
+**Release macOS app → Run workflow** also accepts `upload_testflight` when building
+an existing tag manually. A plain tag push publishes only the GitHub release:
+push events do not carry the manual workflow's inputs. The bump workflow passes
+the reserved tag directly to the TestFlight workflow, so selecting the checkbox
+starts one upload without a second tag-triggered upload.
+
+For a first upload or a retry, use **Actions → Upload macOS app to TestFlight →
+Run workflow**, select the default branch, and enter an existing version tag.
+This dedicated workflow uploads the selected tag directly without an additional
+checkbox. Merge the workflow and scripts before creating the release tag: the
+selected tag must contain them.
+The workflow validates the tag and tooling and runs core tests before importing
+credentials. It never creates a version commit or tag itself.
+
+### Certificates and provisioning profile
+
+The GitHub release's **Developer ID Application** certificate signs downloads
+distributed outside the Mac App Store. TestFlight uses separate store distribution
+credentials from the same Apple Developer team:
+
+1. An **Apple Distribution** certificate (or **Mac App Distribution**, whose
+   installed identity is `3rd Party Mac Developer Application`) and its private key
+   to sign the app.
+2. A **Mac Installer Distribution** certificate (installed as
+   `3rd Party Mac Developer Installer`) and its private key to sign the package
+   Xcode uploads. A Developer ID Installer certificate does not serve this purpose.
+3. A **Mac App Store Connect** distribution provisioning profile for the explicit
+   App ID `com.acehinnnqru.pasket`, containing the app distribution certificate from
+   step 1. Download the `.provisionprofile` from the developer portal. Development,
+   wildcard, and Developer ID profiles are rejected by the upload script.
+
+Create certificates and profiles in **Apple Developer → Certificates, Identifiers
+& Profiles** with an authorized account. In Keychain Access, export both signing
+identities **with their private keys together into one password-protected `.p12`**.
+The export must contain exactly one app distribution identity and one installer
+distribution identity. A `.cer` download alone does not contain a private key.
+When renewing the app certificate, regenerate the matching profile and update
+both secrets. See Apple's [certificate types](https://developer.apple.com/help/account/certificates/certificates-overview/)
+and [App Store Connect profile guide](https://developer.apple.com/help/account/provisioning-profiles/create-an-app-store-provisioning-profile/).
+
+### Actions Secrets
+
+Add these three **repository secrets** alongside the existing release secrets:
+
+| Secret | Value |
+| --- | --- |
+| `APP_STORE_CERTIFICATES_BASE64` | Base64 of the combined `.p12` containing the app and installer distribution certificates and both private keys. |
+| `APP_STORE_CERTIFICATES_PASSWORD` | The nonempty password for that `.p12`. |
+| `APP_STORE_PROVISIONING_PROFILE_BASE64` | Base64 of the downloaded Mac App Store Connect `.provisionprofile`. |
+
+Encode the files outside the checkout and paste the results into Actions Secrets:
+
+```sh
+base64 -i /path/to/AppStoreDistribution.p12 | pbcopy
+base64 -i /path/to/Pasket.provisionprofile | pbcopy
+```
+
+Run each command separately and save its clipboard contents to the corresponding
+secret before running the next command. Keep the original private files outside
+the repository.
+
+The workflow also uses the existing `APPLE_TEAM_ID`, `APPLE_API_KEY_ID`,
+`APPLE_API_ISSUER_ID`, and `APPLE_API_PRIVATE_KEY`. The team API key needs permission
+to upload builds to this app; Apple's upload guide lists Developer, App Manager,
+Admin, and Account Holder as eligible roles. The existing Developer-role team key
+can be reused if it has the required access. The `.p8` value remains the complete
+key with real line breaks, not Base64. No Apple ID password, app-specific password,
+or additional deploy key is needed by this workflow.
+
+Signing assets are imported only into an ephemeral GitHub-hosted macOS runner.
+The script validates profile platform, team, bundle identifier, expiration, and
+certificate membership, uses manual signing without automatic provisioning
+updates, and removes its keychain, profile copies, and decoded credentials on
+exit. It does not create or renew certificates or profiles in the developer portal.
+
+### App Store Connect setup and upload status
+
+Create a **macOS app record** in App Store Connect using bundle ID
+`com.acehinnnqru.pasket`, and ensure the membership and required agreements are
+current. The bundle ID is the app's unique identifier, configured as
+`PRODUCT_BUNDLE_IDENTIFIER` in the Xcode project. The app record, explicit App ID,
+provisioning profile, and built app must all use this identifier. It is separate
+from the display name and version number.
+
+The project already enables App Sandbox and declares
+`ITSAppUsesNonExemptEncryption=NO`; review that declaration if encryption features
+change. Select an Xcode version Apple currently accepts for uploads if the pinned
+runner toolchain becomes ineligible.
+
+A successful workflow means Xcode completed its upload, not that Apple finished
+processing or approved beta distribution. Inspect **App Store Connect → Pasket →
+TestFlight** for processing errors, compliance questions, and build availability.
+Configure an internal testing group with automatic distribution if internal
+testers should receive new builds automatically. External testing also requires
+test information, a tester group, and any required TestFlight App Review. This
+workflow uploads builds; it does not submit them for external beta review or
+publish an App Store release. See Apple's [upload guide](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
+and [internal testing guide](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers/).
+
+After an interrupted upload, check App Store Connect before retrying: Apple may
+already have accepted that version/build, and duplicate uploads are rejected.
+Retry the same tag only if its build was not accepted. If Apple accepted it and a
+replacement binary is needed, create the next release using the existing bump
+workflow. Do not move the old tag or reuse its build number. Actual signing and
+upload must be verified in Actions after the credentials are configured.

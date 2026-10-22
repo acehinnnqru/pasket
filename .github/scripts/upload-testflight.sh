@@ -70,8 +70,19 @@ rm "$work_directory/certificates.p12"
 identities="$(security find-identity -v "$keychain_path")"
 app_identities="$(printf '%s\n' "$identities" | awk '/"(Apple Distribution:|3rd Party Mac Developer Application:)/ { print $2 }')"
 installer_identities="$(printf '%s\n' "$identities" | awk '/"(3rd Party Mac Developer Installer:|Mac Installer Distribution:)/ { print $2 }')"
+app_identity_count="$(printf '%s\n' "$app_identities" | awk 'NF { count++ } END { print count+0 }')"
+installer_identity_count="$(printf '%s\n' "$installer_identities" | awk 'NF { count++ } END { print count+0 }')"
 if [[ ! "$app_identities" =~ ^[A-Fa-f0-9]{40}$ || ! "$installer_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
-  echo '::error::The P12 must contain exactly one Apple Distribution (or Mac App Distribution) identity and one Mac Installer Distribution identity, both with private keys.'
+  if [[ ! "$app_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+    echo "::error::Expected exactly one valid Apple Distribution (or Mac App Distribution) certificate with its matching private key; found $app_identity_count signing identities."
+  fi
+  if [[ ! "$installer_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+    echo "::error::Expected exactly one valid Mac Installer Distribution certificate with its matching private key; found $installer_identity_count signing identities."
+  fi
+  if printf '%s\n' "$identities" | awk '/"Developer ID (Application|Installer):/ { found=1 } END { exit !found }'; then
+    echo '::error::Detected Developer ID signing identities. These sign downloads distributed outside the Mac App Store and cannot replace the App Store distribution identities required for TestFlight. Update APP_STORE_CERTIFICATES_BASE64 with the App Store app and installer identities.'
+  fi
+  echo '::error::Zero matches can mean a missing certificate or private key, an invalid certificate, or the wrong certificate type. Multiple matches mean the P12 contains too many identities of that type. See docs/RELEASING.md, Certificates and provisioning profile.'
   exit 1
 fi
 

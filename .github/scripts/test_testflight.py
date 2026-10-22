@@ -4,6 +4,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -94,6 +95,43 @@ class TestUploadGuard(unittest.TestCase):
         result = self.run_script({"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "github-hosted"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Missing required variable: APP_STORE_CERTIFICATES_BASE64", result.stdout)
+
+    def test_identity_validation_reports_missing_and_duplicate_identity_types(self):
+        script = Path(__file__).with_name("upload-testflight.sh").read_text()
+        validation = script[script.index("# Installer identities are not code-signing identities;"):
+                            script.index("\nsecurity cms -D")]
+        app = f'  1) {"A" * 40} "Apple Distribution: Example (TESTTEAM01)"'
+        legacy_app = f'  1) {"B" * 40} "3rd Party Mac Developer Application: Example (TESTTEAM01)"'
+        installer = f'  2) {"C" * 40} "3rd Party Mac Developer Installer: Example (TESTTEAM01)"'
+        alternate_installer = f'  2) {"D" * 40} "Mac Installer Distribution: Example (TESTTEAM01)"'
+        unrelated = f'  3) {"E" * 40} "Developer ID Application: Example (TESTTEAM01)"'
+        for identities, expected_errors in (
+            (f"{app}\n{installer}\n{unrelated}", ()),
+            (f"{legacy_app}\n{alternate_installer}", ()),
+            (installer, (("Apple Distribution", 0),)),
+            (app, (("Mac Installer Distribution", 0),)),
+            ("0 valid identities found", (("Apple Distribution", 0), ("Mac Installer Distribution", 0))),
+            (unrelated, (("Apple Distribution", 0), ("Mac Installer Distribution", 0))),
+            (f"{app}\n{legacy_app}\n{installer}", (("Apple Distribution", 2),)),
+            (f"{app}\n{installer}\n{alternate_installer}", (("Mac Installer Distribution", 2),)),
+        ):
+            with self.subTest(identities=identities):
+                # Exercise selection without importing credentials or accessing a keychain.
+                result = subprocess.run(
+                    ["/bin/bash", "-euc", 'security() { printf "%s\\n" "$TEST_IDENTITIES"; }\n'
+                     'keychain_path=synthetic-keychain\n' + validation],
+                    env={**os.environ, "TEST_IDENTITIES": identities}, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 1 if expected_errors else 0, result.stderr)
+                errors = [line for line in result.stdout.splitlines() if "Expected exactly one" in line]
+                self.assertEqual(len(errors), len(expected_errors))
+                for line, (identity_type, count) in zip(errors, expected_errors):
+                    self.assertIn(identity_type, line)
+                    self.assertIn(f"found {count} signing identities", line)
+                if expected_errors:
+                    self.assertIn("Zero matches can mean", result.stdout)
+                self.assertEqual("Detected Developer ID signing identities" in result.stdout,
+                                 bool(expected_errors) and unrelated in identities)
 
     def test_cleanup_before_profile_installation_works_in_macos_bash(self):
         script = Path(__file__).with_name("upload-testflight.sh").read_text()

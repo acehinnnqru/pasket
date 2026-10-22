@@ -197,6 +197,13 @@ Pasket never changes your system privacy settings.
 - **Delete Unavailable Files** in the bottom-right More menu checks file references across the entire
   history, regardless of the current search or filter. It removes an entry if any referenced file is
   missing or inaccessible, while keeping original files, readable file entries, text, and saved images.
+- **Auto Recycle Unavailable Items** in Settings → History performs the same check when you close
+  the history window, at most once every **5 minutes** during an app session. It is off by default, including for existing
+  installations. Toggle it and choose **Apply** to save; the first check runs on the next close.
+  Copying, startup, and hourly or wake maintenance do not trigger this file scan. Checks cover the
+  entire history, regardless of search or filter. Manual **Delete Unavailable Files** remains available
+  during the cooldown. History age, count, and storage limits keep their existing cleanup schedule.
+  This also removes references to temporarily inaccessible files, such as files on disconnected drives.
 - Up to 100 file references can be recorded together. Pasket retains paths and read-only
   security-scoped bookmarks when the system grants access, allowing those file references to be
   reopened after relaunch. Existing ordinary bookmarks are upgraded while accessible entries are

@@ -923,9 +923,23 @@ private struct HistoryRetentionSettingsView: View {
                 Divider().opacity(0.35).padding(.horizontal, 12)
                 limitRow("Image storage", detail: "\(Self.formatBytes(store.imageStorageBytes)) used · includes thumbnails",
                          value: $draft.images, unit: "MiB", field: .images)
+                Divider().opacity(0.35).padding(.horizontal, 12)
+                Toggle(isOn: $draft.autoRecycleUnavailableFiles) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Auto Recycle Unavailable Items")
+                            .font(.system(size: 13))
+                        Text("Remove unavailable file entries when history closes, at most once every 5 minutes. Original files are kept.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .accessibilityIdentifier("autoRecycleUnavailableFiles")
+                .padding(12)
                 Divider().opacity(0.35)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Apply to save these limits. The oldest matching entries are cleaned up first. Original files stay untouched.")
+                    Text("Apply to save these settings. History limits are checked at startup, after writes, every hour, and after waking from sleep. Original files stay untouched.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1188,12 +1202,14 @@ private struct HistoryRetentionDraft {
     var items: HistoryLimitDraft
     var text: HistoryLimitDraft
     var images: HistoryLimitDraft
+    var autoRecycleUnavailableFiles: Bool
 
     init(_ settings: ClipboardRetention) {
         days = HistoryLimitDraft(settings.maximumAgeDays)
         items = HistoryLimitDraft(settings.maximumItems)
         text = HistoryLimitDraft(settings.maximumTextBytes, unit: ClipboardRetention.mebibyte)
         images = HistoryLimitDraft(settings.maximumImageBytes, unit: ClipboardRetention.mebibyte)
+        autoRecycleUnavailableFiles = settings.autoRecycleUnavailableFiles
     }
 
     var settings: ClipboardRetention? {
@@ -1201,7 +1217,8 @@ private struct HistoryRetentionDraft {
         let settings = ClipboardRetention(maximumItems: items.value(),
                                           maximumTextBytes: text.value(unit: ClipboardRetention.mebibyte),
                                           maximumImageBytes: images.value(unit: ClipboardRetention.mebibyte),
-                                          maximumAgeDays: days.value())
+                                          maximumAgeDays: days.value(),
+                                          autoRecycleUnavailableFiles: autoRecycleUnavailableFiles)
         return settings.isValid ? settings : nil
     }
 }

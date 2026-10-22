@@ -12,11 +12,191 @@ struct ClipboardRetentionTests {
         #expect(ClipboardRetention.default.maximumTextBytes == 50 * ClipboardRetention.mebibyte)
         #expect(ClipboardRetention.default.maximumImageBytes == 500 * ClipboardRetention.mebibyte)
         #expect(ClipboardRetention.default.maximumAgeDays == 60)
+        #expect(!ClipboardRetention.default.autoRecycleUnavailableFiles)
         #expect(unlimited.isValid)
         #expect(!ClipboardRetention(maximumItems: 0).isValid)
         #expect(!ClipboardRetention(maximumTextBytes: -1).isValid)
         #expect(!ClipboardRetention(maximumImageBytes: Int.max).isValid)
         #expect(!ClipboardRetention(maximumAgeDays: 0).isValid)
+    }
+
+    @Test func legacyRetentionKeepsAutoRecycleDisabledAndUnlimitedValues() throws {
+        let legacy = Data(#"{"maximumItems":9,"maximumAgeDays":7}"#.utf8)
+        let settings = try JSONDecoder().decode(ClipboardRetention.self, from: legacy)
+        #expect(!settings.autoRecycleUnavailableFiles)
+        #expect(settings.maximumItems == 9)
+        #expect(settings.maximumAgeDays == 7)
+        #expect(settings.maximumTextBytes == nil)
+        #expect(settings.maximumImageBytes == nil)
+        #expect(try JSONDecoder().decode(ClipboardRetention.self, from: JSONEncoder().encode(settings)) == settings)
+    }
+
+    @Test func autoRecycleWaitsForDismissalInsteadOfScanningOnStartupWritesOrMaintenance() async throws {
+        let fixture = try RetentionFixture()
+        defer { fixture.remove() }
+        let missing = ClipboardFile(path: fixture.directory.appendingPathComponent("missing.txt").path, name: "missing.txt")
+        let file = ClipboardItem(kind: .file, title: "Missing", content: missing.path, source: .unknown,
+                                 copiedAt: Date(), fingerprint: "missing", files: [missing])
+        var settings = unlimited
+        settings.autoRecycleUnavailableFiles = true
+        try await fixture.persistence.save(ClipboardHistory(items: [file], retention: settings))
+        let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-trigger-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        await store.start()
+        defer { store.stop() }
+        #expect(store.totalCount == 1)
+        await store.checkRetention()
+        #expect(store.totalCount == 1)
+        pasteboard.clearContents()
+        #expect(pasteboard.setString("New copy", forType: .string))
+        store.pollClipboard()
+        await store.flush()
+        #expect(store.totalCount == 2)
+        store.prepareForPresentation()
+        await store.flush()
+        #expect(store.totalCount == 2)
+        store.invalidatePresentation()
+        await store.flush()
+        #expect(store.items.map(\.content) == ["New copy"])
+        #expect(store.storageError == nil)
+    }
+
+    @Test func autoRecycleSkipsRapidDismissalsAndResumesAtFiveMinutes() async throws {
+        let fixture = try RetentionFixture()
+        defer { fixture.remove() }
+        let missing = ClipboardFile(path: fixture.directory.appendingPathComponent("missing.txt").path, name: "missing.txt")
+        let readable = ClipboardFileAccess.capture(fixture.original)
+        let first = ClipboardItem(kind: .file, title: "Missing", content: missing.path, source: .unknown,
+                                  copiedAt: Date(), fingerprint: "missing", files: [missing])
+        let second = ClipboardItem(kind: .file, title: "Original", content: readable.path, source: .unknown,
+                                   copiedAt: Date(), fingerprint: "original", files: [readable])
+        var settings = unlimited
+        settings.autoRecycleUnavailableFiles = true
+        try await fixture.persistence.save(ClipboardHistory(items: [first, second], retention: settings))
+        let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-cooldown-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        await store.start()
+        defer { store.stop() }
+        let closedAt = Date()
+        store.prepareForPresentation(at: closedAt)
+        store.invalidatePresentation(at: closedAt)
+        await store.flush()
+        #expect(store.items.map(\.id) == [second.id])
+        try FileManager.default.removeItem(at: fixture.original)
+        // Duplicate hide callbacks without a new presentation must not trigger cleanup.
+        store.invalidatePresentation(at: closedAt.addingTimeInterval(600))
+        await store.flush()
+        #expect(store.totalCount == 1)
+        store.prepareForPresentation(at: closedAt.addingTimeInterval(299))
+        store.invalidatePresentation(at: closedAt.addingTimeInterval(299.999))
+        await store.flush()
+        #expect(store.totalCount == 1)
+        store.prepareForPresentation(at: closedAt.addingTimeInterval(300))
+        store.invalidatePresentation(at: closedAt.addingTimeInterval(300))
+        await store.flush()
+        #expect(store.totalCount == 0)
+    }
+
+    @Test func enablingAutoRecycleWaitsForDismissalAndDisabledDismissalsDoNotConsumeCooldown() async throws {
+        let fixture = try RetentionFixture()
+        defer { fixture.remove() }
+        let missing = ClipboardFile(path: fixture.directory.appendingPathComponent("missing.txt").path, name: "missing.txt")
+        let file = ClipboardItem(kind: .file, title: "Missing", content: missing.path, source: .unknown,
+                                 copiedAt: Date(), fingerprint: "missing", files: [missing])
+        try await fixture.persistence.save(ClipboardHistory(items: [file], retention: unlimited))
+        let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-enabled-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        await store.start()
+        defer { store.stop() }
+        let closedAt = Date()
+        store.prepareForPresentation(at: closedAt)
+        store.invalidatePresentation(at: closedAt)
+        await store.flush()
+        #expect(store.totalCount == 1)
+        var settings = unlimited
+        settings.autoRecycleUnavailableFiles = true
+        #expect(await store.applyRetention(settings) == nil)
+        #expect(store.retentionError == nil)
+        #expect(try await ClipboardPersistence(directory: fixture.directory).loadSettings().retention == settings)
+        #expect(store.totalCount == 1)
+        store.prepareForPresentation(at: closedAt.addingTimeInterval(1))
+        store.invalidatePresentation(at: closedAt.addingTimeInterval(1))
+        await store.flush()
+        #expect(store.totalCount == 0)
+        // Explicit manual cleanup remains available even during the automatic cooldown.
+        try await fixture.persistence.apply([.upsert(file)])
+        #expect(try await fixture.persistence.page().totalCount == 1)
+        await store.deleteUnavailableFiles()
+        #expect(store.totalCount == 0)
+    }
+
+    @Test func autoRecycleRechecksRestoredFilesOnDismissal() async throws {
+        let fixture = try RetentionFixture()
+        defer { fixture.remove() }
+        let url = fixture.directory.appendingPathComponent("restored.txt")
+        let file = ClipboardItem(kind: .file, title: "Restored", content: url.path, source: .unknown,
+                                 copiedAt: Date(), fingerprint: "restored",
+                                 files: [ClipboardFile(path: url.path, name: "restored.txt")])
+        var settings = unlimited
+        settings.autoRecycleUnavailableFiles = true
+        try await fixture.persistence.save(ClipboardHistory(items: [file], retention: settings))
+        let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-restored-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        await store.start()
+        defer { store.stop() }
+        store.prepareForPresentation()
+        await store.refreshFileAvailability()
+        #expect(store.unavailableItems.contains(file.id))
+        try Data("Restored file".utf8).write(to: url)
+        store.invalidatePresentation()
+        await store.flush()
+        #expect(store.totalCount == 1)
+        #expect(try Data(contentsOf: url) == Data("Restored file".utf8))
+    }
+
+    @Test func autoRecycleScansAllHistoryWhilePausedAndKeepsTheClipboardUntouched() async throws {
+        let fixture = try RetentionFixture()
+        defer { fixture.remove() }
+        let readable = ClipboardFileAccess.capture(fixture.original)
+        let now = Date()
+        let missing = ClipboardFile(path: fixture.directory.appendingPathComponent("missing.txt").path, name: "missing.txt")
+        let file = ClipboardItem(kind: .file, title: "Partially missing", content: "Group", source: .unknown,
+                                 copiedAt: now.addingTimeInterval(-100), fingerprint: "group", files: [readable, missing])
+        let savedImage = try await fixture.persistence.importImage(png(), source: .unknown, at: now.addingTimeInterval(-101))
+        let texts = (0..<55).map { ClipboardItem.text("Visible \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0))) }
+        var settings = unlimited
+        settings.autoRecycleUnavailableFiles = true
+        try await fixture.persistence.save(ClipboardHistory(isPaused: true, items: texts + [file, savedImage], retention: settings))
+        let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("Current clipboard", forType: .string)
+        let changeCount = pasteboard.changeCount
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        await store.start()
+        defer { store.stop() }
+        #expect(store.items.count == 50)
+        #expect(!store.items.contains { $0.id == file.id })
+        store.prepareForPresentation()
+        store.filter = .text
+        store.query = "Visible"
+        await store.flush()
+        store.invalidatePresentation()
+        await store.flush()
+        #expect(store.totalCount == texts.count + 1)
+        #expect(store.matchingCount == texts.count)
+        #expect(store.isPaused)
+        #expect(store.filter == .text)
+        #expect(store.query == "Visible")
+        #expect(store.storageError == nil)
+        #expect(pasteboard.changeCount == changeCount)
+        #expect(pasteboard.string(forType: .string) == "Current clipboard")
+        #expect(Set(try await fixture.persistence.load().items.map(\.id)) == Set((texts + [savedImage]).map(\.id)))
+        #expect(try Data(contentsOf: fixture.original) == Data("Original file".utf8))
+        #expect(try await fixture.persistence.imageData(try #require(savedImage.image)).isEmpty == false)
     }
 
     @Test func categoryLimitsDeleteOnlyMatchingEntriesAndIgnoreOriginalFileSize() async throws {

@@ -8,10 +8,26 @@ nonisolated struct ClipboardRetention: Codable, Equatable, Sendable {
     var maximumTextBytes: Int? = 50 * mebibyte
     var maximumImageBytes: Int? = 500 * mebibyte
     var maximumAgeDays: Int? = 60
+    var autoRecycleUnavailableFiles = false
 
     var isValid: Bool {
         [maximumItems, maximumTextBytes, maximumImageBytes, maximumAgeDays]
             .allSatisfy { $0.map { $0 > 0 && $0 <= Int.max / Self.mebibyte } ?? true }
+    }
+}
+
+extension ClipboardRetention {
+    nonisolated private enum CodingKeys: String, CodingKey {
+        case maximumItems, maximumTextBytes, maximumImageBytes, maximumAgeDays, autoRecycleUnavailableFiles
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maximumItems = try container.decodeIfPresent(Int.self, forKey: .maximumItems)
+        maximumTextBytes = try container.decodeIfPresent(Int.self, forKey: .maximumTextBytes)
+        maximumImageBytes = try container.decodeIfPresent(Int.self, forKey: .maximumImageBytes)
+        maximumAgeDays = try container.decodeIfPresent(Int.self, forKey: .maximumAgeDays)
+        autoRecycleUnavailableFiles = try container.decodeIfPresent(Bool.self, forKey: .autoRecycleUnavailableFiles) ?? false
     }
 }
 

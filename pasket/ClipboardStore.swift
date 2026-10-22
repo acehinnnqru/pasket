@@ -98,6 +98,8 @@ final class ClipboardStore {
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var isPresented = false
     @ObservationIgnored private var lastDismissedAt: Date?
+    @ObservationIgnored private var lastAutoRecycleAt: Date?
+    private let autoRecycleInterval: TimeInterval = 5 * 60
     private let pageSize = 50
 
     init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general,
@@ -276,10 +278,20 @@ final class ClipboardStore {
         if isPresented {
             lastDismissedAt = date
             isPresented = false
+            autoRecycleUnavailableFilesIfNeeded(at: date)
         }
         presentationID = UUID()
         toasts.dismissTransient()
         systemAccess.dismiss()
+    }
+
+    private func autoRecycleUnavailableFilesIfNeeded(at date: Date) {
+        guard !stopRequested, !isDebugMode, !isLoading, !storageBlocked, !needsRetentionReview,
+              !isDeletingUnavailableFiles, retentionSettings.autoRecycleUnavailableFiles,
+              lastAutoRecycleAt.map({ date.timeIntervalSince($0) >= autoRecycleInterval }) ?? true else { return }
+        // Reserve the interval before queuing work so rapid dismissals cannot schedule another scan.
+        lastAutoRecycleAt = date
+        persist([.deleteUnavailableFiles])
     }
 
     #if DEBUG

@@ -65,6 +65,10 @@ using a dedicated writable deploy key. Its tag push automatically starts
 GitHub packaging is triggered only by that tag push, so a bump starts only one
 GitHub release. When `upload_testflight` is selected, the bump workflow also calls
 the reusable TestFlight workflow in its own run after the tag push succeeds.
+That call sets `core_tests_verified: true` because the prepare job passed core
+tests and the commit job checked that the committed tree matches the validated
+tree. TestFlight skips only its duplicate core tests. The separate tag-triggered
+release run still runs core tests; tag pushes do not carry reusable-workflow inputs.
 The release workflow checks that the tag matches the version stored in the project, runs
 tests, builds a universal Release app for Apple Silicon and Intel, signs with
 Developer ID, submits it to Apple's notary service, staples the ticket, and
@@ -201,8 +205,12 @@ Run workflow**, select the default branch, and enter an existing version tag.
 This dedicated workflow uploads the selected tag directly without an additional
 checkbox. Merge the workflow and scripts before creating the release tag: the
 selected tag must contain them.
-The workflow validates the tag and tooling and runs core tests before importing
-credentials. It never creates a version commit or tag itself.
+The workflow validates the tag and tooling before importing credentials. Core
+tests also run unless a reusable-workflow caller sets `core_tests_verified: true`
+after validating the exact release content. This input defaults to false and is
+not exposed by the manual entry point, so standalone manual uploads always run
+core tests. Calls from the release workflow also retain core tests. The workflow
+never creates a version commit or tag itself.
 
 ### Certificates and provisioning profile
 

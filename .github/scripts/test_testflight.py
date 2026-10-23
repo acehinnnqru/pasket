@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -80,6 +81,48 @@ class TestDistributionProfile(unittest.TestCase):
 
 
 class TestUploadGuard(unittest.TestCase):
+    def test_distribution_files_are_readable_without_exposing_credentials(self):
+        script = Path(__file__).with_name("upload-testflight.sh").read_text()
+        build = script[script.index("distribution_build() ("):script.index("\nfor variable in")]
+        permissions = script[script.index("# Copied inputs can retain private modes"):
+                             script.index('\narchitectures="')]
+        with tempfile.TemporaryDirectory(prefix="pasket-testflight-permissions-") as directory:
+            result = subprocess.run(
+                ["/bin/bash", "-euc", build + '''
+umask 077
+work_directory="$1"
+app_path="$work_directory/pasket.app"
+printf 'synthetic private key' > "$work_directory/AuthKey.p8"
+xcodebuild() {
+  mkdir -p "$app_path/Contents/MacOS"
+  printf 'synthetic resource' > "$app_path/Contents/Info.plist"
+  printf 'synthetic executable' > "$app_path/Contents/MacOS/pasket"
+  chmod u+x "$app_path/Contents/MacOS/pasket"
+}
+distribution_build -archivePath "$work_directory/pasket.xcarchive" archive
+# Model a copied input whose original private mode survives the build.
+printf 'synthetic profile' > "$app_path/Contents/embedded.provisionprofile"
+''' + permissions + '''
+xcodebuild() {
+  mkdir "$work_directory/export"
+  printf 'synthetic package' > "$work_directory/export/pasket.pkg"
+}
+distribution_build -exportArchive
+printf 'synthetic credential' > "$work_directory/credential-after-build"
+''', "permissions-test", directory],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            root = Path(directory)
+            for name in ("AuthKey.p8", "credential-after-build"):
+                self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o600)
+            for name in ("pasket.app", "pasket.app/Contents", "pasket.app/Contents/MacOS",
+                         "pasket.app/Contents/MacOS/pasket", "export"):
+                self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o755, name)
+            for name in ("pasket.app/Contents/Info.plist", "pasket.app/Contents/embedded.provisionprofile",
+                         "export/pasket.pkg"):
+                self.assertEqual(stat.S_IMODE((root / name).stat().st_mode), 0o644, name)
+
     def run_script(self, env):
         script = Path(__file__).with_name("upload-testflight.sh")
         return subprocess.run(["/bin/bash", str(script)], env=env, capture_output=True, text=True)

@@ -10,20 +10,11 @@ on:
         description: Existing version tag to build or retry
         type: string
         required: true
-      upload_testflight:
-        description: Upload this release to TestFlight as well
-        type: boolean
-        required: false
-        default: false
   workflow_call:
     inputs:
       tag:
         type: string
         required: true
-      upload_testflight:
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -106,8 +97,7 @@ jobs:
           gh release edit "$RELEASE_TAG" --draft=false "${release_flags[@]}"
 
   testflight:
-    if: inputs.upload_testflight
     uses: ./.github/workflows/testflight.yml
     with:
-      tag: ${{ inputs.tag }}
+      tag: ${{ inputs.tag || github.ref_name }}
     secrets: inherit

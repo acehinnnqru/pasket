@@ -9,10 +9,10 @@ The channel defaults to `alpha`; the bump defaults to `patch`. The workflow
 calculates the exact next tag from existing Git tags instead of accepting a
 manually entered version.
 
-Select **Upload this release to TestFlight as well** (`upload_testflight`) to
-upload that version to App Store Connect after its commit and tag are pushed.
-The checkbox defaults to off; enable it after configuring the TestFlight signing
-secrets described below. This choice applies only to the current workflow run.
+Every release automatically publishes GitHub ZIP/DMG assets and uploads the same
+version to TestFlight. No upload checkbox is required. Configure both the GitHub
+release signing secrets and the TestFlight signing secrets described below before
+starting a release.
 
 For example, after releasing `1.0.0`:
 
@@ -62,13 +62,9 @@ applies only to this manually requested CI version update.
 [Bump version and release](../.github/workflows/bump-version.yml) pushes over SSH
 using a dedicated writable deploy key. Its tag push automatically starts
 [Release macOS app](../.github/workflows/release.yml) as a separate workflow run.
-GitHub packaging is triggered only by that tag push, so a bump starts only one
-GitHub release. When `upload_testflight` is selected, the bump workflow also calls
-the reusable TestFlight workflow in its own run after the tag push succeeds.
-That call sets `core_tests_verified: true` because the prepare job passed core
-tests and the commit job checked that the committed tree matches the validated
-tree. TestFlight skips only its duplicate core tests. The separate tag-triggered
-release run still runs core tests; tag pushes do not carry reusable-workflow inputs.
+That run starts GitHub packaging and the reusable TestFlight workflow in parallel,
+using the same tag for both. The bump workflow does not upload separately, so each
+bump starts one GitHub release and one TestFlight upload.
 The release workflow checks that the tag matches the version stored in the project, runs
 tests, builds a universal Release app for Apple Silicon and Intel, signs with
 Developer ID, submits it to Apple's notary service, staples the ticket, and
@@ -141,7 +137,7 @@ fails the job instead of falling back to token authentication. Unlike
 [pushes made with `GITHUB_TOKEN`](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow-run),
 SSH tag pushes trigger the normal release workflow. A successful bump run confirms
 the commit and tag were pushed; inspect the separate **Release macOS app** run
-for packaging and publication status.
+for GitHub packaging, publication, and TestFlight upload status.
 
 See GitHub's [deploy key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
 and [ruleset bypass actor reference](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
@@ -164,8 +160,11 @@ app and DMG, validates stapled tickets, and checks Gatekeeper before publishing.
 Notarization rejection or a 30-minute submission timeout fails the job and leaves
 the release unpublished; submission IDs and available Apple diagnostics appear
 in the job log. For signing, notarization, or upload failures, fix the cause and
-use **Actions → Release macOS app → Run workflow**, entering the existing tag.
-This retries that version without another bump or commit. An interrupted upload
+rerun the failed jobs in the **Release macOS app** run. To start both distribution
+jobs again, use **Actions → Release macOS app → Run workflow**, entering the
+existing tag. This retries that version without another bump or commit. Avoid
+restarting a successful TestFlight upload; use the dedicated TestFlight workflow
+below when only that upload needs a retry. An interrupted GitHub asset upload
 can resume while the release is still a draft. Published releases are never
 overwritten. If a failure requires a code change, fix the code and request another
 release. For alpha/beta/rc, select the same channel to increment its sequence;
@@ -188,23 +187,17 @@ channel can succeed or be retried independently. It uses the same release tag, n
 marketing version, and unique build number. Xcode's automatic build-number changes
 are disabled to preserve the version reserved by the tag.
 
-After configuring the credentials below, select **Upload this release to TestFlight
-as well** (`upload_testflight`) when running **Bump version and release**. The
-checkbox is available for every channel: alpha, beta, rc, and stable. It defaults
-to off, and no repository variable is required. The upload starts automatically
-after the requested version's commit and tag are pushed successfully.
-
-**Release macOS app → Run workflow** also accepts `upload_testflight` when building
-an existing tag manually. A plain tag push publishes only the GitHub release:
-push events do not carry the manual workflow's inputs. The bump workflow passes
-the reserved tag directly to the TestFlight workflow, so selecting the checkbox
-starts one upload without a second tag-triggered upload.
+Every **Release macOS app** run automatically calls this workflow for the release
+tag, including tag pushes, manual runs for an existing tag, and reusable workflow
+calls. This applies to alpha, beta, rc, and stable releases. There is no upload
+checkbox or repository variable. **Bump version and release** starts the release
+workflow through its tag push; it does not call TestFlight separately.
 
 For a first upload or a retry, use **Actions → Upload macOS app to TestFlight →
 Run workflow**, select the default branch, and enter an existing version tag.
-This dedicated workflow uploads the selected tag directly without an additional
-checkbox. Merge the workflow and scripts before creating the release tag: the
-selected tag must contain them.
+This dedicated workflow uploads only the selected tag to TestFlight, without
+rebuilding GitHub Release assets. Merge the workflow and scripts before creating
+the release tag: the selected tag must contain them.
 The workflow validates the tag and tooling before importing credentials. Core
 tests also run unless a reusable-workflow caller sets `core_tests_verified: true`
 after validating the exact release content. This input defaults to false and is

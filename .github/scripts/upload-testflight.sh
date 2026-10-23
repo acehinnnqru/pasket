@@ -8,6 +8,12 @@ if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hoste
   exit 1
 fi
 
+# Build distributable files with public read access without relaxing credential permissions.
+distribution_build() (
+  umask 022
+  xcodebuild "$@"
+)
+
 for variable in APP_STORE_CERTIFICATES_BASE64 APP_STORE_CERTIFICATES_PASSWORD \
   APP_STORE_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID APPLE_API_KEY_ID \
   APPLE_API_ISSUER_ID APPLE_API_PRIVATE_KEY RELEASE_TAG RUNNER_TEMP GITHUB_STEP_SUMMARY; do
@@ -102,7 +108,7 @@ for profile_directory in "$HOME/Library/Developer/Xcode/UserData/Provisioning Pr
   cp "$work_directory/profile.provisionprofile" "$profile_path"
 done
 
-xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
+distribution_build -project pasket.xcodeproj -scheme pasket -configuration Release \
   -destination 'generic/platform=macOS' -derivedDataPath "$work_directory/DerivedData" \
   -archivePath "$archive_path" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$app_identities" \
@@ -110,6 +116,9 @@ xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
   ENABLE_APP_SANDBOX=YES OTHER_CODE_SIGN_FLAGS="--keychain $keychain_path" archive
 
 app_path="$archive_path/Products/Applications/pasket.app"
+# Copied inputs can retain private modes even when the build uses umask 022.
+# Limit permission changes to the app payload; credentials stay private.
+chmod -R a+rX "$app_path"
 architectures="$(lipo -archs "$app_path/Contents/MacOS/pasket")"
 for architecture in arm64 x86_64; do
   if [[ " $architectures " != *" $architecture "* ]]; then
@@ -120,7 +129,7 @@ done
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
 # Static signing assets keep provisioning changes out of this upload operation.
-xcodebuild -exportArchive -archivePath "$archive_path" \
+distribution_build -exportArchive -archivePath "$archive_path" \
   -exportPath "$work_directory/export" -exportOptionsPlist "$work_directory/ExportOptions.plist" \
   -authenticationKeyPath "$key_path" -authenticationKeyID "$APPLE_API_KEY_ID" \
   -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID"

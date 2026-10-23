@@ -12,6 +12,11 @@ on:
       tag:
         type: string
         required: true
+      core_tests_verified:
+        description: The caller has passed core tests for the exact release content
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -46,6 +51,7 @@ jobs:
           bash -n .github/scripts/upload-testflight.sh
 
       - name: Run core tests
+        if: ${{ !inputs.core_tests_verified }}
         run: swift test
 
       - name: Archive and upload to App Store Connect

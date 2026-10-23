@@ -174,4 +174,5 @@ jobs:
     uses: ./.github/workflows/testflight.yml
     with:
       tag: ${{ needs.prepare.outputs.tag }}
+      core_tests_verified: true
     secrets: inherit

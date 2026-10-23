@@ -142,6 +142,12 @@ struct ContentView: View {
             }) { event in
                 guard !isDialogPresented, !shortcuts.isRecording else { return false }
                 if !isMenuPresented, searchFocused,
+                   event.modifierFlags.intersection([.command, .control, .option, .shift]) == .shift,
+                   event.keyCode == UInt16(kVK_Tab), store.canSelectRecentCopies() {
+                    if !event.isARepeat { selectRecentCopies() }
+                    return true
+                }
+                if !isMenuPresented, searchFocused,
                    event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
                    event.keyCode == UInt16(kVK_Tab), store.selectedID != nil {
                     if !event.isARepeat {
@@ -681,6 +687,39 @@ struct ContentView: View {
         .accessibilityIdentifier("clipboardCollectionToggle")
     }
 
+    private var selectRecentControl: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if store.hasRecentCopies(at: context.date) {
+                Button(action: selectRecentCopies) {
+                    HStack(spacing: 8) {
+                        Text("Select Recent")
+                        Text("⇧Tab")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12))
+                    .frame(minHeight: 18)
+                }
+                .buttonStyle(PasketButtonStyle())
+                .fixedSize()
+                .focusable(false)
+                .disabled(!store.canSelectRecentCopies(at: context.date))
+                .help(store.query.isEmpty && store.filter == .all
+                      ? "Select the latest batch of copies (⇧Tab)"
+                      : "Clear search and choose All Types to select recent copies")
+                .accessibilityLabel("Select recent copies")
+                .accessibilityHint("Shift-Tab selects the latest batch of copies")
+                .accessibilityIdentifier("selectRecentCopies")
+            }
+        }
+    }
+
+    private func selectRecentCopies() {
+        dismissMenus()
+        searchFocused = true
+        Task { await store.selectRecentCopies() }
+    }
+
     private var footer: some View {
         HStack(spacing: 6) {
             collectionControl
@@ -692,15 +731,20 @@ struct ContentView: View {
                     .scaledToFit()
                     .frame(width: 12, height: 12)
             }
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
+            .font(.system(size: 12))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
             Spacer()
-            Text("↑ ↓ Navigate · Tab Select / Deselect")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .help("Use arrow keys to move focus. Press Tab to select or deselect the focused item.")
+            ViewThatFits(in: .horizontal) {
+                Text("↑ ↓ Navigate · Tab Select / Deselect").fixedSize()
+                Text("↑ ↓ · Tab").fixedSize()
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .help("Use arrow keys to move focus. Press Tab to select or deselect the focused item.")
+            .accessibilityLabel("Use arrow keys to navigate and Tab to select or deselect")
+            selectRecentControl
             if store.selectedIDs.count > 1 {
                 Text("\(store.selectedIDs.count) Selected")
                     .font(.system(size: 12)).foregroundStyle(.secondary)

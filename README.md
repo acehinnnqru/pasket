@@ -34,6 +34,7 @@ were using. **Escape** closes history and takes you back to your work.
 ### Paste several things together
 
 Select multiple entries with **Command-click**, **Shift-click**, or **Tab**,
+or use **Select Recent** (**Shift-Tab**) to select your latest batch of copies,
 then choose **Paste Together**. Combine text, links, and emails with a new line,
 space, blank line, or no separator. **Reverse Order** is on by default for both
 Paste Together and Paste Queue, so items paste from bottom to top. Turn it off

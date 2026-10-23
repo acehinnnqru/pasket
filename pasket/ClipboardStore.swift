@@ -50,6 +50,9 @@ final class ClipboardStore {
     private(set) var isApplyingRetention = false
     private(set) var isSearching = false
     private(set) var isLoadingMore = false
+    private(set) var isSelectingRecentCopies = false
+    private var recentCopies = ClipboardRecentCopies()
+    private var recentSelectionIDs: [UUID]?
     private var selectedDetail: ClipboardItem?
     private(set) var thumbnails: [UUID: NSImage] = [:]
     private(set) var previewID: UUID?
@@ -257,6 +260,7 @@ final class ClipboardStore {
     }
 
     func prepareForPresentation(at date: Date = .now) {
+        recentSelectionIDs = nil
         query = ""
         if !filterPreferences.memory.retainsFilter(closedAt: lastDismissedAt, reopeningAt: date) {
             filter = .all
@@ -327,6 +331,39 @@ final class ClipboardStore {
 
     func toggleSelectionMark() {
         selection.toggleMark()
+        copyError = nil
+    }
+
+    func hasRecentCopies(at date: Date = .now) -> Bool {
+        !isDebugMode && recentCopies.batch(at: date).count > 1
+    }
+
+    func canSelectRecentCopies(at date: Date = .now) -> Bool {
+        !isDebugMode && !isLoading && !isSearching && !isLoadingMore && !isSelectingRecentCopies
+            && !isStorageBlocked && query.isEmpty && filter == .all
+            && hasRecentCopies(at: date)
+            && (recentSelectionIDs ?? recentCopies.batch(at: date)).count > 1
+    }
+
+    func selectRecentCopies() async {
+        guard canSelectRecentCopies() else { return }
+        let candidates = recentSelectionIDs ?? recentCopies.batch(at: .now)
+        let presentation = presentationID
+        isSelectingRecentCopies = true
+        defer { isSelectingRecentCopies = false }
+        // A burst may extend beyond the first page of history. Load it before selecting.
+        while hasMoreItems && !Set(candidates).isSubset(of: Set(items.map(\.id))) {
+            let previousCount = items.count
+            await loadMore()
+            guard presentationID == presentation, query.isEmpty, filter == .all,
+                  !isDebugMode, !isLoading, !isStorageBlocked, !isSearching else { return }
+            if items.count == previousCount { return }
+        }
+        let visibleIDs = Set(filteredItems.map(\.id))
+        let available = candidates.filter { visibleIDs.contains($0) }
+        guard available.count > 1 else { return }
+        recentSelectionIDs = available
+        selection.selectMarked(available)
         copyError = nil
     }
 
@@ -403,6 +440,8 @@ final class ClipboardStore {
         guard !isDebugMode, !storageBlocked, !isLoading else { return }
         pasteQueue.cancel()
         captureGeneration += 1
+        recentCopies = ClipboardRecentCopies()
+        recentSelectionIDs = nil
         deletionCutoffs = [:]
         monitor.checkpoint()
         items = []
@@ -736,6 +775,8 @@ final class ClipboardStore {
         if let existing = items.firstIndex(where: { $0.fingerprint == item.fingerprint }) {
             recent.id = items.remove(at: existing).id
         }
+        // Only external captures enter a batch; pasting old history also updates copiedAt.
+        recentCopies.record(recent.id, at: recent.copiedAt)
         if recent.kind == .file {
             fileAvailabilityGeneration += 1
             unavailableItems.remove(recent.id)

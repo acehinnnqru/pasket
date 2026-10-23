@@ -8,6 +8,13 @@ nonisolated struct ClipboardSelection {
     private var addsRange = false
     private(set) var markedIDs: Set<UUID> = []
 
+    mutating func selectMarked(_ orderedIDs: [UUID]) {
+        guard let first = orderedIDs.first else { return }
+        selectOnly(first)
+        ids = Set(orderedIDs)
+        markedIDs = ids
+    }
+
     mutating func toggleMark() {
         guard let focusedID else { return }
         if !markedIDs.insert(focusedID).inserted { markedIDs.remove(focusedID) }

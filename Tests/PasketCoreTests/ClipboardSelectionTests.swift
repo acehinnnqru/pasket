@@ -3,6 +3,20 @@ import Testing
 @testable import PasketCore
 
 struct ClipboardSelectionTests {
+    @Test func batchSelectionReplacesOldMarksAndSupportsTabAdjustments() {
+        let ids = (0..<5).map { _ in UUID() }
+        var selection = ClipboardSelection()
+        selection.select(ids[4], in: ids)
+        selection.selectMarked(Array(ids[0...2]))
+        #expect(selection.ids == Set(ids[0...2]))
+        #expect(selection.markedIDs == selection.ids)
+        #expect(selection.focusedID == ids[0])
+        selection.toggleMark()
+        selection.move(to: ids[3], in: ids)
+        #expect(selection.ids == Set(ids[1...3]))
+        #expect(selection.anchorID == ids[3])
+    }
+
     @Test func tabMarksSurviveNavigationAndCanBeRemovedWithoutLosingFocus() {
         let ids = (0..<4).map { _ in UUID() }
         var selection = ClipboardSelection()

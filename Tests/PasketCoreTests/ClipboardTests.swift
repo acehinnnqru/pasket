@@ -5,6 +5,76 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func recentSelectionLoadsTheEntireBurstAndFreezesItUntilReopening() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for index in 0..<55 { await fixture.copy("Recent item \(index)") }
+        fixture.store.prepareForPresentation()
+        await fixture.store.flush()
+        #expect(fixture.store.items.count == 50)
+        #expect(fixture.store.canSelectRecentCopies())
+        await fixture.store.selectRecentCopies()
+        let batch = fixture.store.selectedIDs
+        #expect(batch.count == 55)
+        #expect(fixture.store.markedIDs == batch)
+        #expect(fixture.store.selectedID == fixture.store.items.first?.id)
+        let expired = Date.now.addingTimeInterval(301)
+        #expect(!fixture.store.hasRecentCopies(at: expired))
+        #expect(!fixture.store.canSelectRecentCopies(at: expired))
+
+        await fixture.copy("A later copy")
+        await fixture.store.selectRecentCopies()
+        #expect(fixture.store.selectedIDs == batch)
+        fixture.store.prepareForPresentation()
+        await fixture.store.flush()
+        await fixture.store.selectRecentCopies()
+        #expect(fixture.store.selectedIDs.count == 56)
+        await fixture.cleanUp()
+    }
+
+    @Test func pastingSavedHistoryDoesNotBecomeAnExternalCopy() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        await fixture.copy("Saved alpha")
+        await fixture.copy("Saved beta")
+        let savedID = try #require(fixture.store.items.last?.id)
+        await fixture.restart()
+        await fixture.copy("Fresh alpha")
+        await fixture.copy("Fresh beta")
+        let freshIDs = Set(fixture.store.items.prefix(2).map(\.id))
+        #expect(await fixture.store.copyItem(savedID))
+        await fixture.store.flush()
+        fixture.store.prepareForPresentation()
+        await fixture.store.flush()
+        await fixture.store.selectRecentCopies()
+        #expect(fixture.store.selectedIDs == freshIDs)
+        await fixture.cleanUp()
+    }
+
+    @Test func recentSelectionLeavesSearchAndTypeFiltersUntouched() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        #expect(!fixture.store.hasRecentCopies())
+        await fixture.copy("Alpha")
+        #expect(!fixture.store.hasRecentCopies())
+        await fixture.copy("Beta")
+        #expect(fixture.store.hasRecentCopies())
+        fixture.store.query = "Alpha"
+        await fixture.store.flush()
+        let selection = fixture.store.selectedIDs
+        #expect(!fixture.store.canSelectRecentCopies())
+        await fixture.store.selectRecentCopies()
+        #expect(fixture.store.query == "Alpha")
+        #expect(fixture.store.selectedIDs == selection)
+        fixture.store.query = ""
+        fixture.store.filter = .text
+        await fixture.store.flush()
+        #expect(!fixture.store.canSelectRecentCopies())
+        await fixture.store.selectRecentCopies()
+        #expect(fixture.store.filter == .text)
+        await fixture.cleanUp()
+    }
+
     @Test func pasteQueueKeepsItsOrderAcrossSearchAndRecencyChanges() async throws {
         let fixture = try Fixture()
         await fixture.start()

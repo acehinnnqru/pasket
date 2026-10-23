@@ -58,6 +58,14 @@ save automatically for the next launch.
   and Tab marks. Tab toggles a mark on the focused entry; a plain click replaces the selection.
   Search keeps keyboard focus, including its normal Command-A behavior. Search and type filters
   remove hidden entries from selection.
+  **Select Recent ⇧Tab** after the footer's navigation hint, or Shift-Tab with search focused, selects the latest batch
+  of external copies captured since launch. A batch spans at most five minutes and ends at a gap
+  greater than 60 seconds. Duplicate entries are selected once; Pasket's own clipboard writes do
+  not enter a batch. Search must be empty and the type filter must be All Types. The first use
+  freezes the batch until history reopens; subsequent copies do not expand it. Large batches load
+  additional history pages before selecting. Tab and arrow keys can adjust the resulting marks.
+  The button appears only while a recent batch contains at least two distinct entries and hides
+  when that batch expires. The collection indicator and total history count stay at the footer's left.
   Multiple selections show a numbered summary; inspect an entry without changing the selection.
   **Delete Selected** and the deletion shortcut affect the selection, with confirmation for multiple
   entries. A selected row's Delete context menu uses the full selection; an unselected row uses itself.

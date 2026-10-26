@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Capture the launch event before yielding to the asynchronous startup task.
+        let isLoginItemLaunch = AppLaunch.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent)
         launchTask = Task {
             let ready = await AppRelaunch.waitForPreviousInstance()
             guard !Task.isCancelled else { return }
@@ -14,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApplication.shared.terminate(nil)
                 return
             }
-            controller.start()
+            controller.start(showHistoryOnLaunch: !isLoginItemLaunch)
         }
     }
 
@@ -104,7 +106,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
     }
 
-    func start() {
+    func start(showHistoryOnLaunch: Bool = true) {
         applyDockPreferences()
         shortcuts.onInvoke = { [weak self] in self?.togglePanel() }
         shortcuts.onPasteNext = { [weak self] in self?.pasteNextQueuedItem() }
@@ -126,7 +128,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
         setup.refresh(hasShortcut: shortcuts.shortcut != nil)
         if setup.step == .complete {
-            finishSetup()
+            finishSetup(showHistory: showHistoryOnLaunch)
         } else {
             showSetup()
         }
@@ -401,7 +403,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func finishSetup() {
+    private func finishSetup(showHistory: Bool = true) {
         guard setup.step == .complete else { return }
         if shortcuts.isRecording { shortcuts.cancelRecording() }
         setupWindow?.close()
@@ -410,7 +412,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             hasStartedHistory = true
             startupTask = Task { await store.start() }
         }
-        showPanel()
+        if showHistory { showPanel() }
     }
 
     private func applyDockPreferences() {

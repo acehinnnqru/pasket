@@ -14,7 +14,10 @@ final class ClipboardStore {
     }
     var selectedID: ClipboardItem.ID? {
         get { selection.focusedID }
-        set { selection.selectOnly(newValue) }
+        set {
+            selectsFirstResultOnReload = false
+            selection.selectOnly(newValue)
+        }
     }
     var selectedIDs: Set<UUID> { selection.ids }
     var markedIDs: Set<UUID> { selection.markedIDs }
@@ -93,6 +96,7 @@ final class ClipboardStore {
     @ObservationIgnored private var pendingMutations: [ClipboardMutation] = []
     @ObservationIgnored private var queryTask: Task<Void, Never>?
     @ObservationIgnored private var queryGeneration = 0
+    @ObservationIgnored private var selectsFirstResultOnReload = false
     @ObservationIgnored private var loadedLimit = 50
     @ObservationIgnored private var navigationTask: Task<Void, Never>?
     @ObservationIgnored private var advanceAfterLoading: UUID?
@@ -269,6 +273,8 @@ final class ClipboardStore {
         lastDismissedAt = nil
         isPresented = true
         selectedID = filteredItems.first?.id
+        // The current items may still belong to the previous search or type filter.
+        selectsFirstResultOnReload = !isDebugMode
         copyError = nil
         if !isDebugMode {
             updateRetentionToast()
@@ -280,6 +286,7 @@ final class ClipboardStore {
     }
 
     func invalidatePresentation(at date: Date = .now) {
+        selectsFirstResultOnReload = false
         if isPresented {
             lastDismissedAt = date
             isPresented = false
@@ -324,13 +331,18 @@ final class ClipboardStore {
     }
 
     func select(_ id: UUID, command: Bool = false, shift: Bool = false) {
+        selectsFirstResultOnReload = false
         selection.select(id, in: filteredItems.map(\.id), command: command, shift: shift)
         copyError = nil
     }
 
-    func focusSelection(_ id: UUID) { selection.focus(id) }
+    func focusSelection(_ id: UUID) {
+        selectsFirstResultOnReload = false
+        selection.focus(id)
+    }
 
     func toggleSelectionMark() {
+        selectsFirstResultOnReload = false
         selection.toggleMark()
         copyError = nil
     }
@@ -364,11 +376,13 @@ final class ClipboardStore {
         let available = candidates.filter { visibleIDs.contains($0) }
         guard available.count > 1 else { return }
         recentSelectionIDs = available
+        selectsFirstResultOnReload = false
         selection.selectMarked(available)
         copyError = nil
     }
 
     private func moveSelection(to id: UUID, extending: Bool) {
+        selectsFirstResultOnReload = false
         selection.move(to: id, in: filteredItems.map(\.id), extending: extending)
         copyError = nil
     }
@@ -376,6 +390,7 @@ final class ClipboardStore {
     func moveSelection(by offset: Int, extending: Bool = false) {
         let visibleItems = filteredItems
         guard !visibleItems.isEmpty else { return }
+        selectsFirstResultOnReload = false
         let current = visibleItems.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : visibleItems.count)
         if offset > 0, current == visibleItems.count - 1, hasMoreItems {
             advanceAfterLoading = selectedID
@@ -874,14 +889,16 @@ final class ClipboardStore {
         var detail: ClipboardItem?
         while true {
             let previousSelection = selectedID
-            let nextSelection = page.items.first(where: { $0.id == previousSelection })?.id ?? page.items.first?.id
+            let selectsFirst = selectsFirstResultOnReload
+            let nextSelection = selectsFirst ? page.items.first?.id
+                : (page.items.first(where: { $0.id == previousSelection })?.id ?? page.items.first?.id)
             if let nextSelection {
                 detail = try await persistence.item(nextSelection)
             } else {
                 detail = nil
             }
             guard generation == queryGeneration, !isDebugMode else { return }
-            if selectedID == previousSelection { break }
+            if selectedID == previousSelection, selectsFirstResultOnReload == selectsFirst { break }
         }
         items = page.items
         totalCount = page.totalCount
@@ -889,6 +906,7 @@ final class ClipboardStore {
         imageStorageBytes = page.imageBytes
         textStorageBytes = page.textBytes
         pruneCaches()
+        if selectsFirstResultOnReload { selectedID = page.items.first?.id }
         reconcileSelection()
         selectedDetail = detail
         isSearching = false

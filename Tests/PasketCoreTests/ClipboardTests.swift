@@ -301,6 +301,64 @@ struct ClipboardTests {
         await fixture.cleanUp()
     }
 
+    @Test(arguments: [false, true])
+    func reopeningSelectsFirstRefreshedResult(retainsFilter: Bool) async throws {
+        let suite = "PasketFilterTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ClipboardFilterPreferences(defaults: defaults)
+        preferences.select(retainsFilter ? .untilQuit : .never)
+        let fixture = try Fixture(filterPreferences: preferences)
+        await fixture.start()
+        await fixture.copy("https://example.com/older")
+        await fixture.copy("https://example.com/newer")
+        let newestLink = try #require(fixture.store.items.first?.id)
+        let newestText = String(repeating: "Latest text ", count: 80)
+        await fixture.copy(newestText)
+        let newestID = try #require(fixture.store.items.first?.id)
+        fixture.store.prepareForPresentation()
+        fixture.store.filter = .links
+        fixture.store.query = "older"
+        await fixture.store.flush()
+        let oldSelection = fixture.store.selectedID
+        fixture.store.invalidatePresentation()
+
+        fixture.store.prepareForPresentation()
+        // SwiftUI reconciles selection when the query and filter change, before the reload finishes.
+        fixture.store.reconcileSelection()
+        await fixture.store.flush()
+
+        #expect(fixture.store.selectedID == (retainsFilter ? newestLink : newestID))
+        #expect(fixture.store.selectedID != oldSelection)
+        #expect(fixture.store.selectedID == fixture.store.filteredItems.first?.id)
+        #expect(fixture.store.selectedIDs.count == 1)
+        #expect(fixture.store.markedIDs.isEmpty)
+        #expect(fixture.store.selectedItem?.content == (retainsFilter ? "https://example.com/newer" : newestText))
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [false, true])
+    func reopeningPreservesUserSelectionDuringReload(usesKeyboard: Bool) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        for text in ["Older match", "Newer match", "Latest entry"] { await fixture.copy(text) }
+        fixture.store.query = "match"
+        await fixture.store.flush()
+        let chosenID = try #require(fixture.store.items.last?.id)
+
+        fixture.store.prepareForPresentation()
+        if usesKeyboard {
+            fixture.store.moveSelection(by: 1)
+        } else {
+            fixture.store.select(chosenID)
+        }
+        await fixture.store.flush()
+
+        #expect(fixture.store.selectedID == chosenID)
+        #expect(fixture.store.selectedIDs == [chosenID])
+        await fixture.cleanUp()
+    }
+
     @Test func filterMemoryStartsOnDismissalAndExpiresOnReopening() async throws {
         let suite = "PasketFilterTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -331,6 +389,7 @@ struct ClipboardTests {
         await fixture.store.flush()
         #expect(fixture.store.filter == .all)
         #expect(fixture.store.filteredItems.count == 2)
+        #expect(fixture.store.selectedID == fixture.store.filteredItems.first?.id)
         await fixture.cleanUp()
     }
 

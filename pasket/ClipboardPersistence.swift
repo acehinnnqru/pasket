@@ -124,18 +124,19 @@ actor ClipboardPersistence {
 
     func page(query: String = "", filter: ClipboardFilter = .all, limit: Int = 50, offset: Int = 0) throws -> ClipboardPage {
         let database = try openDatabase()
-        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let search = ClipboardSearch(query)
         var predicates: [String] = []
         var values: [ClipboardDatabase.Value] = []
         if filter == .images { predicates.append("has_image_preview = 1") }
         else if let kind = filter.kind { predicates.append("kind = ?"); values.append(.text(kind.rawValue)) }
         if !search.isEmpty {
-            predicates.append("(pasket_contains(title, ?) OR pasket_contains(content, ?) OR pasket_contains(source_name, ?) OR pasket_contains(source_bundle, ?))")
-            values.append(contentsOf: Array(repeating: .text(search), count: 4))
+            try database.setSearch(search)
+            predicates.append("pasket_search_rank(title, content, source_name, source_bundle) > 0")
         }
         let clause = predicates.isEmpty ? "" : " WHERE " + predicates.joined(separator: " AND ")
+        let ranking = search.isEmpty ? "" : "pasket_search_rank(title, content, source_name, source_bundle) DESC, "
         var items: [ClipboardItem] = []
-        try database.query("SELECT summary FROM items" + clause + " ORDER BY copied_at DESC, position DESC, id LIMIT ? OFFSET ?",
+        try database.query("SELECT summary FROM items" + clause + " ORDER BY " + ranking + "copied_at DESC, position DESC, id LIMIT ? OFFSET ?",
                            values + [.integer(max(0, limit)), .integer(max(0, offset))]) {
             items.append(try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0)))
         }

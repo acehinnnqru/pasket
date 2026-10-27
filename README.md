@@ -24,7 +24,9 @@
 ### Find what you copied
 
 Keep text, links, email addresses, images, and file references in one searchable
-history. Search saved text or the source app, filter by content type, and browse
+history. Search saved text or the source app with multiple keywords or short character sequences
+(`hlo` finds `hello`). Continuous matches come first, then word initials (`lp` finds
+`LOKI_PHRASE`), then other character sequences with smaller gaps first. Filter by content type and browse
 entries grouped by date. Preview text and images before choosing what to paste.
 
 Open Pasket from the menu bar or your own shortcut. Start typing to search, use

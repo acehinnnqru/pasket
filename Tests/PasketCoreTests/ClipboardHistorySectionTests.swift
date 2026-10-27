@@ -3,6 +3,17 @@ import Testing
 @testable import PasketCore
 
 struct ClipboardHistorySectionTests {
+    @Test func searchPreservesRelevanceOrderAcrossDates() {
+        let now = Date()
+        let items = [ClipboardItem.text("Exact match", source: .unknown, at: now.addingTimeInterval(-172_800)),
+                     ClipboardItem.text("Fuzzy match", source: .unknown, at: now)]
+        let sections = ClipboardHistorySection.grouping(items, at: now, query: "match")
+        #expect(sections.map(\.period) == [.searchResults])
+        #expect(sections.flatMap(\.items).map(\.id) == items.map(\.id))
+        #expect(ClipboardHistorySection.grouping([], query: "match").isEmpty)
+        #expect(ClipboardHistorySection.grouping(items, at: now, query: " \n").map(\.period) == [.today, .sevenDays])
+    }
+
     private func calendar(in timeZone: String = "Asia/Shanghai") -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: timeZone)!

@@ -119,13 +119,14 @@ final class ClipboardStore {
 
     var filteredItems: [ClipboardItem] {
         if !isDebugMode { return items }
-        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return displayedItems.filter { item in
-            (filter == .images ? item.hasImagePreview : filter.kind == nil || filter.kind == item.kind)
-                && (search.isEmpty || [item.title, item.content, item.source.name, item.source.bundleIdentifier ?? ""].contains {
-                    $0.localizedStandardContains(search)
-                })
-        }
+        let search = ClipboardSearch(query)
+        return displayedItems.enumerated().compactMap { offset, item -> (item: ClipboardItem, rank: Double, offset: Int)? in
+            guard filter == .images ? item.hasImagePreview : filter.kind == nil || filter.kind == item.kind else { return nil }
+            let rank = search.rank(item)
+            return rank > 0 ? (item, rank, offset) : nil
+        }.sorted {
+            $0.rank != $1.rank ? $0.rank > $1.rank : $0.offset < $1.offset
+        }.map(\.item)
     }
 
     var selectedItem: ClipboardItem? {

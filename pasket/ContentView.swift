@@ -437,7 +437,7 @@ struct ContentView: View {
     }
 
     private func historyList(at date: Date) -> some View {
-        let sections = ClipboardHistorySection.grouping(store.filteredItems, at: date)
+        let sections = ClipboardHistorySection.grouping(store.filteredItems, at: date, query: store.query)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {

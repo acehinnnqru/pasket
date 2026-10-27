@@ -408,11 +408,14 @@ struct ClipboardTests {
         fixture.store.setDebugMode(true)
         #expect(Set(fixture.store.displayedItems.map(\.kind)) == Set(ClipboardKind.allCases))
         let sections = ClipboardHistorySection.grouping(fixture.store.displayedItems)
-        #expect(sections.map(\.period) == ClipboardHistoryPeriod.allCases)
+        #expect(sections.map(\.period) == [.today, .yesterday, .sevenDays, .thirtyDays, .older])
         #expect(sections.allSatisfy { $0.items.count == 2 })
         fixture.store.query = "example.com"
         #expect(!fixture.store.filteredItems.isEmpty)
         #expect(fixture.store.filteredItems.allSatisfy { [.email, .link].contains($0.kind) })
+        fixture.store.query = "safari exmple"
+        #expect(fixture.store.filteredItems.count == 3)
+        #expect(fixture.store.filteredItems.allSatisfy { $0.kind == .link && $0.source.name == "Safari" })
         fixture.store.prepareForPresentation()
         fixture.store.filter = .images
         fixture.store.reconcileSelection()
@@ -465,6 +468,81 @@ struct ClipboardTests {
         await fixture.restart()
         #expect(fixture.store.items.map(\.id) == [image.id])
         #expect(try Data(contentsOf: legacyURL) == original)
+        await fixture.cleanUp()
+    }
+
+    @Test func fuzzySearchRanksAllPagesBeforeLoadingAndKeepsRecencyWithinEachRank() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let now = Date()
+        let fuzzy = (0..<55).map { index in
+            ClipboardItem.text(String(repeating: "z", count: 700) + " hello world \(index)",
+                               source: .unknown, at: now.addingTimeInterval(-Double(index)))
+        }
+        let words = ClipboardItem.text("world before hlo", source: .unknown, at: now.addingTimeInterval(-86_400))
+        let phrase = ClipboardItem.text("hlo world", source: .unknown, at: now.addingTimeInterval(-172_800))
+        let distant = ClipboardItem.text("hxxxxlxxxxo world", source: .unknown, at: now)
+        try await persistence.save(ClipboardHistory(items: [distant] + fuzzy + [words, phrase]))
+        await fixture.start()
+        #expect(!fixture.store.items.contains { $0.id == phrase.id })
+        fixture.store.query = "hlo world"
+        await fixture.store.flush()
+        let expected = [phrase, words] + fuzzy + [distant]
+        #expect(fixture.store.items.map(\.id) == Array(expected.prefix(50)).map(\.id))
+        #expect(fixture.store.matchingCount == 58)
+        #expect(fixture.store.hasMoreItems)
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.map(\.id) == expected.map(\.id))
+        #expect(!fixture.store.hasMoreItems)
+        fixture.store.select(fuzzy.last!.id)
+        await fixture.store.loadSelection()
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.pasteboard.string(forType: .string) == fuzzy.last!.content)
+        await fixture.store.flush()
+        #expect(fixture.store.items.prefix(3).map(\.id) == [phrase.id, words.id, fuzzy.last!.id])
+        fixture.store.query = " \t\n"
+        await fixture.store.flush()
+        #expect(fixture.store.items.first?.id == fuzzy.last!.id)
+        #expect(fixture.store.matchingCount == 58)
+        await fixture.cleanUp()
+    }
+
+    @Test func wordInitialsOutrankTighterSubsequencesAcrossDatabasePages() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let now = Date()
+        let contents = ["lxxxxp", "lxxp", "lxp", "**LOKI_PHRASE**", "help"]
+        let items = contents.enumerated().map { index, content in
+            ClipboardItem.text(content, source: .unknown, at: now.addingTimeInterval(-Double(index) * 86_400))
+        }
+        try await persistence.save(ClipboardHistory(items: items))
+        var loaded: [UUID] = []
+        for offset in stride(from: 0, to: items.count, by: 2) {
+            let page = try await persistence.page(query: "lp", limit: 2, offset: offset)
+            #expect(page.matchingCount == 5)
+            loaded.append(contentsOf: page.items.map(\.id))
+        }
+        #expect(loaded == items.reversed().map(\.id))
+        await fixture.start()
+        fixture.store.query = "lp"
+        await fixture.store.flush()
+        #expect(fixture.store.filteredItems.map(\.id) == loaded)
+        await fixture.cleanUp()
+    }
+
+    @Test func keywordSearchCombinesSourceAndBodyAndRespectsTypeFilters() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let source = ClipboardSource(name: "Safari", bundleIdentifier: "com.apple.Safari")
+        let text = ClipboardItem.text("Quarterly report", source: source, at: Date())
+        let link = ClipboardItem.text("https://example.com/report", source: source, at: Date())
+        try await persistence.save(ClipboardHistory(items: [link, text]))
+        let page = try await persistence.page(query: "safari rpt", filter: .links)
+        #expect(page.items.map(\.id) == [link.id])
+        #expect(page.matchingCount == 1)
+        #expect(page.totalCount == 2)
+        #expect(try await persistence.page(query: "com.apple report").matchingCount == 2)
+        #expect(try await persistence.page(query: "safari absent").matchingCount == 0)
         await fixture.cleanUp()
     }
 

@@ -147,6 +147,7 @@ nonisolated enum ClipboardHistoryPeriod: String, CaseIterable, Identifiable, Sen
     case sevenDays = "7 Days"
     case thirtyDays = "30 Days"
     case older = "Older"
+    case searchResults = "Search Results"
 
     var id: Self { self }
 }
@@ -157,7 +158,10 @@ nonisolated struct ClipboardHistorySection: Identifiable, Sendable {
     var id: ClipboardHistoryPeriod { period }
 
     static func grouping(_ items: [ClipboardItem], at date: Date = .now,
-                         calendar: Calendar = .current) -> [Self] {
+                         calendar: Calendar = .current, query: String = "") -> [Self] {
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return items.isEmpty ? [] : [Self(period: .searchResults, items: items)]
+        }
         let today = calendar.startOfDay(for: date)
         let grouped = Dictionary(grouping: items) { item -> ClipboardHistoryPeriod in
             let day = calendar.startOfDay(for: item.copiedAt)

@@ -52,6 +52,7 @@ save automatically for the next launch.
   the search field focused, so you can continue typing immediately.
 - History is grouped by local calendar dates under **Today**, **Yesterday**, **7 Days** (2–7 days
   ago), and **30 Days** (8–30 days ago). Earlier entries appear under **Older**; empty groups are hidden.
+  While searching, a single **Search Results** group preserves relevance order across dates.
 - Click to select one entry, Command-click to toggle individual entries, and Shift-click to select
   a range across date groups. Command-Shift-click adds a range to existing selections. Shift-Up/Down
   extends or shrinks a range; plain arrows end the keyboard range while preserving mouse selections
@@ -272,7 +273,19 @@ used without third-party dependencies or network services. The list initially re
 with at most 500 characters of text per row, and loads further batches as you scroll or move past
 the last loaded row with the keyboard. Selection and copying fetch the complete saved record.
 Search runs against all saved records and their complete bodies, including records outside the
-loaded pages, with the same Unicode-aware literal substring matching used previously.
+loaded pages. Whitespace separates keywords; every keyword must match, in any order, across the
+title, body, source app name, or bundle identifier. Literal matching remains Unicode-aware and
+ignores case and diacritics. Keywords also support ordered subsequence matching (for example,
+`hlo` matches `hello`) without a hard limit on skipped characters. Word initials recognize
+whitespace, punctuation (including underscores and hyphens), camelCase, and acronym boundaries:
+`lp` matches `LOKI_PHRASE` or `lokiPhrase`, and `xp` matches `XMLParser`. Initials may skip words.
+A subsequence stays within one field; gaps count Unicode grapheme clusters after text folding.
+Whole-query literal matches rank first, followed by records containing every keyword literally,
+then records matching the remaining keywords by word initials. Ordinary subsequences follow,
+ordered by the sum of the smallest gaps for keywords requiring ordinary subsequence matching.
+Each keyword uses its tightest matching span across fields. Equal scores keep newest copies first,
+and ranking happens before pagination. Search adds no persistent index or schema changes; matching runs on
+the existing text, with a query matcher held only for the database connection's lifetime.
 
 Collection, deletion, copy-time updates, and settings changes update individual database records
 in serialized transactions. Retention limits apply to the complete database. File bookmarks are

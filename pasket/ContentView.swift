@@ -191,12 +191,13 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                     PasketPickerMenu(title: "Content type options", selection: store.filter,
                                      options: ClipboardFilter.allCases, optionTitle: { $0.title },
-                                     optionSymbol: { $0.symbol }, width: filterControlFrame.width, onSelect: { filter in
+                                     optionSymbol: { $0.symbol }, width: filterControlFrame.width,
+                                     controlHeight: filterControlFrame.height, onSelect: { filter in
                         store.filter = filter
                         dismissFilterMenu()
                     }, onDismiss: dismissFilterMenu)
-                    .padding(.top, filterControlFrame.maxY + 4)
-                    .padding(.trailing, 14)
+                    .padding(.top, filterControlFrame.maxY + PasketPickerLayout.triggerGap)
+                    .padding(.trailing, 14 - PasketShape.menuInset)
                 }
             }
         }
@@ -959,6 +960,17 @@ private struct WindowKeyStateObserver: NSViewRepresentable {
     }
 }
 
+private enum PasketPickerLayout {
+    static let optionGap: CGFloat = 2
+    static let triggerGap: CGFloat = 4
+    static let contentInset: CGFloat = 14
+
+    static func menuHeight(optionCount: Int, controlHeight: CGFloat) -> CGFloat {
+        CGFloat(optionCount) * controlHeight + CGFloat(max(0, optionCount - 1)) * optionGap
+            + PasketShape.menuInset * 2
+    }
+}
+
 private struct PasketPickerMenu<Selection: Hashable>: View {
     let title: String
     let selection: Selection
@@ -967,14 +979,18 @@ private struct PasketPickerMenu<Selection: Hashable>: View {
     var optionSymbol: (Selection) -> String? = { _ in nil }
     var valueAlignment: Alignment = .leading
     let width: CGFloat
+    let controlHeight: CGFloat
+    var opensUpward = false
     var onSelect: (Selection) -> Void
     var onDismiss: () -> Void
 
     @State private var highlightedOption: Selection?
+    @State private var isExpanded = false
     @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: PasketPickerLayout.optionGap) {
             ForEach(options, id: \.self) { option in
                 Button {
                     onSelect(option)
@@ -983,7 +999,7 @@ private struct PasketPickerMenu<Selection: Hashable>: View {
                         if let symbol = optionSymbol(option) {
                             Image(systemName: symbol)
                                 .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(selection == option ? Color.accentColor : .secondary)
+                                .foregroundStyle(selection == option || highlightedOption == option ? Color.accentColor : .secondary)
                                 .frame(width: 16)
                                 .accessibilityHidden(true)
                         }
@@ -1000,7 +1016,8 @@ private struct PasketPickerMenu<Selection: Hashable>: View {
                     }
                 }
                 .buttonStyle(PasketMenuItemStyle(isHighlighted: highlightedOption == option,
-                                                isSelected: selection == option))
+                                                isSelected: selection == option,
+                                                pickerHeight: controlHeight))
                 .focusable(false)
                 .onHover { hovering in
                     if hovering {
@@ -1011,15 +1028,23 @@ private struct PasketPickerMenu<Selection: Hashable>: View {
                 }
             }
         }
-        .padding(PasketShape.menuInset)
         .frame(width: width)
+        .padding(PasketShape.menuInset)
         .modifier(ClipboardMenuSurface())
+        .scaleEffect(x: 1, y: isExpanded || reduceMotion ? 1 : 0.94,
+                     anchor: opensUpward ? .bottom : .top)
+        .offset(y: isExpanded || reduceMotion ? 0 : opensUpward ? 6 : -6)
+        .opacity(isExpanded ? 1 : 0)
+        .allowsHitTesting(isExpanded)
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
         .onAppear {
             highlightedOption = selection
             isFocused = true
+            withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.88)) {
+                isExpanded = true
+            }
         }
         .onKeyPress(.downArrow) {
             moveHighlight(by: 1)
@@ -1048,20 +1073,28 @@ private struct PasketPickerMenu<Selection: Hashable>: View {
 private struct PasketMenuItemStyle: ButtonStyle {
     var isHighlighted: Bool
     var isSelected = false
+    var pickerHeight: CGFloat? = nil
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        let selectionFill = Color.accentColor.opacity(isSelected ? 0.08 : 0)
+        let isPicker = pickerHeight != nil
+        let isInteracting = isEnabled && (isHighlighted || configuration.isPressed)
+        let interactionFill = (isPicker ? Color.accentColor : .primary).opacity(
+            isEnabled ? (configuration.isPressed ? (isPicker ? 0.18 : 0.08)
+                : isHighlighted ? (isPicker ? 0.12 : 0.04) : 0) : 0
+        )
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(configuration.role == .destructive ? Color.red : isSelected ? .accentColor : .primary)
-            .padding(.horizontal, 8)
-            .frame(minHeight: 32)
+            .foregroundStyle(configuration.role == .destructive ? Color.red
+                : isSelected || (isPicker && isInteracting) ? .accentColor : .primary)
+            .padding(.horizontal, pickerHeight == nil ? 8 : PasketPickerLayout.contentInset)
+            .frame(minHeight: pickerHeight == nil ? 32 : nil)
+            .frame(height: pickerHeight)
             .contentShape(PasketShape.control)
             .background {
-                PasketShape.control.fill(Color.accentColor.opacity(isSelected ? 0.08 : 0))
-                PasketShape.control.fill(Color.primary.opacity(
-                    isEnabled ? (configuration.isPressed ? 0.08 : isHighlighted ? 0.04 : 0) : 0
-                ))
+                PasketShape.control.fill(selectionFill)
+                PasketShape.control.fill(interactionFill)
             }
             .opacity(isEnabled ? 1 : 0.35)
             .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -1511,6 +1544,7 @@ private struct PasketPickerLabel: View {
     let isExpanded: Bool
     var width: CGFloat? = nil
     var valueAlignment: Alignment = .leading
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1532,6 +1566,7 @@ private struct PasketPickerLabel: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isExpanded)
                 .frame(width: 10)
                 .accessibilityHidden(true)
         }
@@ -1585,11 +1620,12 @@ struct PasketPicker<Selection: Hashable>: View {
         .anchorPreference(key: PasketPickerPresentationKey.self, value: .bounds) { bounds in
             guard isPresented else { return nil }
             return PasketPickerPresentation(bounds: bounds,
-                                             height: CGFloat(options.count) * 34 - 2 + PasketShape.menuInset * 2,
-                                             dismiss: { isPresented = false }) { width in
+                                             optionCount: options.count,
+                                             dismiss: { isPresented = false }) { size, opensUpward in
                 AnyView(PasketPickerMenu(title: title, selection: selection, options: options,
                                          optionTitle: optionTitle, valueAlignment: valueAlignment,
-                                         width: width, onSelect: { option in
+                                         width: size.width, controlHeight: size.height,
+                                         opensUpward: opensUpward, onSelect: { option in
                     selection = option
                     isPresented = false
                 }, onDismiss: { isPresented = false }))
@@ -1600,9 +1636,9 @@ struct PasketPicker<Selection: Hashable>: View {
 
 private struct PasketPickerPresentation {
     let bounds: Anchor<CGRect>
-    let height: CGFloat
+    let optionCount: Int
     var dismiss: () -> Void
-    var menu: (CGFloat) -> AnyView
+    var menu: (CGSize, Bool) -> AnyView
 }
 
 private struct PasketPickerPresentationKey: PreferenceKey {
@@ -1621,16 +1657,20 @@ struct PasketPickerOverlay: ViewModifier {
                 GeometryReader { geometry in
                     let bounds = geometry[presentation.bounds]
                     let inset = PasketShape.menuInset
-                    let below = bounds.maxY + 4
-                    let above = bounds.minY - presentation.height - 4
-                    let y = below + presentation.height <= geometry.size.height - inset ? below : above
+                    let menuHeight = PasketPickerLayout.menuHeight(optionCount: presentation.optionCount,
+                                                                   controlHeight: bounds.height)
+                    let below = bounds.maxY + PasketPickerLayout.triggerGap
+                    let above = bounds.minY - menuHeight - PasketPickerLayout.triggerGap
+                    let opensUpward = below + menuHeight > geometry.size.height - inset
+                    let y = opensUpward ? above : below
+                    let menuWidth = bounds.width + inset * 2
                     ZStack(alignment: .topLeading) {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture(perform: presentation.dismiss)
                             .accessibilityHidden(true)
-                        presentation.menu(bounds.width)
-                            .offset(x: max(inset, min(bounds.minX, geometry.size.width - bounds.width - inset)),
+                        presentation.menu(bounds.size, opensUpward)
+                            .offset(x: max(inset, min(bounds.minX - inset, geometry.size.width - menuWidth - inset)),
                                     y: max(inset, y))
                     }
                 }

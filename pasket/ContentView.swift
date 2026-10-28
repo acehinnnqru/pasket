@@ -650,7 +650,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 28)
-        .background(shaded ? Color.primary.opacity(0.035) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        .background(shaded ? Color.primary.opacity(0.035) : .clear, in: PasketShape.control)
     }
 
     private var collectionControl: some View {
@@ -1009,11 +1009,11 @@ private struct ClipboardFilterMenu: View {
                     .foregroundStyle(selection == filter ? Color.accentColor : .primary)
                     .padding(.horizontal, 8)
                     .frame(minHeight: 32)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(PasketShape.control)
                     .background {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        PasketShape.control
                             .fill(Color.accentColor.opacity(selection == filter ? 0.08 : 0))
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        PasketShape.control
                             .fill(.primary.opacity(highlightedFilter == filter ? 0.04 : 0))
                     }
                 }
@@ -1029,7 +1029,7 @@ private struct ClipboardFilterMenu: View {
                 .accessibilityAddTraits(selection == filter ? .isSelected : [])
             }
         }
-        .padding(6)
+        .padding(PasketShape.menuInset)
         .frame(width: width)
         .modifier(ClipboardMenuSurface())
         .focusable()
@@ -1069,11 +1069,11 @@ private struct ClipboardMenuSurface: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                PasketShape.menu
                     .fill(.regularMaterial)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                PasketShape.menu
                     .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
                     .allowsHitTesting(false)
             }
@@ -1156,15 +1156,15 @@ private struct ClipboardPasteActionsMenu: View {
                     }
                     .font(.system(size: 13, weight: .medium))
                     .padding(.horizontal, 8).frame(minHeight: 32)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-                    .background(RoundedRectangle(cornerRadius: 6).fill(.primary.opacity(highlighted == row ? 0.05 : 0)))
+                    .contentShape(PasketShape.control)
+                    .background(PasketShape.control.fill(.primary.opacity(highlighted == row ? 0.05 : 0)))
                 }
                 .buttonStyle(.plain).focusable(false)
                 .disabled(!enabledRows.contains(row))
                 .onHover { if $0, enabledRows.contains(row) { highlighted = row } }
             }
         }
-        .padding(6).frame(width: 272)
+        .padding(PasketShape.menuInset).frame(width: 272)
         .modifier(ClipboardMenuSurface())
         .focusable().focusEffectDisabled().focused($isFocused)
         .onAppear { highlighted = enabledRows.first ?? .newline; isFocused = true }
@@ -1259,9 +1259,9 @@ private struct ClipboardMoreActionsMenu: View {
                     .foregroundStyle(action == .settings ? .primary : Color.red)
                     .padding(.horizontal, 8)
                     .frame(minHeight: 32)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(PasketShape.control)
                     .background {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        PasketShape.control
                             .fill(.primary.opacity(highlightedAction == action && enabledActions.contains(action) ? 0.04 : 0))
                     }
                     .opacity(enabledActions.contains(action) ? 1 : 0.35)
@@ -1280,7 +1280,7 @@ private struct ClipboardMoreActionsMenu: View {
                 .accessibilityIdentifier(action.accessibilityIdentifier)
             }
         }
-        .padding(6)
+        .padding(PasketShape.menuInset)
         .frame(width: 208)
         .modifier(ClipboardMenuSurface())
         .focusable()
@@ -1350,7 +1350,7 @@ private struct HistoryRow: View {
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
                 .frame(width: 30, height: 30)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .background(.quaternary.opacity(0.5), in: PasketShape.control)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true
@@ -1367,21 +1367,21 @@ private struct HistoryRow: View {
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            PasketShape.control
                 .fill(Color.primary.opacity(0.055))
                 .opacity(isHovered && !isSelected ? 1 : 0)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
                 .animation(nil, value: isSelected)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            PasketShape.control
                 .fill(Color.accentColor.opacity(isSelected ? 0.12 : 0))
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            PasketShape.control
                 .fill(Color.accentColor.opacity(isFocused && isMarked ? 0.12 : 0))
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            PasketShape.control
                 .strokeBorder(Color.accentColor.opacity(isFocused ? 0.65 : 0), lineWidth: 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(PasketShape.control)
         .onHover { isHovered = $0 }
     }
 }
@@ -1426,6 +1426,20 @@ private struct ClipboardImagePreview: View {
     }
 }
 
+private enum PasketShape {
+    static let controlRadius: CGFloat = 8
+    static let menuInset: CGFloat = 6
+
+    static var control: RoundedRectangle {
+        RoundedRectangle(cornerRadius: controlRadius, style: .continuous)
+    }
+
+    static var menu: RoundedRectangle {
+        // Keep the outer curve concentric with the inset menu items.
+        RoundedRectangle(cornerRadius: controlRadius + menuInset, style: .continuous)
+    }
+}
+
 struct PasketButtonStyle: ButtonStyle {
     var isProminent = false
     var isActive = false
@@ -1450,15 +1464,15 @@ struct PasketButtonStyle: ButtonStyle {
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                PasketShape.control
                     .fill(tint.opacity(backgroundOpacity))
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                PasketShape.control
                     .strokeBorder(tint.opacity(borderOpacity))
                     .allowsHitTesting(false)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .contentShape(PasketShape.control)
             .opacity(isEnabled ? 1 : 0.35)
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)

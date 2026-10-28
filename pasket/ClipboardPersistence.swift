@@ -67,6 +67,27 @@ actor ClipboardPersistence {
         try settings(in: openDatabase())
     }
 
+    func historicalCopyCounts(timeZone: TimeZone = .current) throws -> [String: Int] {
+        var counts: [String: Int] = [:]
+        // Read legacy dates before importing, since import can enforce saved retention limits.
+        if !FileManager.default.fileExists(atPath: databaseURL.path),
+           FileManager.default.fileExists(atPath: historyURL.path) {
+            let history = try JSONDecoder().decode(ClipboardHistory.self, from: Data(contentsOf: historyURL))
+            try validate(history)
+            for item in history.items {
+                counts[HistoryStatistics.dayKey(item.copiedAt, timeZone: timeZone), default: 0] += 1
+            }
+            return counts
+        }
+        // Scan dates only, across the entire database rather than the visible page.
+        let database = try openDatabase()
+        try database.query("SELECT copied_at FROM items") { row in
+            let date = Date(timeIntervalSinceReferenceDate: ClipboardDatabase.real(row, 0))
+            counts[HistoryStatistics.dayKey(date, timeZone: timeZone), default: 0] += 1
+        }
+        return counts
+    }
+
     // Full snapshots are used by importers and fixtures; normal collection uses apply(_:).
     func save(_ history: ClipboardHistory) throws {
         try validate(history)

@@ -2,10 +2,29 @@ import Carbon
 import Charts
 import SwiftUI
 
+private enum StatisticsPage: String, CaseIterable {
+    case copies = "Copies"
+    case historyOpens = "History opens"
+
+    var unit: String { self == .copies ? "copies" : "opens" }
+    var chartID: String { self == .copies ? "copiesChart" : "historyOpensChart" }
+    var explanation: String {
+        self == .copies ? "Each captured copy or successful copy from history."
+            : "Each time the history panel becomes visible."
+    }
+    var note: String {
+        self == .copies
+            ? "Counts are saved on this Mac by local date. The initial estimate counts each saved history item once on its most recent copy date; earlier repeats and deleted items cannot be recovered. New copies count every time, including repeats. Copying or pasting a group from history counts once; each queue item counts separately. Paused, excluded, or missed clipboard changes are not counted. Clearing history does not reset these counts."
+            : "Counts are saved on this Mac by local date, starting with this version. Launch opens are included. Bringing an already visible panel forward does not add an open."
+    }
+}
+
 struct HistoryStatisticsWindowView: View {
     var statistics: HistoryStatistics
+    var copyStatistics: HistoryStatistics
     var onClose: () -> Void
     @State private var isPickerPresented = false
+    @State private var page = StatisticsPage.copies
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,7 +37,7 @@ struct HistoryStatisticsWindowView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Statistics")
                             .font(.system(size: 16, weight: .medium))
-                        Text("Your daily history usage.")
+                        Text("Your daily clipboard usage.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
@@ -34,7 +53,30 @@ struct HistoryStatisticsWindowView: View {
             }
             .padding(.trailing, 14)
             Divider().opacity(0.5)
-            HistoryStatisticsView(statistics: statistics, isPickerPresented: $isPickerPresented)
+            HStack(spacing: 10) {
+                ForEach(StatisticsPage.allCases, id: \.self) { option in
+                    Button(option.rawValue) {
+                        isPickerPresented = false
+                        page = option
+                    }
+                    .buttonStyle(PasketButtonStyle(isActive: page == option))
+                    .accessibilityAddTraits(page == option ? [.isSelected] : [])
+                    .accessibilityIdentifier(option == .copies ? "copiesStatisticsPage" : "historyOpensStatisticsPage")
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            if page == .copies && !copyStatistics.isInitialized {
+                Text("Copy statistics will appear after clipboard history loads successfully.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HistoryStatisticsView(statistics: page == .copies ? copyStatistics : statistics,
+                                      isPickerPresented: $isPickerPresented, page: page)
+            }
         }
         .frame(width: 640, height: 600)
         .modifier(PasketSurface())
@@ -54,9 +96,10 @@ struct HistoryStatisticsWindowView: View {
     }
 }
 
-struct HistoryStatisticsView: View {
+private struct HistoryStatisticsView: View {
     var statistics: HistoryStatistics
     @Binding var isPickerPresented: Bool
+    var page: StatisticsPage
     @State private var dayCount = 7
     @State private var endDate: Date?
 
@@ -68,9 +111,9 @@ struct HistoryStatisticsView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("History opens")
+                            Text(page.rawValue)
                                 .font(.headline)
-                            Text("Each time the history panel becomes visible.")
+                            Text(page.explanation)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -88,7 +131,7 @@ struct HistoryStatisticsView: View {
                         metric("Selected period", value: days.reduce(0) { $0 + $1.count })
                         Spacer()
                         metric("Total", value: statistics.totalCount)
-                            .help("All history opens recorded on this Mac")
+                            .help(page == .copies ? "All recorded copies, including the initial history estimate" : "All history opens recorded on this Mac")
                     }
 
                     HStack {
@@ -116,12 +159,12 @@ struct HistoryStatisticsView: View {
                     Chart(days) { day in
                         BarMark(
                             x: .value("Date", day.date, unit: .day),
-                            y: .value("Opens", day.count)
+                            y: .value(page.rawValue, day.count)
                         )
                         .foregroundStyle(Color.accentColor)
                         .cornerRadius(3)
                         .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
-                        .accessibilityValue("\(day.count) opens")
+                        .accessibilityValue("\(day.count) \(page.unit)")
                     }
                     .chartYScale(domain: 0...max(1, days.map(\.count).max() ?? 0))
                     .chartYAxis {
@@ -133,10 +176,10 @@ struct HistoryStatisticsView: View {
                         }
                     }
                     .frame(height: 150)
-                    .accessibilityIdentifier("historyOpensChart")
+                    .accessibilityIdentifier(page.chartID)
 
                     if days.allSatisfy({ $0.count == 0 }) {
-                        Text("No history opens recorded in this period.")
+                        Text(page == .copies ? "No copies recorded in this period." : "No history opens recorded in this period.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -154,7 +197,7 @@ struct HistoryStatisticsView: View {
                         }
                     }
 
-                    Text("Counts are saved on this Mac by local date, starting with this version. Launch opens are included. Bringing an already visible panel forward does not add an open.")
+                    Text(page.note)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

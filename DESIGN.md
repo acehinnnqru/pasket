@@ -125,6 +125,10 @@ The recording area's 64-point height remains a deliberate content presentation s
 Setup section introductions may use 18-point headings to explain a step; they are not
 ordinary setting labels. Statistics retains its chart-oriented content layout and
 18-point content inset, while its navigation actions use the standard button style.
+Its Copies and History opens page controls reuse `PasketButtonStyle(isActive:)`, with
+selected accessibility traits, a 10-point gap, an 18-point horizontal inset, and a
+16-point top inset. Both pages share the same summary, date controls, chart, and daily list
+layout; the page controls stay above the scrolling content for stable navigation.
 
 ## Typography and control sizing
 

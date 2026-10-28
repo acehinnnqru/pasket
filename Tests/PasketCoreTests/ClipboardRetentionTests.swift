@@ -42,7 +42,7 @@ struct ClipboardRetentionTests {
         try await fixture.persistence.save(ClipboardHistory(items: [file], retention: settings))
         let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-trigger-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         defer { store.stop() }
         #expect(store.totalCount == 1)
@@ -76,7 +76,7 @@ struct ClipboardRetentionTests {
         try await fixture.persistence.save(ClipboardHistory(items: [first, second], retention: settings))
         let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-cooldown-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         defer { store.stop() }
         let closedAt = Date()
@@ -108,7 +108,7 @@ struct ClipboardRetentionTests {
         try await fixture.persistence.save(ClipboardHistory(items: [file], retention: unlimited))
         let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-enabled-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         defer { store.stop() }
         let closedAt = Date()
@@ -145,7 +145,7 @@ struct ClipboardRetentionTests {
         try await fixture.persistence.save(ClipboardHistory(items: [file], retention: settings))
         let pasteboard = NSPasteboard(name: .init("pasket-auto-recycle-restored-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         defer { store.stop() }
         store.prepareForPresentation()
@@ -175,7 +175,7 @@ struct ClipboardRetentionTests {
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString("Current clipboard", forType: .string)
         let changeCount = pasteboard.changeCount
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         defer { store.stop() }
         #expect(store.items.count == 50)
@@ -334,7 +334,7 @@ struct ClipboardRetentionTests {
         try JSONEncoder().encode(history).write(to: fixture.directory.appendingPathComponent("history.json"))
         let pasteboard = NSPasteboard(name: .init("pasket-retention-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         #expect(store.needsRetentionReview)
         #expect(store.totalCount == 1)
@@ -365,7 +365,7 @@ struct ClipboardRetentionTests {
         let pasteboard = NSPasteboard(name: .init("pasket-retention-\(UUID())"))
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString("Current clipboard", forType: .string)
-        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard)
+        let store = ClipboardStore(directory: fixture.directory, pasteboard: pasteboard, statisticsDefaults: fixture.defaults)
         await store.start()
         let database = try ClipboardDatabase(url: fixture.directory.appendingPathComponent("history.sqlite"))
         try database.execute("UPDATE items SET copied_at = ?", [.real(Date().addingTimeInterval(-61 * 86_400).timeIntervalSinceReferenceDate)])
@@ -433,8 +433,11 @@ struct ClipboardRetentionTests {
     let directory: URL
     let original: URL
     let persistence: ClipboardPersistence
+    let defaults: UserDefaults
+    private let suite = "RetentionStatisticsTests.\(UUID())"
 
     init() throws {
+        defaults = try #require(UserDefaults(suiteName: suite))
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("pasket-retention-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         original = directory.appendingPathComponent("original.txt")
@@ -442,5 +445,8 @@ struct ClipboardRetentionTests {
         persistence = ClipboardPersistence(directory: directory)
     }
 
-    func remove() { try? FileManager.default.removeItem(at: directory) }
+    func remove() {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: directory)
+    }
 }

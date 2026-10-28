@@ -5,6 +5,79 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func copyStatisticsCountRepeatedEventsAndSurviveHistoryCleanup() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        #expect(fixture.store.copyStatistics.isInitialized)
+        #expect(fixture.store.copyStatistics.totalCount == 0)
+        await fixture.copy("Repeated content")
+        await fixture.copy("Repeated content")
+        #expect(fixture.store.totalCount == 1)
+        #expect(fixture.store.copyStatistics.totalCount == 2)
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        #expect(fixture.store.copyStatistics.totalCount == 2)
+        let id = try #require(fixture.store.items.first?.id)
+        for _ in 0..<2 {
+            #expect(await fixture.store.copyItem(id))
+            fixture.store.pollClipboard()
+            await fixture.store.flush()
+        }
+        #expect(fixture.store.copyStatistics.totalCount == 4)
+        #expect(await fixture.store.copyItem(id, isCurrent: { false }) == false)
+        fixture.store.setPaused(true)
+        await fixture.copy("Paused copy")
+        #expect(fixture.store.copyStatistics.totalCount == 4)
+        fixture.store.setPaused(false)
+        fixture.store.clearHistory()
+        await fixture.restart()
+        #expect(fixture.store.totalCount == 0)
+        #expect(fixture.store.copyStatistics.totalCount == 4)
+        await fixture.copy("After restart")
+        #expect(fixture.store.copyStatistics.totalCount == 5)
+        await fixture.cleanUp()
+    }
+
+    @Test func copyBaselineScansAllDatesOnceBeforeStartupRetention() async throws {
+        let fixture = try Fixture()
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let oldDate = Date().addingTimeInterval(-100 * 86400)
+        let items = (0..<60).map { ClipboardItem.text("Old item \($0)", source: .unknown, at: oldDate) }
+        let unlimited = ClipboardRetention(maximumItems: nil, maximumTextBytes: nil,
+                                           maximumImageBytes: nil, maximumAgeDays: nil)
+        try await persistence.save(ClipboardHistory(items: items, retention: unlimited))
+        // Simulate history that has aged beyond its saved limits while the app was closed.
+        let database = try ClipboardDatabase(url: fixture.directory.appendingPathComponent("history.sqlite"))
+        try database.execute("UPDATE settings SET payload = ? WHERE id = 1",
+                             [.blob(try JSONEncoder().encode(ClipboardHistory(retention: .default)))])
+        await fixture.start()
+        #expect(fixture.store.copyStatistics.totalCount == 60)
+        #expect(fixture.store.copyStatistics.days(endingAt: oldDate, count: 1).first?.count == 60)
+        #expect(fixture.store.totalCount == 0)
+        await fixture.restart()
+        #expect(fixture.store.copyStatistics.totalCount == 60)
+        await fixture.copy("New copy")
+        #expect(fixture.store.copyStatistics.totalCount == 61)
+        await fixture.restart()
+        #expect(fixture.store.copyStatistics.totalCount == 61)
+        await fixture.cleanUp()
+    }
+
+    @Test func legacyCopyBaselinePrecedesImportRetention() async throws {
+        let fixture = try Fixture()
+        let oldDate = Date().addingTimeInterval(-100 * 86400)
+        let item = ClipboardItem.text("Expired legacy copy", source: .unknown, at: oldDate)
+        let history = ClipboardHistory(items: [item], retention: .default)
+        try JSONEncoder().encode(history).write(to: fixture.directory.appendingPathComponent("history.json"))
+        await fixture.start()
+        #expect(fixture.store.totalCount == 0)
+        #expect(fixture.store.copyStatistics.totalCount == 1)
+        #expect(fixture.store.copyStatistics.days(endingAt: oldDate, count: 1).first?.count == 1)
+        await fixture.restart()
+        #expect(fixture.store.copyStatistics.totalCount == 1)
+        await fixture.cleanUp()
+    }
+
     @Test func recentSelectionLoadsTheEntireBurstAndFreezesItUntilReopening() async throws {
         let fixture = try Fixture()
         await fixture.start()
@@ -146,6 +219,7 @@ struct ClipboardTests {
         fixture.store.pollClipboard()
         await fixture.store.flush()
         #expect(fixture.store.totalCount == 3)
+        #expect(fixture.store.copyStatistics.totalCount == 4)
         #expect(fixture.store.selectedIDs == [ids[0], ids[2]])
         #expect(await fixture.store.copySelection(separator: separator, reversed: true))
         #expect(fixture.pasteboard.string(forType: .string) == [longText, "hello@example.com"].joined(separator: separator.value))
@@ -521,11 +595,13 @@ struct ClipboardTests {
         #expect(!fixture.store.isStorageBlocked)
         #expect(fixture.store.isPaused)
         #expect(fixture.store.items.map(\.id) == [text.id, image.id])
+        #expect(fixture.store.copyStatistics.totalCount == 2)
         #expect(try await persistence.imageData(try #require(image.image)).isEmpty == false)
         #expect(try Data(contentsOf: legacyURL) == original)
         fixture.store.delete(text.id)
         await fixture.restart()
         #expect(fixture.store.items.map(\.id) == [image.id])
+        #expect(fixture.store.copyStatistics.totalCount == 2)
         #expect(try Data(contentsOf: legacyURL) == original)
         await fixture.cleanUp()
     }
@@ -823,6 +899,7 @@ struct ClipboardTests {
             try JSONEncoder().encode(ClipboardHistory()).write(to: fixture.directory.appendingPathComponent("history.json"))
             await fixture.start()
             #expect(fixture.store.isStorageBlocked)
+            #expect(!fixture.store.copyStatistics.isInitialized)
             await fixture.copy("Must not overwrite")
             #expect(try Data(contentsOf: url) == original)
             await fixture.cleanUp()
@@ -1624,12 +1701,16 @@ private final class Fixture {
     let directory: URL
     let pasteboard = NSPasteboard.withUniqueName()
     var store: ClipboardStore
+    let defaults: UserDefaults
+    private let suite = "ClipboardStatisticsTests.\(UUID())"
 
     init(filterPreferences: ClipboardFilterPreferences? = nil) throws {
         let root = ProcessInfo.processInfo.environment["PASKET_TEST_DIRECTORY"] ?? NSTemporaryDirectory()
         directory = URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent("pasket-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: filterPreferences)
+        defaults = try #require(UserDefaults(suiteName: suite))
+        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: filterPreferences,
+                               statisticsDefaults: defaults)
     }
 
     func start() async {
@@ -1651,7 +1732,8 @@ private final class Fixture {
     func restart() async {
         store.stop()
         await store.flush()
-        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: store.filterPreferences)
+        store = ClipboardStore(directory: directory, pasteboard: pasteboard, filterPreferences: store.filterPreferences,
+                               statisticsDefaults: defaults)
         await start()
     }
 
@@ -1659,6 +1741,7 @@ private final class Fixture {
         store.stop()
         await store.flush()
         pasteboard.releaseGlobally()
+        defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: directory)
     }
 }

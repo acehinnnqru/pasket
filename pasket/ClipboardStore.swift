@@ -4,6 +4,7 @@ import Observation
 @MainActor @Observable
 final class ClipboardStore {
     let filterPreferences: ClipboardFilterPreferences
+    let copyStatistics: HistoryStatistics
     let toasts = PasketToastCenter()
     let systemAccess = SystemAccessController()
     let pasteQueue: ClipboardPasteQueue
@@ -110,8 +111,9 @@ final class ClipboardStore {
     private let pageSize = 50
 
     init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general,
-         filterPreferences: ClipboardFilterPreferences? = nil) {
+         filterPreferences: ClipboardFilterPreferences? = nil, statisticsDefaults: UserDefaults = .standard) {
         self.filterPreferences = filterPreferences ?? ClipboardFilterPreferences()
+        copyStatistics = HistoryStatistics(defaults: statisticsDefaults, storageKey: "clipboardDailyCopyCounts")
         persistence = ClipboardPersistence(directory: directory)
         self.pasteboard = pasteboard
         pasteQueue = ClipboardPasteQueue(clipboardChangeCount: { pasteboard.changeCount })
@@ -174,7 +176,11 @@ final class ClipboardStore {
     private func load() async {
         isLoading = true
         do {
+            let baseline = copyStatistics.isInitialized ? nil : try await persistence.historicalCopyCounts()
             let history = try await persistence.loadSettings()
+            if let baseline {
+                copyStatistics.initializeIfNeeded(with: baseline)
+            }
             isPaused = history.isPaused
             retentionSettings = history.retention ?? .default
             needsRetentionReview = history.retention == nil
@@ -574,6 +580,7 @@ final class ClipboardStore {
             }
             monitor.checkpoint()
             let now = Date()
+            copyStatistics.recordEvent(at: now)
             var mutations: [ClipboardMutation] = []
             var recents: [ClipboardItem] = []
             for (index, item) in fullItems.enumerated() {
@@ -787,6 +794,7 @@ final class ClipboardStore {
     }
 
     private func insert(_ item: ClipboardItem) {
+        copyStatistics.recordEvent(at: item.copiedAt)
         var recent = item
         if let existing = items.firstIndex(where: { $0.fingerprint == item.fingerprint }) {
             recent.id = items.remove(at: existing).id

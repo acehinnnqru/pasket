@@ -210,7 +210,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             }
             // Let the nonactivating panel borrow keyboard focus without deactivating the editor.
             panel.makeKeyAndOrderFront(nil)
-            if panel.isVisible { historyStatistics.recordOpen() }
+            if panel.isVisible { historyStatistics.recordEvent() }
         }
     }
 
@@ -372,6 +372,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             window.delegate = self
             window.contentView = NSHostingView(rootView: HistoryStatisticsWindowView(
                 statistics: historyStatistics,
+                copyStatistics: store.copyStatistics,
                 onClose: { [weak self] in self?.statisticsWindow?.close() }
             ).modifier(PasketAccentColor(preferences: accentColor)))
             if let visibleFrame = screen?.visibleFrame {

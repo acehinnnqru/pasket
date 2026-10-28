@@ -42,14 +42,28 @@ indicator. Choose System (the default) to follow the macOS accent color, or Blue
 Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
 save automatically for the next launch.
 
-The menu bar's Statistics entry opens a separate window with history panel opens by local date and 7-, 30-, and 90-day
-charts, daily counts, and previous/next period navigation. Counts start with this feature
-and include Today, Selected period, and Total summaries. Total covers every recorded date,
+The menu bar's Statistics entry opens a separate window with Copies and History opens pages by local date and 7-, 30-, and 90-day
+charts, daily counts, and previous/next period navigation. Both pages
+include Today, Selected period, and Total summaries. Total covers every recorded date,
 including dates outside the selected period. Counts accumulate across launches
-and persist in UserDefaults independently of clipboard retention. Each hidden-to-visible
+and persist in UserDefaults independently of clipboard retention.
+
+Copies initializes once from every saved history item's most recent copy date, before startup
+retention cleanup. This is a baseline estimate: deduplicated repeats and already deleted items
+cannot be recovered, and old dates are interpreted in the current local time zone. The scan
+reads only timestamps from the full database, regardless of the visible page or filter.
+An empty baseline also marks initialization complete; a failed history load leaves it pending.
+Subsequent accepted external captures and successful writes from history each add one event,
+including repeated content. Copying or pasting a combined group counts once; a paste queue
+counts each successful item write. The monitor checkpoints Pasket's writes to avoid double
+counting. Paused, private, unsupported, oversized, rejected, and missed clipboard changes
+are excluded. Metadata updates, save retries, retention, and history deletion do not alter
+counts. Clipboard monitoring still polls, so changes overwritten between polls cannot be counted.
+
+History opens starts with its feature version. Each hidden-to-visible
 presentation counts once, including startup, shortcuts, menu actions, and Dock reopen.
 Focusing an already visible panel, hiding it, or showing setup, Settings, or Statistics does not count.
-Dates use the local Gregorian calendar when the open occurs; changing time zones does not
+New events use the local Gregorian calendar when they occur; changing time zones does not
 reassign earlier counts. Missing dates display zero, and Today refreshes while the page is open.
 Repeatedly choosing Statistics brings the existing window forward. Drag its header to move it;
 use its close button, Escape, or Command-W to close it. Settings remains a separate window.

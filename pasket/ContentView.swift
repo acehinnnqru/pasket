@@ -1426,12 +1426,20 @@ private struct ClipboardImagePreview: View {
     }
 }
 
-private enum PasketShape {
+enum PasketShape {
     static let controlRadius: CGFloat = 8
     static let menuInset: CGFloat = 6
 
+    static var compact: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+    }
+
     static var control: RoundedRectangle {
         RoundedRectangle(cornerRadius: controlRadius, style: .continuous)
+    }
+
+    static var card: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
     }
 
     static var menu: RoundedRectangle {

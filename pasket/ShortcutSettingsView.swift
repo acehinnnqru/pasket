@@ -113,23 +113,15 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: "General")
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Start at Login")
-                        .font(.system(size: 13, weight: .medium))
-                    Spacer(minLength: 12)
-                    Toggle("Start at Login", isOn: Binding(
+                SettingsToggleRow(
+                    title: "Start at Login",
+                    detail: "Automatically start Pasket when you log in to your Mac.",
+                    isOn: Binding(
                         get: { loginItem.isEnabled },
                         set: { loginItem.setEnabled($0) }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("startAtLogin")
-                }
-                Text("Automatically start Pasket when you log in to your Mac.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    ),
+                    accessibilityIdentifier: "startAtLogin"
+                )
                 if loginItem.requiresApproval {
                     Text("Allow Pasket in System Settings to enable Start at Login.")
                         .font(.system(size: 12))
@@ -242,17 +234,15 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: "Dock icon")
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Show in Dock", isOn: Binding(
-                    get: { dockIcon.showInDock },
-                    set: { dockIcon.setShowInDock($0) }
-                ))
-                .toggleStyle(.switch)
-                .font(.system(size: 13, weight: .medium))
-                .accessibilityIdentifier("showInDock")
-                Text("Show Pasket in the Dock, even when Settings is closed. Changes take effect immediately.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                SettingsToggleRow(
+                    title: "Show in Dock",
+                    detail: "Show Pasket in the Dock, even when Settings is closed. Changes take effect immediately.",
+                    isOn: Binding(
+                        get: { dockIcon.showInDock },
+                        set: { dockIcon.setShowInDock($0) }
+                    ),
+                    accessibilityIdentifier: "showInDock"
+                )
                 Divider().opacity(0.35)
                 HStack {
                     Text("Color")
@@ -274,7 +264,7 @@ struct ShortcutSettingsView: View {
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 4)
                                     .overlay {
-                                        RoundedRectangle(cornerRadius: 10)
+                                        PasketShape.control
                                             .strokeBorder(dockIcon.color == color ? Color.accentColor : .clear,
                                                           lineWidth: 2)
                                     }
@@ -427,7 +417,7 @@ struct ShortcutSettingsView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .padding(.horizontal, 6)
                 .frame(height: 22)
-                .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
+                .background(.primary.opacity(0.045), in: PasketShape.compact)
             Text(title)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -662,7 +652,7 @@ struct PasketSetupView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
-                .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
+                .background(.primary.opacity(0.045), in: PasketShape.compact)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
@@ -769,9 +759,9 @@ struct ShortcutRecordingView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 64)
-                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                .background(.primary.opacity(0.035), in: PasketShape.card)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 10)
+                    PasketShape.card
                         .strokeBorder(.primary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 }
                 VStack(alignment: .leading, spacing: 4) {
@@ -848,7 +838,7 @@ private struct DockIconOptionButtonStyle: ButtonStyle {
         let isInteracting = isEnabled && (isHovered || configuration.isPressed)
         configuration.label
             .background(alignment: .top) {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                PasketShape.control
                     .fill(.primary.opacity(isEnabled && configuration.isPressed ? 0.12 : isInteracting ? 0.06 : 0))
                     .frame(height: 72)
             }
@@ -924,18 +914,12 @@ private struct HistoryRetentionSettingsView: View {
                 limitRow("Image storage", detail: "\(Self.formatBytes(store.imageStorageBytes)) used · includes thumbnails",
                          value: $draft.images, unit: "MiB", field: .images)
                 Divider().opacity(0.35).padding(.horizontal, 12)
-                Toggle(isOn: $draft.autoRecycleUnavailableFiles) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Auto Recycle Unavailable Items")
-                            .font(.system(size: 13))
-                        Text("Remove unavailable file entries when history closes, at most once every 5 minutes. Original files are kept.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .toggleStyle(.switch)
-                .accessibilityIdentifier("autoRecycleUnavailableFiles")
+                SettingsToggleRow(
+                    title: "Auto Recycle Unavailable Items",
+                    detail: "Remove unavailable file entries when history closes, at most once every 5 minutes. Original files are kept.",
+                    isOn: $draft.autoRecycleUnavailableFiles,
+                    accessibilityIdentifier: "autoRecycleUnavailableFiles"
+                )
                 .padding(12)
                 Divider().opacity(0.35)
                 VStack(alignment: .leading, spacing: 10) {
@@ -1033,14 +1017,14 @@ private struct HistoryRetentionSettingsView: View {
             .frame(width: 118, height: 34)
             .background {
                 Button { focusedField.wrappedValue = field } label: {
-                    RoundedRectangle(cornerRadius: 7).fill(.primary.opacity(0.035))
+                    PasketShape.control.fill(.primary.opacity(0.035))
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
                 .accessibilityHidden(true)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 7)
+                PasketShape.control
                     .strokeBorder(isFocused ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.1))
                     .allowsHitTesting(false)
             }
@@ -1125,9 +1109,9 @@ private struct HistoryApplyButtonStyle: ButtonStyle {
             .padding(.horizontal, 18)
             .frame(height: 32)
             .background(isEnabled ? Color.accentColor : Color.primary.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 7))
+                        in: PasketShape.control)
             .opacity(configuration.isPressed && isEnabled ? 0.8 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .contentShape(PasketShape.control)
     }
 }
 
@@ -1223,6 +1207,36 @@ private struct HistoryRetentionDraft {
     }
 }
 
+private struct SettingsToggleRow: View {
+    let title: String
+    let detail: String
+    @Binding var isOn: Bool
+    let accessibilityIdentifier: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                Spacer(minLength: 12)
+                Toggle(title, isOn: $isOn)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .accessibilityIdentifier(accessibilityIdentifier)
+                    .accessibilityHint(detail)
+            }
+            .frame(minHeight: 24)
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct SettingsSectionHeader: View {
     let title: String
     var showsUnsavedChanges = false
@@ -1248,7 +1262,7 @@ private struct SettingsSectionHeader: View {
 private struct SettingsCard: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(.primary.opacity(0.035), in: PasketShape.card)
     }
 }
 
@@ -1268,9 +1282,9 @@ private struct ShortcutKeycaps: View {
                     .frame(minWidth: 12)
                     .padding(.horizontal, 5)
                     .frame(height: 22)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
+                    .background(.primary.opacity(0.045), in: PasketShape.compact)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 6)
+                        PasketShape.compact
                             .strokeBorder(.primary.opacity(0.08))
                     }
             }

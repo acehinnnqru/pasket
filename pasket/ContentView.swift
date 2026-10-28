@@ -189,7 +189,9 @@ struct ContentView: View {
                         .contentShape(Rectangle())
                         .onTapGesture(perform: dismissFilterMenu)
                         .accessibilityHidden(true)
-                    ClipboardFilterMenu(selection: store.filter, width: filterControlFrame.width, onSelect: { filter in
+                    PasketPickerMenu(title: "Content type options", selection: store.filter,
+                                     options: ClipboardFilter.allCases, optionTitle: { $0.title },
+                                     optionSymbol: { $0.symbol }, width: filterControlFrame.width, onSelect: { filter in
                         store.filter = filter
                         dismissFilterMenu()
                     }, onDismiss: dismissFilterMenu)
@@ -357,22 +359,9 @@ struct ContentView: View {
                 isFilterMenuPresented.toggle()
                 if !isFilterMenuPresented { searchFocused = true }
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: store.filter.symbol)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 16)
-                    Text(store.filter.title)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isFilterMenuPresented ? 180 : 0))
-                        .frame(width: 10)
-                }
-                .font(.system(size: 13, weight: .medium))
-                .padding(.horizontal, 5)
-                .frame(width: 130)
-                .frame(minHeight: 18)
+                PasketPickerLabel(title: store.filter.title, symbol: store.filter.symbol,
+                                  optionTitles: ClipboardFilter.allCases.map(\.title),
+                                  isExpanded: isFilterMenuPresented, width: 130)
             }
             .buttonStyle(PasketButtonStyle(isActive: isFilterMenuPresented))
             .fixedSize()
@@ -970,44 +959,54 @@ private struct WindowKeyStateObserver: NSViewRepresentable {
     }
 }
 
-private struct ClipboardFilterMenu: View {
-    let selection: ClipboardFilter
+private struct PasketPickerMenu<Selection: Hashable>: View {
+    let title: String
+    let selection: Selection
+    let options: [Selection]
+    var optionTitle: (Selection) -> String
+    var optionSymbol: (Selection) -> String? = { _ in nil }
+    var valueAlignment: Alignment = .leading
     let width: CGFloat
-    var onSelect: (ClipboardFilter) -> Void
+    var onSelect: (Selection) -> Void
     var onDismiss: () -> Void
 
-    @State private var highlightedFilter: ClipboardFilter?
+    @State private var highlightedOption: Selection?
     @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(ClipboardFilter.allCases) { filter in
+            ForEach(options, id: \.self) { option in
                 Button {
-                    onSelect(filter)
+                    onSelect(option)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: filter.symbol)
-                            .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(selection == filter ? Color.accentColor : .secondary)
-                            .frame(width: 16)
-                        Text(filter.title)
+                        if let symbol = optionSymbol(option) {
+                            Image(systemName: symbol)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(selection == option ? Color.accentColor : .secondary)
+                                .frame(width: 16)
+                                .accessibilityHidden(true)
+                        }
+                        Text(optionTitle(option))
                             .font(.system(size: 13, weight: .medium))
+                            .monospacedDigit()
                             .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: valueAlignment)
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .semibold))
                             .frame(width: 10)
-                            .opacity(selection == filter ? 1 : 0)
+                            .opacity(selection == option ? 1 : 0)
+                            .accessibilityHidden(true)
                     }
                 }
-                .buttonStyle(PasketMenuItemStyle(isHighlighted: highlightedFilter == filter,
-                                                isSelected: selection == filter))
+                .buttonStyle(PasketMenuItemStyle(isHighlighted: highlightedOption == option,
+                                                isSelected: selection == option))
                 .focusable(false)
                 .onHover { hovering in
                     if hovering {
-                        highlightedFilter = filter
-                    } else if highlightedFilter == filter {
-                        highlightedFilter = nil
+                        highlightedOption = option
+                    } else if highlightedOption == option {
+                        highlightedOption = nil
                     }
                 }
             }
@@ -1019,7 +1018,7 @@ private struct ClipboardFilterMenu: View {
         .focusEffectDisabled()
         .focused($isFocused)
         .onAppear {
-            highlightedFilter = selection
+            highlightedOption = selection
             isFocused = true
         }
         .onKeyPress(.downArrow) {
@@ -1031,18 +1030,18 @@ private struct ClipboardFilterMenu: View {
             return .handled
         }
         .onKeyPress(.return) {
-            onSelect(highlightedFilter ?? selection)
+            onSelect(highlightedOption ?? selection)
             return .handled
         }
         .onExitCommand(perform: onDismiss)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Content type options")
+        .accessibilityLabel(title)
     }
 
     private func moveHighlight(by offset: Int) {
-        let filters = ClipboardFilter.allCases
-        let current = filters.firstIndex(of: highlightedFilter ?? selection) ?? 0
-        highlightedFilter = filters[(current + offset + filters.count) % filters.count]
+        guard !options.isEmpty else { return }
+        let current = options.firstIndex(of: highlightedOption ?? selection) ?? 0
+        highlightedOption = options[(current + offset + options.count) % options.count]
     }
 }
 
@@ -1502,6 +1501,141 @@ struct PasketButtonStyle: ButtonStyle {
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+private struct PasketPickerLabel: View {
+    let title: String
+    var symbol: String? = nil
+    let optionTitles: [String]
+    let isExpanded: Bool
+    var width: CGFloat? = nil
+    var valueAlignment: Alignment = .leading
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+            }
+            ZStack(alignment: valueAlignment) {
+                // Reserve the longest option's width so selection never shifts the layout.
+                ForEach(optionTitles.indices, id: \.self) { index in
+                    Text(optionTitles[index]).hidden().accessibilityHidden(true)
+                }
+                Text(title)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                .frame(width: 10)
+                .accessibilityHidden(true)
+        }
+        .font(.system(size: 13, weight: .medium))
+        .monospacedDigit()
+        .padding(.horizontal, 5)
+        .frame(width: width)
+        .frame(minHeight: 18)
+    }
+}
+
+struct PasketPicker<Selection: Hashable>: View {
+    let title: String
+    @Binding var selection: Selection
+    @Binding var isPresented: Bool
+    let options: [Selection]
+    var valueAlignment: Alignment = .leading
+    var optionTitle: (Selection) -> String
+    @FocusState private var isFocused: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            PasketPickerLabel(title: optionTitle(selection), optionTitles: options.map(optionTitle),
+                              isExpanded: isPresented, valueAlignment: valueAlignment)
+        }
+        .buttonStyle(PasketButtonStyle(isActive: isPresented))
+        .fixedSize()
+        .focused($isFocused)
+        .accessibilityLabel(title)
+        .accessibilityValue(optionTitle(selection))
+        .accessibilityHint(isPresented ? "Hide options" : "Show options")
+        .onKeyPress(.downArrow) {
+            guard isEnabled else { return .ignored }
+            isPresented = true
+            return .handled
+        }
+        .onChange(of: isPresented) { _, presented in
+            if !presented { isFocused = true }
+        }
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled { isPresented = false }
+        }
+        .background {
+            WindowKeyStateObserver { isKey in
+                if !isKey { isPresented = false }
+            }
+        }
+        .anchorPreference(key: PasketPickerPresentationKey.self, value: .bounds) { bounds in
+            guard isPresented else { return nil }
+            return PasketPickerPresentation(bounds: bounds,
+                                             height: CGFloat(options.count) * 34 - 2 + PasketShape.menuInset * 2,
+                                             dismiss: { isPresented = false }) { width in
+                AnyView(PasketPickerMenu(title: title, selection: selection, options: options,
+                                         optionTitle: optionTitle, valueAlignment: valueAlignment,
+                                         width: width, onSelect: { option in
+                    selection = option
+                    isPresented = false
+                }, onDismiss: { isPresented = false }))
+            }
+        }
+    }
+}
+
+private struct PasketPickerPresentation {
+    let bounds: Anchor<CGRect>
+    let height: CGFloat
+    var dismiss: () -> Void
+    var menu: (CGFloat) -> AnyView
+}
+
+private struct PasketPickerPresentationKey: PreferenceKey {
+    static var defaultValue: PasketPickerPresentation? { nil }
+
+    static func reduce(value: inout PasketPickerPresentation?, nextValue: () -> PasketPickerPresentation?) {
+        value = nextValue() ?? value
+    }
+}
+
+// Present above the scroll content so dropdowns share the history menu's surface without clipping.
+struct PasketPickerOverlay: ViewModifier {
+    func body(content: Content) -> some View {
+        content.overlayPreferenceValue(PasketPickerPresentationKey.self) { presentation in
+            if let presentation {
+                GeometryReader { geometry in
+                    let bounds = geometry[presentation.bounds]
+                    let inset = PasketShape.menuInset
+                    let below = bounds.maxY + 4
+                    let above = bounds.minY - presentation.height - 4
+                    let y = below + presentation.height <= geometry.size.height - inset ? below : above
+                    ZStack(alignment: .topLeading) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: presentation.dismiss)
+                            .accessibilityHidden(true)
+                        presentation.menu(bounds.width)
+                            .offset(x: max(inset, min(bounds.minX, geometry.size.width - bounds.width - inset)),
+                                    y: max(inset, y))
+                    }
+                }
+            }
+        }
     }
 }
 

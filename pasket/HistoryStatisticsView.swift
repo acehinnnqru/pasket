@@ -5,6 +5,7 @@ import SwiftUI
 struct HistoryStatisticsWindowView: View {
     var statistics: HistoryStatistics
     var onClose: () -> Void
+    @State private var isPickerPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,16 +34,20 @@ struct HistoryStatisticsWindowView: View {
             }
             .padding(.trailing, 14)
             Divider().opacity(0.5)
-            HistoryStatisticsView(statistics: statistics)
+            HistoryStatisticsView(statistics: statistics, isPickerPresented: $isPickerPresented)
         }
         .frame(width: 640, height: 600)
         .modifier(PasketSurface())
+        .modifier(PasketPickerOverlay())
         .background {
             ShortcutEventMonitor { event in
                 guard event.keyCode == UInt16(kVK_Escape),
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
                 else { return false }
-                if !event.isARepeat { onClose() }
+                if !event.isARepeat {
+                    if isPickerPresented { isPickerPresented = false }
+                    else { onClose() }
+                }
                 return true
             }
         }
@@ -51,6 +56,7 @@ struct HistoryStatisticsWindowView: View {
 
 struct HistoryStatisticsView: View {
     var statistics: HistoryStatistics
+    @Binding var isPickerPresented: Bool
     @State private var dayCount = 7
     @State private var endDate: Date?
 
@@ -69,13 +75,12 @@ struct HistoryStatisticsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Picker("Date range", selection: $dayCount) {
-                            Text("7 days").tag(7)
-                            Text("30 days").tag(30)
-                            Text("90 days").tag(90)
+                        PasketPicker(title: "Date range", selection: $dayCount,
+                                     isPresented: $isPickerPresented, options: [7, 30, 90],
+                                     valueAlignment: .trailing) { count in
+                            "\(count) days"
                         }
-                        .labelsHidden()
-                        .fixedSize()
+                        .accessibilityIdentifier("statisticsDateRange")
                     }
 
                     HStack(spacing: 24) {

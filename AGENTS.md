@@ -1,5 +1,21 @@
 # Repository Agent Instructions
 
+## UI design
+
+- Read [DESIGN.md](DESIGN.md) before changing UI layout, styling, or shared components.
+- Follow its role-based shape, spacing, typography, sizing, and alignment rules. Reuse
+  shared components such as `PasketShape`, `PasketButtonStyle`, and `SettingsToggleRow`
+  for equivalent controls instead of duplicating local style definitions.
+- When changing a shared design rule, review its affected uses and update `DESIGN.md`
+  alongside the implementation. Document the role and rationale for new exceptions;
+  do not introduce unexplained one-off values for equivalent controls.
+- Preserve accessibility labels and identifiers, keyboard behavior, and interaction states.
+  Follow the validation guidance in `DESIGN.md` and the build requirements below.
+- Report compilation and visual or interaction validation separately. If UI inspection
+  is unavailable, identify the remaining checks without claiming visual verification.
+- For documentation-only changes, check consistency with the implementation and verify
+  document links; an app build is not required.
+
 ## Commit messages
 
 - Every commit message must follow Conventional Commits: `<type>[optional scope][!]: <description>`.

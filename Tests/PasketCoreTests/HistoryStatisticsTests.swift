@@ -13,10 +13,14 @@ struct HistoryStatisticsTests {
         let date = try #require(ISO8601DateFormatter().date(from: "2026-10-27T05:00:00Z"))
 
         #expect(statistics.days(endingAt: date, count: 7, timeZone: zone).map(\.count) == Array(repeating: 0, count: 7))
+        #expect(statistics.totalCount == 0)
+        statistics.recordOpen(at: date.addingTimeInterval(-120 * 86400), timeZone: zone)
         statistics.recordOpen(at: date, timeZone: zone)
         statistics.recordOpen(at: date.addingTimeInterval(60), timeZone: zone)
+        #expect(statistics.totalCount == 3)
 
         let restored = HistoryStatistics(defaults: defaults)
+        #expect(restored.totalCount == 3)
         #expect(restored.days(endingAt: date, count: 3, timeZone: zone).map(\.count) == [0, 0, 2])
         #expect(restored.days(endingAt: date, count: 0, timeZone: zone).isEmpty)
     }

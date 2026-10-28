@@ -89,6 +89,8 @@ struct HistoryStatisticsView: View {
                         metric("Today", value: statistics.days(endingAt: context.date, count: 1).first?.count ?? 0)
                         metric("Selected period", value: days.reduce(0) { $0 + $1.count })
                         Spacer()
+                        metric("Total", value: statistics.totalCount)
+                            .help("All history opens recorded on this Mac")
                     }
 
                     HStack {

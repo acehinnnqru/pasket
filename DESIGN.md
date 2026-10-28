@@ -55,7 +55,9 @@ Custom menus use `PasketShape.menuInset` on all sides. Keep the outer radius der
 from the item radius and inset so changes preserve the relationship between the curves.
 
 Native switches, checkboxes, and system context menus retain macOS geometry.
-Dropdowns use the shared control shape for triggers and options, and the menu shape for containers.
+Dropdowns use the shared control shape for triggers and option highlights. Their menu
+containers use the menu shape and `ClipboardMenuSurface`, sharing the material, outline,
+and shadow of paste and more-action menus.
 Accent-color swatches remain circular, and status pills may use a capsule. Do not force
 these semantic shapes into the rounded-rectangle scale.
 
@@ -160,9 +162,21 @@ to the trailing edge of the text column in both the trigger and menu. Its shared
 suffix stays in one position, with 7, 30, and 90 aligned by their units digit. Other
 selectors retain leading alignment; the numeric alignment does not move the indicator column.
 
-Menus match their trigger's width and use `ClipboardMenuSurface`, a 6-point outer inset,
-2-point row spacing, and `PasketMenuItemStyle` for 32-point minimum rows. Selected options
-have accent text and fill plus a right-aligned checkmark; hover uses the shared subtle fill.
+Dropdowns use the matching-option-size design (option B): options form one vertical
+column with a 2-point gap, using the picker variant of `PasketMenuItemStyle`.
+Every option matches its trigger's
+measured width and height (normally 30 points high), rather than the 32-point grouped-menu
+row. A 14-point horizontal content inset matches the trigger's combined 9 + 5 inset.
+Use `ClipboardMenuSurface` for the continuous regular-material background, subtle outline,
+and shadow around the options. The background covers the spaces between options as well
+as the rows. Keep labels, icons, selection highlights, and hit regions sharp, and the
+decorative outline noninteractive.
+The menu has a 6-point inset on all sides, so its background is 12 points wider than the
+trigger while each option remains exactly trigger-sized. Offset the menu 6 points toward
+the leading edge to align the option column with the trigger, subject to window bounds.
+Selected options have accent text, a 0.08 accent fill, and a right-aligned checkmark.
+Picker options also use accent text and icons on hover, with an additional 0.12 accent
+fill (0.18 while pressed). Selection remains distinguishable by its persistent checkmark.
 Do not substitute a native menu for these dropdowns. Keep accessible titles, values, and
 selected traits. Up/Down move the highlight, Return selects, and Escape dismisses before
 the containing window can close. Clicking outside dismisses without changing selection.
@@ -172,6 +186,13 @@ views, so option menus are not clipped by cards or scroll content. Place the men
 below its trigger, or above when space below is insufficient. Restore focus to the trigger
 after dismissal. History retains its existing overlay and search-focus handling while
 using the same label, menu, and interaction styles as the other screens.
+
+On opening, the menu and its backdrop fade in together from 94% vertical scale and a
+6-point offset toward the trigger, with a spring response of 0.28 seconds and damping
+fraction 0.88. Anchor this motion to the nearest edge of the trigger. The chevron rotates
+over 0.18 seconds. With Reduce
+Motion enabled, both changes happen immediately without movement. The final geometry and
+keyboard selection behavior are independent of the animation.
 
 Use `PasketCloseButton` in Settings, statistics, and notifications. It has a 12-point medium
 close icon in a 14-by-16 label frame; standard button padding makes the control 32 by 28.
@@ -194,6 +215,8 @@ content hierarchy, red for destructive actions even at rest, and explanatory tex
 Do not rely on color alone to communicate state.
 
 Reuse `PasketSurface` for main panels and `ClipboardMenuSurface` for custom menus.
+Custom menus use `.regularMaterial` without an additional solid color fill or tint.
+Reserve accent fills for option selection and interaction feedback.
 Settings cards use a primary-color fill at 0.035 opacity through `SettingsCard`.
 Reuse the existing state treatments in `PasketButtonStyle` rather than choosing new
 opacity values for each button. Decorative outlines must not intercept input.
@@ -203,11 +226,12 @@ the focused row receives an accent outline; hover feedback must not obscure sele
 Preserve menu checkmarks, selected accessibility traits, and disabled interaction behavior.
 When changing state appearance, review all states of the component together.
 
-Custom filter, paste, and more-action menus share `PasketMenuItemStyle`. Highlighted items
-use a primary fill at 0.04 opacity; pressed items use 0.08. Selected options also have an
+Custom picker, paste, and more-action menus share `PasketMenuItemStyle`. Grouped menus
+use a primary hover fill at 0.04 opacity and a pressed fill at 0.08; picker
+options use the accent interaction treatment described above. Selected options also have an
 accent fill at 0.08, accent text, a checkmark, and the selected accessibility trait.
 Disabled rows use 0.35 opacity and do not show hover or press feedback. Mouse exit clears
-the highlighted row in all three menus; arrow keys can establish a highlight again.
+the highlighted row in these menus; arrow keys can establish a highlight again.
 The paste menu retains the last active row for Return and continued arrow navigation after
 mouse exit, so clearing a hover cannot unexpectedly switch the action to Paste Together.
 The filter and more-action menus retain their existing selection/default fallbacks. Keep number shortcuts

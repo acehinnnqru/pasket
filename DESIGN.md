@@ -21,6 +21,8 @@ when the change belongs to every instance; avoid copying its implementation into
 | --- | --- | --- |
 | `PasketShape` | [ContentView.swift](pasket/ContentView.swift) | Compact, control, card, and menu shapes |
 | `PasketButtonStyle` | [ContentView.swift](pasket/ContentView.swift) | Standard buttons and their interaction states |
+| `PasketPicker`, `PasketPickerOverlay` | [ContentView.swift](pasket/ContentView.swift) | Single-selection dropdowns and their window-level presentation |
+| `PasketPickerLabel`, `PasketPickerMenu` | [ContentView.swift](pasket/ContentView.swift) | Shared trigger labels and option menus for history, Settings, and statistics |
 | `PasketCloseButton` | [ContentView.swift](pasket/ContentView.swift) | Window and notification close controls |
 | `PasketMenuItemStyle` | [ContentView.swift](pasket/ContentView.swift) | Custom menu item geometry, colors, feedback, and selected traits |
 | `PasketSurface` | [ContentView.swift](pasket/ContentView.swift) | Main panel material, outline, and clipping |
@@ -52,7 +54,8 @@ clickable, including the caption.
 Custom menus use `PasketShape.menuInset` on all sides. Keep the outer radius derived
 from the item radius and inset so changes preserve the relationship between the curves.
 
-Native switches, checkboxes, menu pickers, and system context menus retain macOS geometry.
+Native switches, checkboxes, and system context menus retain macOS geometry.
+Dropdowns use the shared control shape for triggers and options, and the menu shape for containers.
 Accent-color swatches remain circular, and status pills may use a capsule. Do not force
 these semantic shapes into the rounded-rectangle scale.
 
@@ -97,7 +100,7 @@ Use `SettingsControlRow` for a title with a trailing control and an explanation 
 including switches and the type-filter picker. Use `SettingsLabel` for stacked title and
 explanation text beside a shortcut or numeric input. Both use 13-point medium titles,
 11-point secondary explanations, and a 4-point gap. Additional card-wide notes remain
-separate blocks with 12-point spacing. Keep picker geometry native.
+separate blocks with 12-point spacing. Use `PasketPicker` for dropdown controls.
 
 ## Setup and dialog layout
 
@@ -142,6 +145,33 @@ Standard buttons use 9-point horizontal and 6-point vertical padding through
 content padding. History-limit inputs are 118 by 34. Use `PasketButtonStyle(isFilled: true)`
 for the History Apply button: height 32, horizontal padding 18, and a 12-point semibold
 label. This is a variant of the shared button style, not a separate interaction implementation.
+
+Use `PasketPicker` for the statistics date range, Settings type-filter memory, and equivalent
+single-selection dropdowns. All three screens, including the history type filter, share
+`PasketPickerLabel` and `PasketPickerMenu`. Triggers use `PasketButtonStyle(isActive:)`:
+opening the menu applies the accent fill and outline and turns the chevron upward.
+The shared label uses 13-point medium text, an 8-point gap, a 10-point semibold chevron,
+5-point horizontal inset inside standard button padding, and an 18-point minimum label
+height. Optional content-type icons occupy 16 points. Reserve the longest option's width
+to prevent layout shifts. The history trigger retains its 130-point label width for the
+search bar layout; other selectors size to their option text.
+Use tabular digits in selector labels. The statistics date-range selector aligns values
+to the trailing edge of the text column in both the trigger and menu. Its shared `days`
+suffix stays in one position, with 7, 30, and 90 aligned by their units digit. Other
+selectors retain leading alignment; the numeric alignment does not move the indicator column.
+
+Menus match their trigger's width and use `ClipboardMenuSurface`, a 6-point outer inset,
+2-point row spacing, and `PasketMenuItemStyle` for 32-point minimum rows. Selected options
+have accent text and fill plus a right-aligned checkmark; hover uses the shared subtle fill.
+Do not substitute a native menu for these dropdowns. Keep accessible titles, values, and
+selected traits. Up/Down move the highlight, Return selects, and Escape dismisses before
+the containing window can close. Clicking outside dismisses without changing selection.
+
+Apply `PasketPickerOverlay` to the containing window after `PasketSurface`, outside scroll
+views, so option menus are not clipped by cards or scroll content. Place the menu 4 points
+below its trigger, or above when space below is insufficient. Restore focus to the trigger
+after dismissal. History retains its existing overlay and search-focus handling while
+using the same label, menu, and interaction styles as the other screens.
 
 Use `PasketCloseButton` in Settings, statistics, and notifications. It has a 12-point medium
 close icon in a 14-by-16 label frame; standard button padding makes the control 32 by 28.

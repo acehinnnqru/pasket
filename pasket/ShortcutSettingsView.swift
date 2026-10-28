@@ -10,6 +10,7 @@ struct ShortcutSettingsView: View {
     @Bindable var loginItem: LoginItemPreferences
     var onClose: () -> Void = {}
     @FocusState private var focusedHistoryField: HistoryLimitField?
+    @State private var isPickerPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,6 +51,7 @@ struct ShortcutSettingsView: View {
         }
         .frame(width: 600, height: 520)
         .modifier(PasketSurface())
+        .modifier(PasketPickerOverlay())
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginItem.refresh()
@@ -62,7 +64,10 @@ struct ShortcutSettingsView: View {
                 guard !shortcuts.isRecording, event.keyCode == UInt16(kVK_Escape),
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
                 else { return false }
-                if !event.isARepeat { onClose() }
+                if !event.isARepeat {
+                    if isPickerPresented { isPickerPresented = false }
+                    else { onClose() }
+                }
                 return true
             }
         }
@@ -142,17 +147,12 @@ struct ShortcutSettingsView: View {
             SettingsSectionHeader(title: "History panel")
             VStack(alignment: .leading, spacing: 12) {
                 SettingsControlRow(title: "Remember type filter", detail: store.filterPreferences.memory.explanation) {
-                    Picker("Remember type filter", selection: Binding<ClipboardFilterMemory>(
+                    PasketPicker(title: "Remember type filter", selection: Binding<ClipboardFilterMemory>(
                         get: { store.filterPreferences.memory },
                         set: { store.filterPreferences.select($0) }
-                    )) {
-                        ForEach(ClipboardFilterMemory.allCases) { memory in
-                            Text(memory.title).tag(memory)
-                        }
+                    ), isPresented: $isPickerPresented, options: ClipboardFilterMemory.allCases) { memory in
+                        memory.title
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .fixedSize()
                     .accessibilityIdentifier("clipboardFilterMemory")
                 }
                 Text("Default: 1 minute. Search text clears on each open. The type filter resets when Pasket quits.")

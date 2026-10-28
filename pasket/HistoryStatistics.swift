@@ -14,6 +14,8 @@ final class HistoryStatistics {
     @ObservationIgnored private let defaults: UserDefaults
     private static let storageKey = "historyPanelDailyOpenCounts"
 
+    var totalCount: Int { dailyCounts.values.reduce(0, +) }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         dailyCounts = (defaults.dictionary(forKey: Self.storageKey) as? [String: Int] ?? [:])

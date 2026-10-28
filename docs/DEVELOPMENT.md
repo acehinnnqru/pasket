@@ -44,6 +44,8 @@ save automatically for the next launch.
 
 The menu bar's Statistics entry opens a separate window with history panel opens by local date and 7-, 30-, and 90-day
 charts, daily counts, and previous/next period navigation. Counts start with this feature
+and include Today, Selected period, and Total summaries. Total covers every recorded date,
+including dates outside the selected period. Counts accumulate across launches
 and persist in UserDefaults independently of clipboard retention. Each hidden-to-visible
 presentation counts once, including startup, shortcuts, menu actions, and Dock reopen.
 Focusing an already visible panel, hiding it, or showing setup, Settings, or Statistics does not count.

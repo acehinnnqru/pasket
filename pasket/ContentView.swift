@@ -721,18 +721,11 @@ struct ContentView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             collectionControl
-            Label {
-                Text("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items")
-            } icon: {
-                Image(nsImage: PasketMenuIcon.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 12, height: 12)
-            }
-            .font(.system(size: 12))
-            .monospacedDigit()
-            .foregroundStyle(.secondary)
-            .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
+            Text("\(store.isDebugMode ? store.displayedItems.count : store.totalCount) items")
+                .font(.system(size: 12))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .help("Change history limits in Settings → History. Text entries are limited to 2,000 characters.")
             Spacer()
             ViewThatFits(in: .horizontal) {
                 Text("↑ ↓ Navigate · Tab Select / Deselect").fixedSize()

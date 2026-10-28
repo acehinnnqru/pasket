@@ -78,10 +78,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let accentColor = AccentColorPreferences()
     let loginItem = LoginItemPreferences()
     let setup = AppSetup()
+    let historyStatistics = HistoryStatistics()
     private(set) var isRelaunchRequested = false
 
     private var panel: ClipboardPanel?
     private var settingsWindow: NSWindow?
+    private var statisticsWindow: NSWindow?
     private var setupWindow: NSWindow?
     private var hasStartedHistory = false
     private var previousApplication: NSRunningApplication?
@@ -147,8 +149,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             showSetup()
             return
         }
-        if settingsWindow?.isVisible == true {
+        if let window = statisticsWindow, window.isKeyWindow {
+            bringWindowToFront(window)
+        } else if settingsWindow?.isVisible == true {
             bringSettingsToFront()
+        } else if let window = statisticsWindow, window.isVisible {
+            bringWindowToFront(window)
         } else {
             showPanel()
         }
@@ -204,6 +210,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             }
             // Let the nonactivating panel borrow keyboard focus without deactivating the editor.
             panel.makeKeyAndOrderFront(nil)
+            if panel.isVisible { historyStatistics.recordOpen() }
         }
     }
 
@@ -340,15 +347,55 @@ final class ApplicationController: NSObject, NSWindowDelegate {
 
     private func bringSettingsToFront() {
         guard let window = settingsWindow else { return }
+        bringWindowToFront(window)
+    }
+
+    func showStatistics() {
+        guard setupWindow == nil else { showSetup(); return }
+        shortcuts.suspendPasteQueueShortcut()
+        let screen = (panel?.isVisible == true ? panel?.screen : nil)
+            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+        hidePanel(restorePreviousApplication: false)
+        if statisticsWindow == nil {
+            let window = SettingsWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+                styleMask: [.borderless], backing: .buffered, defer: false
+            )
+            window.title = "Pasket Statistics"
+            window.isReleasedWhenClosed = false
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            window.isMovableByWindowBackground = false
+            window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            window.delegate = self
+            window.contentView = NSHostingView(rootView: HistoryStatisticsWindowView(
+                statistics: historyStatistics,
+                onClose: { [weak self] in self?.statisticsWindow?.close() }
+            ).modifier(PasketAccentColor(preferences: accentColor)))
+            if let visibleFrame = screen?.visibleFrame {
+                window.setFrameOrigin(NSPoint(
+                    x: visibleFrame.midX - window.frame.width / 2,
+                    y: visibleFrame.midY - window.frame.height / 2
+                ))
+            }
+            statisticsWindow = window
+        }
+        if let window = statisticsWindow { bringWindowToFront(window) }
+    }
+
+    private func bringWindowToFront(_ window: NSWindow) {
         // Let menu tracking finish before activating; closing the menu can restore the previous app.
         DispatchQueue.main.async { [weak self, weak window] in
-            guard let self, let window, self.settingsWindow === window else { return }
+            guard let self, let window,
+                  self.settingsWindow === window || self.statisticsWindow === window else { return }
             let application = NSApplication.shared
             application.unhide(nil)
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
             application.activate()
-            // Activation is a request, so also raise Settings while AppKit processes it.
+            // Activation is a request, so also raise the window while AppKit processes it.
             window.orderFrontRegardless()
         }
     }
@@ -420,7 +467,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         let policy: NSApplication.ActivationPolicy = dockIcon.showInDock ? .regular : .accessory
         if application.activationPolicy() != policy {
             let visibleSettingsWindow = settingsWindow.flatMap { $0.isVisible ? $0 : nil }
+            let visibleStatisticsWindow = statisticsWindow.flatMap { $0.isVisible ? $0 : nil }
             application.setActivationPolicy(policy)
+            if let window = visibleStatisticsWindow { bringWindowToFront(window) }
             if visibleSettingsWindow != nil {
                 // AppKit may hide the app while its Dock presence changes.
                 // Restore the existing window after the activation transition finishes.
@@ -464,7 +513,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        guard let window = notification.object as? NSWindow else { return }
+        if window === statisticsWindow {
+            statisticsWindow = nil
+            return
+        }
+        guard window === settingsWindow else { return }
         if shortcuts.isRecording { shortcuts.cancelRecording() }
         // Closing under the pointer may not send a hover exit to the hosted controls.
         // Recreate the window next time so transient interaction state cannot survive closing.

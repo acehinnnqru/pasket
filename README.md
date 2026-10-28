@@ -79,6 +79,7 @@ backups. Removing an entry from Pasket never deletes the original file.
 - **Light and dark appearance**, with system or custom accent colors and six Dock icon colors.
 - **Remembered type filters** for a duration you choose.
 - **History cleanup**, including an optional setting to recycle unavailable file references.
+- **Daily usage statistics** in a separate window from the menu bar's Statistics entry, with history opens by day and 7-, 30-, or 90-day trends.
 
 ## Getting started
 

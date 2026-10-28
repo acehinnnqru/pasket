@@ -49,6 +49,10 @@ struct PasketApp: App {
             .accessibilityIdentifier("debugModeToggle")
             #endif
             Divider()
+            Button("Statistics…") {
+                appDelegate.controller.showStatistics()
+            }
+            .accessibilityIdentifier("openPasketStatistics")
             Button("Settings…") {
                 appDelegate.controller.showSettings()
             }

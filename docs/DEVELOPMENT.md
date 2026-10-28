@@ -42,6 +42,16 @@ indicator. Choose System (the default) to follow the macOS accent color, or Blue
 Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
 save automatically for the next launch.
 
+The menu bar's Statistics entry opens a separate window with history panel opens by local date and 7-, 30-, and 90-day
+charts, daily counts, and previous/next period navigation. Counts start with this feature
+and persist in UserDefaults independently of clipboard retention. Each hidden-to-visible
+presentation counts once, including startup, shortcuts, menu actions, and Dock reopen.
+Focusing an already visible panel, hiding it, or showing setup, Settings, or Statistics does not count.
+Dates use the local Gregorian calendar when the open occurs; changing time zones does not
+reassign earlier counts. Missing dates display zero, and Today refreshes while the page is open.
+Repeatedly choosing Statistics brings the existing window forward. Drag its header to move it;
+use its close button, Escape, or Command-W to close it. Settings remains a separate window.
+
 - No global history shortcut is assigned by default. Use **Show Clipboard History** in the menu
   bar or configure **Show Clipboard History** in Settings. Existing saved shortcuts are preserved.
   Recorded combinations remain visible as drafts until **Save Shortcut** is clicked. Recording

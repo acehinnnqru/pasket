@@ -63,16 +63,9 @@ struct PasketToastOverlay: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button { center.dismiss(id: toast.id) } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
+            PasketCloseButton(title: "Dismiss notification", help: "Dismiss notification") {
+                center.dismiss(id: toast.id)
             }
-            .buttonStyle(.plain)
-            .help("Dismiss notification")
-            .accessibilityLabel("Dismiss notification")
         }
         .padding(14)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))

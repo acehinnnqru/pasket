@@ -999,18 +999,9 @@ private struct ClipboardFilterMenu: View {
                             .frame(width: 10)
                             .opacity(selection == filter ? 1 : 0)
                     }
-                    .foregroundStyle(selection == filter ? Color.accentColor : .primary)
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 32)
-                    .contentShape(PasketShape.control)
-                    .background {
-                        PasketShape.control
-                            .fill(Color.accentColor.opacity(selection == filter ? 0.08 : 0))
-                        PasketShape.control
-                            .fill(.primary.opacity(highlightedFilter == filter ? 0.04 : 0))
-                    }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PasketMenuItemStyle(isHighlighted: highlightedFilter == filter,
+                                                isSelected: selection == filter))
                 .focusable(false)
                 .onHover { hovering in
                     if hovering {
@@ -1019,7 +1010,6 @@ private struct ClipboardFilterMenu: View {
                         highlightedFilter = nil
                     }
                 }
-                .accessibilityAddTraits(selection == filter ? .isSelected : [])
             }
         }
         .padding(PasketShape.menuInset)
@@ -1053,6 +1043,29 @@ private struct ClipboardFilterMenu: View {
         let filters = ClipboardFilter.allCases
         let current = filters.firstIndex(of: highlightedFilter ?? selection) ?? 0
         highlightedFilter = filters[(current + offset + filters.count) % filters.count]
+    }
+}
+
+private struct PasketMenuItemStyle: ButtonStyle {
+    var isHighlighted: Bool
+    var isSelected = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(configuration.role == .destructive ? Color.red : isSelected ? .accentColor : .primary)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 32)
+            .contentShape(PasketShape.control)
+            .background {
+                PasketShape.control.fill(Color.accentColor.opacity(isSelected ? 0.08 : 0))
+                PasketShape.control.fill(Color.primary.opacity(
+                    isEnabled ? (configuration.isPressed ? 0.08 : isHighlighted ? 0.04 : 0) : 0
+                ))
+            }
+            .opacity(isEnabled ? 1 : 0.35)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -1104,7 +1117,8 @@ private struct ClipboardPasteActionsMenu: View {
     var onPaste: () -> Void
     var onQueue: () -> Void
     var onDismiss: () -> Void
-    @State private var highlighted: Row = .together
+    @State private var highlighted: Row? = .together
+    @State private var lastHighlighted: Row = .together
     @FocusState private var isFocused: Bool
     private var enabledRows: [Row] {
         Row.allCases.filter {
@@ -1123,7 +1137,7 @@ private struct ClipboardPasteActionsMenu: View {
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true).padding(8)
                     }
-                    Divider().padding(.vertical, 4)
+                    Divider().padding(.horizontal, 8).padding(.vertical, 4)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Paste Together Only").font(.system(size: 11, weight: .semibold))
                         Text("Separate text with").font(.system(size: 11))
@@ -1131,7 +1145,7 @@ private struct ClipboardPasteActionsMenu: View {
                     .foregroundStyle(.secondary).padding(8)
                 }
                 if row == .reverse {
-                    Divider().padding(.vertical, 4)
+                    Divider().padding(.horizontal, 8).padding(.vertical, 4)
                     Text("Applies to Paste Together and Paste Queue")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true).padding(8)
@@ -1147,23 +1161,34 @@ private struct ClipboardPasteActionsMenu: View {
                                 .monospacedDigit().foregroundStyle(.secondary)
                         }
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 8).frame(minHeight: 32)
-                    .contentShape(PasketShape.control)
-                    .background(PasketShape.control.fill(.primary.opacity(highlighted == row ? 0.05 : 0)))
                 }
-                .buttonStyle(.plain).focusable(false)
+                .buttonStyle(PasketMenuItemStyle(isHighlighted: highlighted == row,
+                                                isSelected: row.separator == separator || (row == .reverse && reversed)))
+                .focusable(false)
                 .disabled(!enabledRows.contains(row))
-                .onHover { if $0, enabledRows.contains(row) { highlighted = row } }
+                .onHover { hovering in
+                    if hovering, enabledRows.contains(row) {
+                        highlighted = row
+                        lastHighlighted = row
+                    }
+                    else if highlighted == row { highlighted = nil }
+                }
             }
         }
         .padding(PasketShape.menuInset).frame(width: 272)
         .modifier(ClipboardMenuSurface())
         .focusable().focusEffectDisabled().focused($isFocused)
-        .onAppear { highlighted = enabledRows.first ?? .newline; isFocused = true }
+        .onAppear {
+            lastHighlighted = enabledRows.first ?? .newline
+            highlighted = lastHighlighted
+            isFocused = true
+        }
         .onKeyPress(.downArrow) { move(by: 1); return .handled }
         .onKeyPress(.upArrow) { move(by: -1); return .handled }
-        .onKeyPress(.return) { choose(highlighted); return .handled }
+        .onKeyPress(.return) {
+            choose(highlighted ?? lastHighlighted)
+            return .handled
+        }
         .onExitCommand(perform: onDismiss)
         .background {
             ShortcutEventMonitor { event in
@@ -1181,8 +1206,11 @@ private struct ClipboardPasteActionsMenu: View {
 
     private func move(by offset: Int) {
         let rows = enabledRows
-        let index = rows.firstIndex(of: highlighted) ?? 0
-        highlighted = rows[(index + offset + rows.count) % rows.count]
+        guard !rows.isEmpty else { return }
+        // Mouse exit clears only visual feedback, preserving the keyboard action target.
+        let index = rows.firstIndex(of: highlighted ?? lastHighlighted) ?? 0
+        lastHighlighted = rows[(index + offset + rows.count) % rows.count]
+        highlighted = lastHighlighted
     }
 
     private func choose(_ row: Row) {
@@ -1249,17 +1277,8 @@ private struct ClipboardMoreActionsMenu: View {
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .foregroundStyle(action == .settings ? .primary : Color.red)
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 32)
-                    .contentShape(PasketShape.control)
-                    .background {
-                        PasketShape.control
-                            .fill(.primary.opacity(highlightedAction == action && enabledActions.contains(action) ? 0.04 : 0))
-                    }
-                    .opacity(enabledActions.contains(action) ? 1 : 0.35)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PasketMenuItemStyle(isHighlighted: highlightedAction == action))
                 .focusable(false)
                 .disabled(!enabledActions.contains(action))
                 .onHover { hovering in
@@ -1445,6 +1464,7 @@ struct PasketButtonStyle: ButtonStyle {
     var isProminent = false
     var isActive = false
     var hasBackground = false
+    var isFilled = false
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
@@ -1452,21 +1472,25 @@ struct PasketButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let isDestructive = configuration.role == .destructive
         let isInteracting = isEnabled && (isHovered || configuration.isPressed)
-        let tint: Color = isDestructive ? .red : isProminent || isActive ? .accentColor : .primary
+        let tint: Color = isDestructive ? .red : isProminent || isActive || isFilled ? .accentColor : .primary
         let backgroundOpacity: Double = isEnabled && configuration.isPressed ? (hasBackground ? 0.12 : 0.2)
             : isInteracting ? (hasBackground ? 0.08 : 0.12)
             : isProminent || isActive ? 0.08 : hasBackground ? 0.05 : 0
         let borderOpacity: Double = isInteracting ? (hasBackground ? 0.12 : 0.2)
             : isProminent || isActive ? 0.12 : hasBackground ? 0.07 : 0
+        let fill: Color = isFilled
+            ? (isEnabled ? tint.opacity(configuration.isPressed ? 0.8 : isHovered ? 0.9 : 1) : .primary.opacity(0.06))
+            : tint.opacity(backgroundOpacity)
 
         configuration.label
-            .font(.system(size: 12))
-            .foregroundStyle(isDestructive && !isInteracting ? Color.secondary : tint)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
+            .font(.system(size: 12, weight: isFilled ? .semibold : .regular))
+            .foregroundStyle(isFilled ? (isEnabled ? Color.white : .secondary) : tint)
+            .padding(.horizontal, isFilled ? 18 : 9)
+            .padding(.vertical, isFilled ? 0 : 6)
+            .frame(height: isFilled ? 32 : nil)
             .background {
                 PasketShape.control
-                    .fill(tint.opacity(backgroundOpacity))
+                    .fill(fill)
             }
             .overlay {
                 PasketShape.control
@@ -1474,10 +1498,27 @@ struct PasketButtonStyle: ButtonStyle {
                     .allowsHitTesting(false)
             }
             .contentShape(PasketShape.control)
-            .opacity(isEnabled ? 1 : 0.35)
+            .opacity(isEnabled || isFilled ? 1 : 0.35)
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
+struct PasketCloseButton: View {
+    let title: String
+    let help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 14, height: 16)
+        }
+        .buttonStyle(PasketButtonStyle())
+        .help(help)
+        .accessibilityLabel(title)
     }
 }
 

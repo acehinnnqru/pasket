@@ -96,15 +96,8 @@ struct ShortcutSettingsView: View {
             .overlay { PasketWindowDragRegion() }
             .help("Drag the header to move Settings")
             .accessibilityIdentifier("settingsWindowDragArea")
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .medium))
-                    .frame(width: 14, height: 16)
-            }
-            .buttonStyle(PasketButtonStyle())
+            PasketCloseButton(title: "Close settings", help: "Close Settings (Esc)", action: onClose)
             .keyboardShortcut("w", modifiers: .command)
-            .help("Close Settings (Esc)")
-            .accessibilityLabel("Close settings")
         }
         .padding(.trailing, 14)
     }
@@ -148,10 +141,7 @@ struct ShortcutSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: "History panel")
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Remember type filter")
-                        .font(.system(size: 13, weight: .medium))
-                    Spacer(minLength: 12)
+                SettingsControlRow(title: "Remember type filter", detail: store.filterPreferences.memory.explanation) {
                     Picker("Remember type filter", selection: Binding<ClipboardFilterMemory>(
                         get: { store.filterPreferences.memory },
                         set: { store.filterPreferences.select($0) }
@@ -165,10 +155,6 @@ struct ShortcutSettingsView: View {
                     .fixedSize()
                     .accessibilityIdentifier("clipboardFilterMemory")
                 }
-                Text(store.filterPreferences.memory.explanation)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 Text("Default: 1 minute. Search text clears on each open. The type filter resets when Pasket quits.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -349,14 +335,7 @@ struct ShortcutSettingsView: View {
                 .frame(width: 14, height: 14)
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                Text(description)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            SettingsLabel(title: title, detail: description)
             Spacer(minLength: 12)
             Button { shortcuts.beginRecording(action) } label: {
                 if let shortcut {
@@ -413,11 +392,7 @@ struct ShortcutSettingsView: View {
 
     private func panelControl(keys: String, title: String) -> some View {
         HStack(spacing: 8) {
-            Text(keys)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .padding(.horizontal, 6)
-                .frame(height: 22)
-                .background(.primary.opacity(0.045), in: PasketShape.compact)
+            ShortcutKeycap(key: keys)
             Text(title)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -467,7 +442,7 @@ struct PasketSetupView: View {
                     .background(.primary.opacity(0.045), in: Capsule())
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
             .overlay { PasketWindowDragRegion() }
             .help("Drag the header to move setup")
             .accessibilityIdentifier("setupWindowDragArea")
@@ -488,7 +463,8 @@ struct PasketSetupView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self) { geometry in
                     geometry.size.height
@@ -551,7 +527,7 @@ struct PasketSetupView: View {
                     actionTitle: "Open System Settings…",
                     action: { onRequestPermission(permission) }
                 )
-                Divider().opacity(0.35).padding(.leading, 46)
+                Divider().opacity(0.35).padding(.leading, 44)
                 permissionInstruction(
                     number: "2",
                     title: isClipboardStep ? "Choose Always Allow for Pasket" : "Enable Pasket",
@@ -559,7 +535,7 @@ struct PasketSetupView: View {
                         : "Turn on the switch next to Pasket."
                 )
                 if !isClipboardStep {
-                    Divider().opacity(0.35).padding(.leading, 46)
+                    Divider().opacity(0.35).padding(.leading, 44)
                     permissionInstruction(
                         number: "3",
                         title: "Reopen Pasket to apply access",
@@ -593,7 +569,7 @@ struct PasketSetupView: View {
     }
 
     private var shortcutGuidance: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Choose your shortcut")
                     .font(.system(size: 18, weight: .medium))
@@ -625,7 +601,7 @@ struct PasketSetupView: View {
                 .disabled(!setup.canContinue)
                 .fixedSize()
             }
-            .padding(14)
+            .padding(12)
             .modifier(SettingsCard())
             if !setup.canContinue {
                 Text("Allow access above, then choose your shortcut.")
@@ -668,7 +644,7 @@ struct PasketSetupView: View {
                     .fixedSize()
             }
         }
-        .padding(14)
+        .padding(12)
     }
 
     private var guideFooter: some View {
@@ -687,7 +663,7 @@ struct PasketSetupView: View {
                 .buttonStyle(PasketButtonStyle(isProminent: true))
                 .disabled(!setup.canContinue || shortcuts.isRecording)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
     }
@@ -737,9 +713,10 @@ struct ShortcutRecordingView: View {
                 }
                 Spacer()
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
             Divider().opacity(0.5)
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 if isPasteQueueSetup {
                     Text("Starting the queue pastes the first item. Set a shortcut to paste each remaining item, or skip for now and use Paste Next in the menu or history panel.")
                         .font(.system(size: 12))
@@ -778,7 +755,8 @@ struct ShortcutRecordingView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
             ShortcutEventMonitor { event in
                 let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
                 if modifiers.isEmpty, [UInt16(kVK_Tab), UInt16(kVK_Return), UInt16(kVK_Space)].contains(event.keyCode) {
@@ -823,7 +801,7 @@ struct ShortcutRecordingView: View {
                 .accessibilityIdentifier("saveRecordedShortcut")
             }
             .buttonStyle(PasketButtonStyle())
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 18)
             .padding(.vertical, 12)
         }
     }
@@ -953,7 +931,7 @@ private struct HistoryRetentionSettingsView: View {
                         Spacer()
                         if store.isApplyingRetention { ProgressView().controlSize(.small) }
                         Button("Apply") { apply() }
-                            .buttonStyle(HistoryApplyButtonStyle())
+                            .buttonStyle(PasketButtonStyle(isFilled: true))
                             .disabled(!canApply)
                             .accessibilityIdentifier("applyHistoryLimits")
                     }
@@ -985,13 +963,7 @@ private struct HistoryRetentionSettingsView: View {
                           unit: String, field: HistoryLimitField) -> some View {
         let isFocused = focusedField.wrappedValue == field
         return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            SettingsLabel(title: title, detail: detail)
             Spacer(minLength: 4)
             HStack(spacing: 6) {
                 TextField("", text: value.number)
@@ -1074,7 +1046,7 @@ private struct HistoryRetentionSettingsView: View {
             .buttonStyle(PasketButtonStyle())
             .disabled(store.isApplyingRetention)
         }
-        .padding(22)
+        .padding(18)
         .frame(width: 420)
         .modifier(PasketSurface())
         .interactiveDismissDisabled()
@@ -1097,22 +1069,6 @@ private struct HistoryRetentionSettingsView: View {
 
 private enum HistoryLimitField: Hashable {
     case days, items, text, images
-}
-
-private struct HistoryApplyButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
-            .padding(.horizontal, 18)
-            .frame(height: 32)
-            .background(isEnabled ? Color.accentColor : Color.primary.opacity(0.06),
-                        in: PasketShape.control)
-            .opacity(configuration.isPressed && isEnabled ? 0.8 : 1)
-            .contentShape(PasketShape.control)
-    }
 }
 
 // Observe mouse clicks without consuming them or interfering with selection inside an input.
@@ -1214,18 +1170,30 @@ private struct SettingsToggleRow: View {
     let accessibilityIdentifier: String
 
     var body: some View {
+        SettingsControlRow(title: title, detail: detail) {
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityIdentifier(accessibilityIdentifier)
+                .accessibilityHint(detail)
+        }
+    }
+}
+
+private struct SettingsControlRow<Control: View>: View {
+    let title: String
+    let detail: String
+    @ViewBuilder var control: () -> Control
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                 Spacer(minLength: 12)
-                Toggle(title, isOn: $isOn)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .accessibilityIdentifier(accessibilityIdentifier)
-                    .accessibilityHint(detail)
+                control()
             }
             .frame(minHeight: 24)
             Text(detail)
@@ -1234,6 +1202,21 @@ private struct SettingsToggleRow: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SettingsLabel: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 13, weight: .medium))
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -1277,20 +1260,28 @@ private struct ShortcutKeycaps: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
-                Text(key)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .frame(minWidth: 12)
-                    .padding(.horizontal, 5)
-                    .frame(height: 22)
-                    .background(.primary.opacity(0.045), in: PasketShape.compact)
-                    .overlay {
-                        PasketShape.compact
-                            .strokeBorder(.primary.opacity(0.08))
-                    }
+                ShortcutKeycap(key: key)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(shortcut.displayName)
+    }
+}
+
+private struct ShortcutKeycap: View {
+    let key: String
+
+    var body: some View {
+        Text(key)
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .frame(minWidth: 12)
+            .padding(.horizontal, 5)
+            .frame(height: 22)
+            .background(.primary.opacity(0.045), in: PasketShape.compact)
+            .overlay {
+                PasketShape.compact.strokeBorder(.primary.opacity(0.08))
+                    .allowsHitTesting(false)
+            }
     }
 }
 

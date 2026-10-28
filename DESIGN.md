@@ -7,9 +7,9 @@ controls. Equivalent controls should share their geometry and behavior across sc
 Different roles, such as a control and its surrounding container, may use different sizes.
 All dimensions in this document are logical points, not screenshot pixels.
 
-This document records the implemented baseline for the history panel and Settings.
-The shared corner shapes and Settings switch rows compile successfully in the full app.
-Their latest visual changes still need an in-app visual review. Treat these values as
+This document records the implemented baseline for the history panel, Settings, statistics,
+setup, recording and confirmation dialogs, and notifications. The latest shared component
+changes still need an in-app visual and interaction review. Treat these values as
 the current implementation standard, subject to deliberate revision after review.
 
 ## Shared components
@@ -21,11 +21,14 @@ when the change belongs to every instance; avoid copying its implementation into
 | --- | --- | --- |
 | `PasketShape` | [ContentView.swift](pasket/ContentView.swift) | Compact, control, card, and menu shapes |
 | `PasketButtonStyle` | [ContentView.swift](pasket/ContentView.swift) | Standard buttons and their interaction states |
+| `PasketCloseButton` | [ContentView.swift](pasket/ContentView.swift) | Window and notification close controls |
+| `PasketMenuItemStyle` | [ContentView.swift](pasket/ContentView.swift) | Custom menu item geometry, colors, feedback, and selected traits |
 | `PasketSurface` | [ContentView.swift](pasket/ContentView.swift) | Main panel material, outline, and clipping |
 | `ClipboardMenuSurface` | [ContentView.swift](pasket/ContentView.swift) | Custom menu material, outline, and shadow |
 | `SettingsToggleRow` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings switch size, alignment, title, and explanation |
+| `SettingsControlRow`, `SettingsLabel` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings title and explanation layout for switches, pickers, shortcuts, and limits |
 | `SettingsSectionHeader`, `SettingsCard` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings grouping and card appearance |
-| `ShortcutKeycaps` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Keyboard shortcut presentation |
+| `ShortcutKeycap`, `ShortcutKeycaps` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Individual keycaps and keyboard shortcut groups |
 
 Some helpers are file-private. If another screen needs one, expose or extract the shared
 component instead of introducing another independent definition.
@@ -68,7 +71,7 @@ new shared role here.
 | Main scroll content inset | 18 horizontal, 16 vertical |
 | Standard card content inset | 12 on each side |
 | Between blocks inside a standard card | 12 |
-| Switch title row to explanation | 4 |
+| Setting title or title row to explanation | 4 |
 | History limit row inset | 12 horizontal, 10 vertical |
 | Main Settings header and footer inset | 18 horizontal, 12 vertical; header close-control trailing inset is 14 |
 
@@ -90,6 +93,34 @@ Do not mix a standalone labeled switch with a manually aligned switch row for eq
 settings. Keep native checkboxes for inline choices such as Unlimited; they serve a
 different layout role and do not need to become switches.
 
+Use `SettingsControlRow` for a title with a trailing control and an explanation below,
+including switches and the type-filter picker. Use `SettingsLabel` for stacked title and
+explanation text beside a shortcut or numeric input. Both use 13-point medium titles,
+11-point secondary explanations, and a 4-point gap. Additional card-wide notes remain
+separate blocks with 12-point spacing. Keep picker geometry native.
+
+## Setup and dialog layout
+
+Setup and shortcut-recording panels use the same outer alignment as Settings:
+
+| Region | Insets or spacing |
+| --- | --- |
+| Header and footer | 18 horizontal, 12 vertical |
+| Content | 18 horizontal, 16 vertical |
+| Setup sections | 24 between sections |
+| Setup introduction, card, and supporting blocks | 16 between blocks |
+| Setup card rows | 12 on each side |
+| Recording content blocks | 12 between blocks |
+| Standalone cleanup confirmation | 18 on each side, 16 between blocks |
+
+The cleanup confirmation has no separate header or footer bands, so its single inset
+applies to the title, explanatory content, and actions. Setup permission-row dividers
+start at 44 points: 12-point inset plus a 22-point number marker and a 10-point gap.
+The recording area's 64-point height remains a deliberate content presentation size.
+Setup section introductions may use 18-point headings to explain a step; they are not
+ordinary setting labels. Statistics retains its chart-oriented content layout and
+18-point content inset, while its navigation actions use the standard button style.
+
 ## Typography and control sizing
 
 Use the system font and semantic foreground styles. Use monospaced text for shortcut
@@ -99,8 +130,8 @@ keycaps and numeric history-limit inputs where stable character widths help scan
 | --- | --- |
 | Main panel heading | 16, medium |
 | Settings section heading | 12, medium, secondary foreground |
-| Settings switch title | 13, medium |
-| Settings switch explanation | 11, regular, secondary foreground |
+| Settings title | 13, medium |
+| Settings explanation | 11, regular, secondary foreground |
 | Standard button label | 12, regular, supplied by `PasketButtonStyle` |
 | Menu item label | 13, medium |
 | History row title / metadata | 13 regular / 11 regular, secondary metadata |
@@ -108,9 +139,19 @@ keycaps and numeric history-limit inputs where stable character widths help scan
 
 Standard buttons use 9-point horizontal and 6-point vertical padding through
 `PasketButtonStyle`. Custom menu items have a minimum height of 32 and 8-point horizontal
-content padding. History-limit inputs are 118 by 34. The History Apply button uses its
-existing specialized style: height 32, horizontal padding 18, and a 12-point semibold label.
-It still shares `PasketShape.control` with ordinary buttons and inputs.
+content padding. History-limit inputs are 118 by 34. Use `PasketButtonStyle(isFilled: true)`
+for the History Apply button: height 32, horizontal padding 18, and a 12-point semibold
+label. This is a variant of the shared button style, not a separate interaction implementation.
+
+Use `PasketCloseButton` in Settings, statistics, and notifications. It has a 12-point medium
+close icon in a 14-by-16 label frame; standard button padding makes the control 32 by 28.
+Provide a context-specific accessible label and help text. Window callers add Command-W;
+notifications do not acquire a window-close shortcut.
+
+Use `ShortcutKeycap` for both shortcut groups and inline navigation hints. Each keycap uses
+12-point medium monospaced text, a minimum content width of 12, horizontal padding of 5,
+height 22, the compact shape, a primary fill at 0.045 opacity, and a primary border at 0.08.
+`ShortcutKeycaps` groups these with a 4-point gap and a combined accessible shortcut name.
 
 Keep specialized emphasis intentional. A primary action may differ in fill or weight,
 but equivalent controls should not acquire unrelated sizing or alignment per screen.
@@ -119,7 +160,7 @@ but equivalent controls should not acquire unrelated sizing or alignment per scr
 
 Use `Color.accentColor` for selection, active controls, and focus feedback so the user's
 accent preference applies consistently. Use primary and secondary semantic colors for
-content hierarchy, red for destructive actions, and explanatory text with warning colors.
+content hierarchy, red for destructive actions even at rest, and explanatory text with warning colors.
 Do not rely on color alone to communicate state.
 
 Reuse `PasketSurface` for main panels and `ClipboardMenuSurface` for custom menus.
@@ -131,6 +172,21 @@ Keep history selection, focus, and hover distinct: selected rows use an accent f
 the focused row receives an accent outline; hover feedback must not obscure selection.
 Preserve menu checkmarks, selected accessibility traits, and disabled interaction behavior.
 When changing state appearance, review all states of the component together.
+
+Custom filter, paste, and more-action menus share `PasketMenuItemStyle`. Highlighted items
+use a primary fill at 0.04 opacity; pressed items use 0.08. Selected options also have an
+accent fill at 0.08, accent text, a checkmark, and the selected accessibility trait.
+Disabled rows use 0.35 opacity and do not show hover or press feedback. Mouse exit clears
+the highlighted row in all three menus; arrow keys can establish a highlight again.
+The paste menu retains the last active row for Return and continued arrow navigation after
+mouse exit, so clearing a hover cannot unexpectedly switch the action to Paste Together.
+The filter and more-action menus retain their existing selection/default fallbacks. Keep number shortcuts
+and Escape dismissal intact. Menu separators use the same 8-point horizontal inset.
+
+Filled buttons retain a solid accent background and white label at rest, with fill opacity
+0.9 on hover and 0.8 while pressed. Disabled filled buttons use secondary text and a primary
+fill at 0.06. Ordinary buttons retain their existing subtle fill and outline treatments.
+Both variants share hover tracking, press handling, corner geometry, and Reduce Motion behavior.
 
 Use the existing short button transitions (0.12 seconds for interaction and 0.08 seconds
 for press feedback). Respect Reduce Motion. Visual changes must preserve keyboard focus,

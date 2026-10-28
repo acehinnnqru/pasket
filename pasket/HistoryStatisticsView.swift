@@ -28,15 +28,8 @@ struct HistoryStatisticsWindowView: View {
                 .overlay { PasketWindowDragRegion() }
                 .help("Drag the header to move Statistics")
                 .accessibilityIdentifier("statisticsWindowDragArea")
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 14, height: 16)
-                }
-                .buttonStyle(PasketButtonStyle())
+                PasketCloseButton(title: "Close statistics", help: "Close Statistics (Esc)", action: onClose)
                 .keyboardShortcut("w", modifiers: .command)
-                .help("Close Statistics (Esc)")
-                .accessibilityLabel("Close statistics")
             }
             .padding(.trailing, 14)
             Divider().opacity(0.5)
@@ -96,6 +89,7 @@ struct HistoryStatisticsView: View {
                     HStack {
                         Button { movePeriod(from: end, by: -dayCount, now: context.date) } label: {
                             Image(systemName: "chevron.left")
+                                .frame(width: 14, height: 16)
                         }
                         .accessibilityLabel("Previous period")
                         if let first = days.first, let last = days.last {
@@ -104,6 +98,7 @@ struct HistoryStatisticsView: View {
                         }
                         Button { movePeriod(from: end, by: dayCount, now: context.date) } label: {
                             Image(systemName: "chevron.right")
+                                .frame(width: 14, height: 16)
                         }
                         .accessibilityLabel("Next period")
                         .disabled(endDate == nil)
@@ -111,7 +106,7 @@ struct HistoryStatisticsView: View {
                         Button("Today") { endDate = nil }
                             .disabled(endDate == nil)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(PasketButtonStyle())
 
                     Chart(days) { day in
                         BarMark(

@@ -93,7 +93,7 @@ struct ShortcutSettingsView: View {
             }
             .padding(.leading, 18)
             .padding(.vertical, 12)
-            .overlay { SettingsWindowDragRegion() }
+            .overlay { PasketWindowDragRegion() }
             .help("Drag the header to move Settings")
             .accessibilityIdentifier("settingsWindowDragArea")
             Button(action: onClose) {
@@ -478,7 +478,7 @@ struct PasketSetupView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
-            .overlay { SettingsWindowDragRegion() }
+            .overlay { PasketWindowDragRegion() }
             .help("Drag the header to move setup")
             .accessibilityIdentifier("setupWindowDragArea")
             Divider().opacity(0.5)
@@ -1280,7 +1280,7 @@ private struct ShortcutKeycaps: View {
     }
 }
 
-private struct SettingsWindowDragRegion: NSViewRepresentable {
+struct PasketWindowDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> DragView { DragView() }
     func updateNSView(_ nsView: DragView, context: Context) {}
 

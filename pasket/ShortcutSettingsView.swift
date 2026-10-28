@@ -36,6 +36,7 @@ struct ShortcutSettingsView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 16)
+                .controlSize(.small)
             }
             Divider().opacity(0.5)
             HStack(spacing: 6) {
@@ -370,7 +371,7 @@ struct ShortcutSettingsView: View {
                 .accessibilityLabel("Restore \(title) shortcut to default")
             } else {
                 Color.clear
-                    .frame(width: 32, height: 28)
+                    .frame(width: 32, height: 26)
                     .accessibilityHidden(true)
             }
         }
@@ -968,7 +969,7 @@ private struct HistoryRetentionSettingsView: View {
             HStack(spacing: 6) {
                 TextField("", text: value.number)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(.system(size: 13, design: .monospaced))
                     .multilineTextAlignment(.trailing)
                     .focused(focusedField, equals: field)
                     .onSubmit { focusedField.wrappedValue = nil }
@@ -985,8 +986,8 @@ private struct HistoryRetentionSettingsView: View {
                 .focusable(false)
                 .accessibilityLabel("Edit \(title.lowercased())")
             }
-            .padding(.horizontal, 10)
-            .frame(width: 118, height: 34)
+            .padding(.horizontal, 8)
+            .frame(width: 108, height: 26)
             .background {
                 Button { focusedField.wrappedValue = field } label: {
                     PasketShape.control.fill(.primary.opacity(0.035))

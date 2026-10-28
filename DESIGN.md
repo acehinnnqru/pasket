@@ -143,10 +143,22 @@ keycaps and numeric history-limit inputs where stable character widths help scan
 | Shortcut keycap | 12, medium, monospaced |
 
 Standard buttons use 9-point horizontal and 6-point vertical padding through
-`PasketButtonStyle`. Custom menu items have a minimum height of 32 and 8-point horizontal
-content padding. History-limit inputs are 118 by 34. Use `PasketButtonStyle(isFilled: true)`
-for the History Apply button: height 32, horizontal padding 18, and a 12-point semibold
-label. This is a variant of the shared button style, not a separate interaction implementation.
+`PasketButtonStyle`. Settings scroll content uses `.controlSize(.small)`: the shared button
+style uses 9-point horizontal and 4-point vertical padding with a minimum height of 26.
+This keeps text actions and picker triggers aligned with the numeric inputs without
+reducing label sizes. Shortcut buttons retain their 22-point keycaps and grow to 30 points
+with this padding. Native inline checkboxes also use the small control size; Settings
+header controls retain their regular geometry.
+
+History-limit inputs are 108 by 26, with 8-point horizontal padding, regular-weight
+13-point monospaced values, and the existing 11-point units. Their compact outline reduces
+visual weight beside the two-line labels; row insets and explanation spacing stay unchanged.
+Use `PasketButtonStyle(isFilled: true)` for the History Apply button: the small variant
+uses height 26, horizontal padding 9, and a 12-point semibold label, matching Restore Defaults
+in height. The regular filled variant retains height 32 and horizontal padding 18.
+Both variants share the same interaction implementation.
+
+Custom menu items have a minimum height of 32 and 8-point horizontal content padding.
 
 Use `PasketPicker` for the statistics date range, Settings type-filter memory, and equivalent
 single-selection dropdowns. All three screens, including the history type filter, share
@@ -164,9 +176,9 @@ selectors retain leading alignment; the numeric alignment does not move the indi
 
 Dropdowns use the matching-option-size design (option B): options form one vertical
 column with a 2-point gap, using the picker variant of `PasketMenuItemStyle`.
-Every option matches its trigger's
-measured width and height (normally 30 points high), rather than the 32-point grouped-menu
-row. A 14-point horizontal content inset matches the trigger's combined 9 + 5 inset.
+Every option matches its trigger's measured width and height (26 points high in Settings,
+normally 30 elsewhere), rather than the 32-point grouped-menu row. A 14-point horizontal
+content inset matches the trigger's combined 9 + 5 inset.
 Use `ClipboardMenuSurface` for the continuous regular-material background, subtle outline,
 and shadow around the options. The background covers the spaces between options as well
 as the rows. Keep labels, icons, selection highlights, and hit regions sharp, and the

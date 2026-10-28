@@ -1497,11 +1497,13 @@ struct PasketButtonStyle: ButtonStyle {
     var isActive = false
     var hasBackground = false
     var isFilled = false
+    @Environment(\.controlSize) private var controlSize
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let isSmall = controlSize == .small || controlSize == .mini
         let isDestructive = configuration.role == .destructive
         let isInteracting = isEnabled && (isHovered || configuration.isPressed)
         let tint: Color = isDestructive ? .red : isProminent || isActive || isFilled ? .accentColor : .primary
@@ -1517,9 +1519,10 @@ struct PasketButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 12, weight: isFilled ? .semibold : .regular))
             .foregroundStyle(isFilled ? (isEnabled ? Color.white : .secondary) : tint)
-            .padding(.horizontal, isFilled ? 18 : 9)
-            .padding(.vertical, isFilled ? 0 : 6)
-            .frame(height: isFilled ? 32 : nil)
+            .padding(.horizontal, isFilled && !isSmall ? 18 : 9)
+            .padding(.vertical, isFilled ? 0 : isSmall ? 4 : 6)
+            .frame(height: isFilled ? (isSmall ? 26 : 32) : nil)
+            .frame(minHeight: isSmall ? 26 : nil)
             .background {
                 PasketShape.control
                     .fill(fill)

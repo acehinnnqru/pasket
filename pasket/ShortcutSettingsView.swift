@@ -932,7 +932,7 @@ private struct HistoryRetentionSettingsView: View {
                         Spacer()
                         if store.isApplyingRetention { ProgressView().controlSize(.small) }
                         Button("Apply") { apply() }
-                            .buttonStyle(PasketButtonStyle(isFilled: true))
+                            .buttonStyle(PasketButtonStyle(isProminent: true))
                             .disabled(!canApply)
                             .accessibilityIdentifier("applyHistoryLimits")
                     }

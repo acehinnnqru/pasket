@@ -153,10 +153,10 @@ header controls retain their regular geometry.
 History-limit inputs are 108 by 26, with 8-point horizontal padding, regular-weight
 13-point monospaced values, and the existing 11-point units. Their compact outline reduces
 visual weight beside the two-line labels; row insets and explanation spacing stay unchanged.
-Use `PasketButtonStyle(isFilled: true)` for the History Apply button: the small variant
-uses height 26, horizontal padding 9, and a 12-point semibold label, matching Restore Defaults
-in height. The regular filled variant retains height 32 and horizontal padding 18.
-Both variants share the same interaction implementation.
+Use `PasketButtonStyle(isProminent: true)` for the History Apply button, matching other
+primary actions such as Paste. It uses the standard small sizing: minimum height 26,
+horizontal padding 9, and a 12-point regular label, matching Restore Defaults in height.
+Primary actions share a subtle accent fill and outline instead of a separate solid-fill style.
 
 Custom menu items have a minimum height of 32 and 8-point horizontal content padding.
 
@@ -249,10 +249,14 @@ mouse exit, so clearing a hover cannot unexpectedly switch the action to Paste T
 The filter and more-action menus retain their existing selection/default fallbacks. Keep number shortcuts
 and Escape dismissal intact. Menu separators use the same 8-point horizontal inset.
 
-Filled buttons retain a solid accent background and white label at rest, with fill opacity
-0.9 on hover and 0.8 while pressed. Disabled filled buttons use secondary text and a primary
-fill at 0.06. Ordinary buttons retain their existing subtle fill and outline treatments.
-Both variants share hover tracking, press handling, corner geometry, and Reduce Motion behavior.
+Prominent buttons use accent text, a 0.08 accent fill, and a 0.12 accent outline at rest.
+Hover increases the fill to 0.12 and the outline to 0.2; pressing increases the fill to 0.2.
+Disabled prominent and active buttons use secondary gray instead of the accent color and
+the shared 0.35 disabled opacity, with no hover or press feedback. Destructive actions
+retain their red tint. Apply is disabled until valid changes or a required history-limit
+review can be saved; loading, storage restrictions, and an in-progress apply also disable it.
+Ordinary buttons retain their existing subtle fill and outline treatments. All buttons
+share hover tracking, press handling, corner geometry, and Reduce Motion behavior.
 
 Use the existing short button transitions (0.12 seconds for interaction and 0.08 seconds
 for press feedback). Respect Reduce Motion. Visual changes must preserve keyboard focus,

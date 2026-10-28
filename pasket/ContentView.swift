@@ -1496,7 +1496,6 @@ struct PasketButtonStyle: ButtonStyle {
     var isProminent = false
     var isActive = false
     var hasBackground = false
-    var isFilled = false
     @Environment(\.controlSize) private var controlSize
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1506,26 +1505,23 @@ struct PasketButtonStyle: ButtonStyle {
         let isSmall = controlSize == .small || controlSize == .mini
         let isDestructive = configuration.role == .destructive
         let isInteracting = isEnabled && (isHovered || configuration.isPressed)
-        let tint: Color = isDestructive ? .red : isProminent || isActive || isFilled ? .accentColor : .primary
+        let tint: Color = isDestructive ? .red
+            : isProminent || isActive ? (isEnabled ? .accentColor : .secondary) : .primary
         let backgroundOpacity: Double = isEnabled && configuration.isPressed ? (hasBackground ? 0.12 : 0.2)
             : isInteracting ? (hasBackground ? 0.08 : 0.12)
             : isProminent || isActive ? 0.08 : hasBackground ? 0.05 : 0
         let borderOpacity: Double = isInteracting ? (hasBackground ? 0.12 : 0.2)
             : isProminent || isActive ? 0.12 : hasBackground ? 0.07 : 0
-        let fill: Color = isFilled
-            ? (isEnabled ? tint.opacity(configuration.isPressed ? 0.8 : isHovered ? 0.9 : 1) : .primary.opacity(0.06))
-            : tint.opacity(backgroundOpacity)
 
         configuration.label
-            .font(.system(size: 12, weight: isFilled ? .semibold : .regular))
-            .foregroundStyle(isFilled ? (isEnabled ? Color.white : .secondary) : tint)
-            .padding(.horizontal, isFilled && !isSmall ? 18 : 9)
-            .padding(.vertical, isFilled ? 0 : isSmall ? 4 : 6)
-            .frame(height: isFilled ? (isSmall ? 26 : 32) : nil)
+            .font(.system(size: 12, weight: .regular))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 9)
+            .padding(.vertical, isSmall ? 4 : 6)
             .frame(minHeight: isSmall ? 26 : nil)
             .background {
                 PasketShape.control
-                    .fill(fill)
+                    .fill(tint.opacity(backgroundOpacity))
             }
             .overlay {
                 PasketShape.control
@@ -1533,7 +1529,7 @@ struct PasketButtonStyle: ButtonStyle {
                     .allowsHitTesting(false)
             }
             .contentShape(PasketShape.control)
-            .opacity(isEnabled || isFilled ? 1 : 0.35)
+            .opacity(isEnabled ? 1 : 0.35)
             .onHover { isHovered = $0 }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isInteracting)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)

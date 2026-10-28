@@ -107,13 +107,11 @@ struct ContentView: View {
     private var historyLayout: some View {
         VStack(spacing: 0) {
             searchBar
-            Divider().opacity(0.5)
             if store.pasteQueue.isActive {
                 queueStatus
                 Divider().opacity(0.5)
             }
             contentArea
-            Divider().opacity(0.5)
             footer
         }
         .buttonStyle(PasketButtonStyle())

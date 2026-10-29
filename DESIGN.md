@@ -146,6 +146,15 @@ keycaps and numeric history-limit inputs where stable character widths help scan
 | History row title / metadata | 13 regular / 11 regular, secondary metadata |
 | Shortcut keycap | 12, medium, monospaced |
 
+History uses a reserved document height calculated from the complete matching identity/date
+index. `ClipboardHistoryLayout` defines 50-point item rows, a 3-point gap, and an 8-point
+outer inset. Date headers reserve 24 points for the first group and 38 for later groups,
+matching their existing top and bottom padding. These fixed roles let the native scrollbar
+represent all matches before summaries or thumbnails load. Loading and retry placeholders
+occupy the same 50-point row as their eventual content; thumbnail arrival must not resize it.
+Only rows near the viewport are instantiated. Keep the title and metadata on one line each,
+and preserve selection, hover, focus, keyboard navigation, and accessible labels in loaded rows.
+
 Standard buttons use 9-point horizontal and 6-point vertical padding through
 `PasketButtonStyle`. Settings scroll content uses `.controlSize(.small)`: the shared button
 style uses 9-point horizontal and 4-point vertical padding with a minimum height of 26.

@@ -22,6 +22,11 @@ nonisolated struct ClipboardPage: Sendable {
     var textBytes: Int
 }
 
+nonisolated struct ClipboardResultSnapshot: Sendable {
+    var references: [ClipboardHistoryReference]
+    var page: ClipboardPage
+}
+
 nonisolated enum ClipboardStorageError: LocalizedError {
     case unsupportedVersion, invalidImage, largeImage, invalidHistory, missingImage, imageBudget, invalidRetention
 
@@ -145,6 +150,53 @@ actor ClipboardPersistence {
 
     func page(query: String = "", filter: ClipboardFilter = .all, limit: Int = 50, offset: Int = 0) throws -> ClipboardPage {
         let database = try openDatabase()
+        let (clause, values, ordering) = try resultQuery(query, filter: filter, in: database)
+        var items: [ClipboardItem] = []
+        try database.query("SELECT summary FROM items" + clause + " ORDER BY " + ordering + " LIMIT ? OFFSET ?",
+                           values + [.integer(max(0, limit)), .integer(max(0, offset))]) {
+            items.append(try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0)))
+        }
+        return ClipboardPage(items: items, matchingCount: try database.integer("SELECT COUNT(*) FROM items" + clause, values),
+                             totalCount: try database.integer("SELECT COUNT(*) FROM items"),
+                             imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"),
+                             textBytes: try database.integer("SELECT COALESCE(SUM(text_bytes), 0) FROM items"))
+    }
+
+    // Index and summaries are read in one actor turn, using exactly the same ranking as pages.
+    func resultSnapshot(query: String, filter: ClipboardFilter, limit: Int,
+                        retainingIDs: Set<UUID> = []) throws -> ClipboardResultSnapshot {
+        let database = try openDatabase()
+        let (clause, values, ordering) = try resultQuery(query, filter: filter, in: database)
+        var references: [ClipboardHistoryReference] = []
+        try database.query("SELECT id, copied_at FROM items" + clause + " ORDER BY " + ordering, values) { row in
+            guard let id = UUID(uuidString: ClipboardDatabase.text(row, 0)) else {
+                throw ClipboardStorageError.invalidHistory
+            }
+            references.append(ClipboardHistoryReference(id: id,
+                copiedAt: Date(timeIntervalSinceReferenceDate: ClipboardDatabase.real(row, 1))))
+        }
+        let retained = references.filter { retainingIDs.contains($0.id) }.map(\.id)
+        let requested = Array(Set(references.prefix(max(0, limit)).map(\.id) + retained))
+        var summaries: [UUID: ClipboardItem] = [:]
+        // Bound parameter counts even when a large selected range has been loaded.
+        for start in stride(from: 0, to: requested.count, by: 500) {
+            let ids = requested[start..<min(start + 500, requested.count)]
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            try database.query("SELECT summary FROM items WHERE id IN (" + placeholders + ")",
+                               ids.map { .text($0.uuidString) }) { row in
+                let item = try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data(row, 0))
+                summaries[item.id] = item
+            }
+        }
+        let page = ClipboardPage(items: references.compactMap { summaries[$0.id] }, matchingCount: references.count,
+                                 totalCount: try database.integer("SELECT COUNT(*) FROM items"),
+                                 imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"),
+                                 textBytes: try database.integer("SELECT COALESCE(SUM(text_bytes), 0) FROM items"))
+        return ClipboardResultSnapshot(references: references, page: page)
+    }
+
+    private func resultQuery(_ query: String, filter: ClipboardFilter, in database: ClipboardDatabase)
+        throws -> (String, [ClipboardDatabase.Value], String) {
         let search = ClipboardSearch(query)
         var predicates: [String] = []
         var values: [ClipboardDatabase.Value] = []
@@ -156,15 +208,7 @@ actor ClipboardPersistence {
         }
         let clause = predicates.isEmpty ? "" : " WHERE " + predicates.joined(separator: " AND ")
         let ranking = search.isEmpty ? "" : "pasket_search_rank(title, content, source_name, source_bundle) DESC, "
-        var items: [ClipboardItem] = []
-        try database.query("SELECT summary FROM items" + clause + " ORDER BY " + ranking + "copied_at DESC, position DESC, id LIMIT ? OFFSET ?",
-                           values + [.integer(max(0, limit)), .integer(max(0, offset))]) {
-            items.append(try JSONDecoder().decode(ClipboardItem.self, from: ClipboardDatabase.data($0, 0)))
-        }
-        return ClipboardPage(items: items, matchingCount: try database.integer("SELECT COUNT(*) FROM items" + clause, values),
-                             totalCount: try database.integer("SELECT COUNT(*) FROM items"),
-                             imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"),
-                             textBytes: try database.integer("SELECT COALESCE(SUM(text_bytes), 0) FROM items"))
+        return (clause, values, ranking + "copied_at DESC, position DESC, id")
     }
 
     private func validate(_ history: ClipboardHistory) throws {

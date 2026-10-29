@@ -150,6 +150,18 @@ nonisolated enum ClipboardHistoryPeriod: String, CaseIterable, Identifiable, Sen
     case searchResults = "Search Results"
 
     var id: Self { self }
+
+    static func period(for copiedAt: Date, at date: Date, calendar: Calendar) -> Self {
+        let age = calendar.dateComponents([.day], from: calendar.startOfDay(for: copiedAt),
+                                          to: calendar.startOfDay(for: date)).day ?? 0
+        switch age {
+        case ...0: return .today
+        case 1: return .yesterday
+        case 2...7: return .sevenDays
+        case 8...30: return .thirtyDays
+        default: return .older
+        }
+    }
 }
 
 nonisolated struct ClipboardHistorySection: Identifiable, Sendable {
@@ -162,17 +174,8 @@ nonisolated struct ClipboardHistorySection: Identifiable, Sendable {
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return items.isEmpty ? [] : [Self(period: .searchResults, items: items)]
         }
-        let today = calendar.startOfDay(for: date)
         let grouped = Dictionary(grouping: items) { item -> ClipboardHistoryPeriod in
-            let day = calendar.startOfDay(for: item.copiedAt)
-            let age = calendar.dateComponents([.day], from: day, to: today).day ?? 0
-            switch age {
-            case ...0: return .today
-            case 1: return .yesterday
-            case 2...7: return .sevenDays
-            case 8...30: return .thirtyDays
-            default: return .older
-            }
+            .period(for: item.copiedAt, at: date, calendar: calendar)
         }
         return ClipboardHistoryPeriod.allCases.compactMap { period in
             grouped[period].map { Self(period: period, items: $0) }

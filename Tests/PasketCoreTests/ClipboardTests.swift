@@ -5,6 +5,131 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ClipboardTests {
+    @Test func scrollbarJumpLoadsTheDestinationWithoutReadingInterveningPages() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let entries = (0..<600).map {
+            ClipboardItem.text("Entry \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: entries))
+        await fixture.start()
+        #expect(fixture.store.resultReferences.map(\.id) == entries.map(\.id))
+        #expect(fixture.store.items.count == 50)
+        let initialLayout = ClipboardHistoryLayout(fixture.store.historyReferences, at: now)
+        await fixture.store.loadHistory(in: 550..<600)
+        #expect(fixture.store.items.count == 100)
+        #expect(fixture.store.items.map(\.id) == (Array(entries.prefix(50)) + Array(entries.suffix(50))).map(\.id))
+        #expect(fixture.store.selectedID == entries[0].id)
+        let loadedLayout = ClipboardHistoryLayout(fixture.store.historyReferences, at: now)
+        #expect(loadedLayout.height == initialLayout.height)
+        #expect(loadedLayout.entries.map(\.y) == initialLayout.entries.map(\.y))
+
+        fixture.store.select(entries[550].id)
+        fixture.store.moveSelection(by: -1)
+        await fixture.store.flush()
+        #expect(fixture.store.selectedID == entries[549].id)
+        #expect(fixture.store.selectedItem?.content == "Entry 549")
+        #expect(fixture.store.items.count == 150)
+        // Fill the first gap, rather than using loaded item count as a database offset.
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.count == 200)
+        #expect(fixture.store.items.prefix(100).map(\.id) == entries.prefix(100).map(\.id))
+        fixture.store.prepareForPresentation()
+        await fixture.store.flush()
+        #expect(fixture.store.items.count == 50)
+        #expect(fixture.store.selectedID == entries[0].id)
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [false, true])
+    func sparseHistorySelectionIncludesUnloadedItemsWhenCopyingAndDeleting(copyBeforeDeleting: Bool) async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let entries = (0..<220).map {
+            ClipboardItem.text("Entry \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: entries))
+        await fixture.start()
+        await fixture.store.loadHistory(in: 200..<220)
+        fixture.store.select(entries[48].id)
+        fixture.store.select(entries[205].id, shift: true)
+        #expect(fixture.store.selectedIDs == Set(entries[48...205].map(\.id)))
+        if copyBeforeDeleting {
+            #expect(await fixture.store.copySelection())
+            #expect(fixture.pasteboard.string(forType: .string) == entries[48...205].map(\.content).joined(separator: "\n"))
+            await fixture.store.flush()
+        }
+        fixture.store.deleteItems(Set(entries[48...205].map(\.id)))
+        await fixture.store.flush()
+        #expect(fixture.store.matchingCount == 62)
+        #expect(fixture.store.resultReferences.count == 62)
+        #expect(fixture.store.resultReferences.allSatisfy { !Set(entries[48...205].map(\.id)).contains($0.id) })
+        await fixture.cleanUp()
+    }
+
+    @Test func failedDistantPageCanRetryWithoutChangingTheScrollRange() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let entries = (0..<160).map {
+            ClipboardItem.text("Entry \($0)", source: .unknown, at: now.addingTimeInterval(-Double($0)))
+        }
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: entries))
+        await fixture.start()
+        let initialHeight = ClipboardHistoryLayout(fixture.store.historyReferences).height
+        let database = try ClipboardDatabase(url: fixture.directory.appendingPathComponent("history.sqlite"))
+        try database.execute("UPDATE items SET summary = ? WHERE id = ?",
+                             [.blob(Data("invalid summary".utf8)), .text(entries[105].id.uuidString)])
+        await fixture.store.loadHistory(in: 100..<150)
+        #expect(fixture.store.items.count == 50)
+        #expect(fixture.store.failedHistoryIDs == Set(entries[100..<150].map(\.id)))
+        #expect(fixture.store.storageError?.contains("Could not load more history") == true)
+        #expect(!fixture.store.isLoadingMore)
+        #expect(ClipboardHistoryLayout(fixture.store.historyReferences).height == initialHeight)
+        try database.execute("UPDATE items SET summary = ? WHERE id = ?",
+                             [.blob(try JSONEncoder().encode(entries[105])), .text(entries[105].id.uuidString)])
+        await fixture.store.loadHistory(in: 100..<150)
+        #expect(fixture.store.items.count == 100)
+        #expect(fixture.store.failedHistoryIDs.isEmpty)
+        #expect(fixture.store.storageError == nil)
+        #expect(ClipboardHistoryLayout(fixture.store.historyReferences).height == initialHeight)
+        await fixture.cleanUp()
+    }
+
+    @Test func resultIndexAndSparsePagesFollowSearchRankingAndFilters() async throws {
+        let fixture = try Fixture()
+        let now = Date()
+        let links = (0..<130).map {
+            ClipboardItem.text("https://example.com/report/\($0)", source: .unknown,
+                               at: now.addingTimeInterval(-Double($0)))
+        }
+        let texts = (0..<20).map {
+            ClipboardItem.text("report \($0)", source: .unknown, at: now.addingTimeInterval(Double($0)))
+        }
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        try await persistence.save(ClipboardHistory(items: texts + links))
+        await fixture.start()
+        fixture.store.query = "rpt"
+        fixture.store.filter = .links
+        await fixture.store.flush()
+        let expected = try await persistence.page(query: "rpt", filter: .links, limit: 1000)
+        #expect(fixture.store.resultReferences.map(\.id) == expected.items.map(\.id))
+        #expect(fixture.store.resultReferences.count == 130)
+        async let first: Void = fixture.store.loadHistory(in: 100..<130)
+        async let duplicate: Void = fixture.store.loadHistory(in: 110..<120)
+        _ = await (first, duplicate)
+        #expect(fixture.store.items.count == 80)
+        #expect(Set(fixture.store.items.map(\.id)).count == 80)
+        // A pending old page cannot populate a new query's cache or change its scroll range.
+        let oldLoad = Task { await fixture.store.loadHistory(in: 50..<100) }
+        fixture.store.query = "report/129"
+        await oldLoad.value
+        await fixture.store.flush()
+        #expect(fixture.store.resultReferences.map(\.id) == [links[129].id])
+        #expect(fixture.store.items.map(\.id) == [links[129].id])
+        #expect(!fixture.store.isLoadingMore)
+        await fixture.cleanUp()
+    }
+
     @Test func copyStatisticsCountRepeatedEventsAndSurviveHistoryCleanup() async throws {
         let fixture = try Fixture()
         await fixture.start()

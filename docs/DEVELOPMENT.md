@@ -295,9 +295,18 @@ Pasket never changes your system privacy settings.
 
 History uses a versioned SQLite database (`history.sqlite`) and a separate `Images` directory under
 the app's Application Support/Pasket directory inside its sandbox. The system SQLite library is
-used without third-party dependencies or network services. The list initially reads 50 summaries,
-with at most 500 characters of text per row, and loads further batches as you scroll or move past
-the last loaded row with the keyboard. Selection and copying fetch the complete saved record.
+used without third-party dependencies or network services. The list initially reads an ordered
+identity/date index for all matches and 50 summaries, with at most 500 characters of text per row.
+`ClipboardHistoryLayout` reserves the complete document height, including date headers, before
+further summaries load. The view creates only rows near the viewport, with equal-sized placeholders
+for unloaded items. Dragging the native scrollbar to an unloaded position reads the corresponding
+50-item pages directly; it does not read every earlier page or expand the document as data arrives.
+Concurrent requests for the same page share one read, cancelled viewport tasks do not cancel that
+shared read, and results from obsolete queries or writes are discarded. Failed rows offer Retry.
+Selection uses the full result order, so keyboard navigation and Shift-selection include unloaded
+gaps. Selected ranges load their summaries before batch actions become available; copying resolves
+all selected identities against full saved records. Reloads refresh retained summaries by identity,
+while a new search, filter, or presentation starts with 50 summaries. Reopening resets the viewport.
 Search runs against all saved records and their complete bodies, including records outside the
 loaded pages. Whitespace separates keywords; every keyword must match, in any order, across the
 title, body, source app name, or bundle identifier. Literal matching remains Unicode-aware and
@@ -359,6 +368,16 @@ persistence across relaunch, returning to System, and independence from the Dock
 
 For the desktop smoke test:
 
+- With at least 600 history entries spanning several date groups, drag the scrollbar directly
+  near the bottom before scrolling through earlier pages. Its thumb size and range should already
+  reflect all matches; loading summaries or thumbnails must not shorten it or move the visible
+  rows. Loading placeholders should be replaced in place. Jump back and forth quickly and verify
+  only nearby pages load, Retry recovers a failed row, and search/type-filter changes cannot show
+  old results. Repeat with search results, a type filter, light/dark appearance, and Reduce Motion.
+  Navigate up and down across an unloaded gap with arrows and Shift-arrows, and Shift-click across
+  the gap; copying and deletion must include every selected entry. Confirm the focused row stays
+  visible, date headers stay aligned, accessible row names remain readable, and reopening starts
+  at the top. Resize the panel while scrolled near the end and check that the viewport stays usable.
 - Choose **… → Delete Unavailable Files** and verify a green cleanup toast appears above
   the footer without moving the list or covering its controls. Repeat after it disappears, and
   while it is still visible, to check that the notification restarts. Verify hover pauses dismissal,

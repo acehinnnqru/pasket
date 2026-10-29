@@ -39,7 +39,7 @@ env:
 jobs:
   prepare:
     name: Prepare and validate the version change
-    runs-on: xcode-27
+    runs-on: self-hosted
     timeout-minutes: 30
     outputs:
       tag: ${{ steps.version.outputs.tag }}

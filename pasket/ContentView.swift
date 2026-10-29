@@ -1106,19 +1106,25 @@ private struct PasketMenuItemStyle: ButtonStyle {
 
 private struct ClipboardMenuSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.pasketAppearance) private var appearance
 
     func body(content: Content) -> some View {
         content
             .background {
-                PasketShape.menu
-                    .fill(.regularMaterial)
+                if appearance == .classic {
+                    PasketShape.menu.fill(.regularMaterial)
+                }
             }
+            .glassEffect(appearance == .liquidGlass ? .regular : .identity, in: PasketShape.menu)
             .overlay {
-                PasketShape.menu
-                    .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
-                    .allowsHitTesting(false)
+                if appearance == .classic {
+                    PasketShape.menu
+                        .strokeBorder(.primary.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                        .allowsHitTesting(false)
+                }
             }
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.2 : 0.12), radius: 12, x: 0, y: 5)
+            .shadow(color: .black.opacity(appearance == .classic ? (colorScheme == .dark ? 0.2 : 0.12) : 0),
+                    radius: 12, x: 0, y: 5)
     }
 }
 
@@ -1702,18 +1708,25 @@ struct PasketCloseButton: View {
 struct PasketSurface: ViewModifier {
     var cornerRadius: CGFloat = 20
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.pasketAppearance) private var appearance
 
     func body(content: Content) -> some View {
         content
             .background {
-                VisualEffectBackground()
-                    .overlay(Color.white.opacity(colorScheme == .dark ? 0.025 : 0.12))
+                if appearance == .classic {
+                    VisualEffectBackground()
+                        .overlay(Color.white.opacity(colorScheme == .dark ? 0.025 : 0.12))
+                }
             }
+            .glassEffect(appearance == .liquidGlass ? .regular : .identity,
+                         in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.6), lineWidth: 1)
-                    .allowsHitTesting(false)
+                if appearance == .classic {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.6), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
             }
     }
 }

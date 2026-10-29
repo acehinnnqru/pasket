@@ -25,6 +25,7 @@ when the change belongs to every instance; avoid copying its implementation into
 | `PasketPickerLabel`, `PasketPickerMenu` | [ContentView.swift](pasket/ContentView.swift) | Shared trigger labels and option menus for history, Settings, and statistics |
 | `PasketCloseButton` | [ContentView.swift](pasket/ContentView.swift) | Window and notification close controls |
 | `PasketMenuItemStyle` | [ContentView.swift](pasket/ContentView.swift) | Custom menu item geometry, colors, feedback, and selected traits |
+| `PasketAppearance` | [AppearancePreferences.swift](pasket/AppearancePreferences.swift) | Shared, persisted surface appearance across windows and sheets |
 | `PasketSurface` | [ContentView.swift](pasket/ContentView.swift) | Main panel material, outline, and clipping |
 | `ClipboardMenuSurface` | [ContentView.swift](pasket/ContentView.swift) | Custom menu material, outline, and shadow |
 | `SettingsToggleRow` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings switch size, alignment, title, and explanation |
@@ -192,8 +193,9 @@ column with a 2-point gap, using the picker variant of `PasketMenuItemStyle`.
 Every option matches its trigger's measured width and height (26 points high in Settings,
 normally 30 elsewhere), rather than the 32-point grouped-menu row. A 14-point horizontal
 content inset matches the trigger's combined 9 + 5 inset.
-Use `ClipboardMenuSurface` for the continuous regular-material background, subtle outline,
-and shadow around the options. The background covers the spaces between options as well
+Use `ClipboardMenuSurface` for the continuous background around the options: native regular
+Liquid Glass in the Liquid Glass appearance, or regular material with a subtle outline and
+shadow in Classic. The background covers the spaces between options as well
 as the rows. Keep labels, icons, selection highlights, and hit regions sharp, and the
 decorative outline noninteractive.
 The menu has a 6-point inset on all sides, so its background is 12 points wider than the
@@ -240,8 +242,26 @@ content hierarchy, red for destructive actions even at rest, and explanatory tex
 Do not rely on color alone to communicate state.
 
 Reuse `PasketSurface` for main panels and `ClipboardMenuSurface` for custom menus.
-Custom menus use `.regularMaterial` without an additional solid color fill or tint.
-Reserve accent fills for option selection and interaction feedback.
+Settings exposes one Appearance picker, using `SettingsControlRow` and `PasketPicker`,
+with Liquid Glass (the default) and Classic options. The selection applies immediately,
+persists across launches, and is independent of accent and Dock icon colors.
+
+Liquid Glass uses the native `.glassEffect(.regular, in:)` on the complete panel or menu,
+so the system handles both its material and foreground legibility. Preserve the existing
+20-point panel and 14-point menu shapes. Let the native material respond to the system's
+Liquid Glass look, Reduce Transparency, and Increase Contrast preferences; do not map
+Clear and Tinted to hard-coded opacity values or read private system preference keys.
+Do not add the Classic white wash, decorative border, or custom menu shadow over native
+glass. These would obscure its adaptive material and duplicate its edge treatment.
+History rows, cards, and buttons retain their subtle content and interaction fills instead
+of acquiring individual glass layers. Floating menus remain outside `PasketSurface` so
+their material and option labels are not part of the main panel's glass content.
+
+Classic retains the existing behind-window HUD material, white wash, and panel outline.
+Its custom menus use `.regularMaterial` without an additional solid color fill or tint,
+with the existing outline and shadow. Both appearances preserve view identity when
+switching, so changing the material does not rebuild content, reset scroll positions,
+or discard input focus. Reserve accent fills for option selection and interaction feedback.
 Settings cards use a primary-color fill at 0.035 opacity through `SettingsCard`.
 Reuse the existing state treatments in `PasketButtonStyle` rather than choosing new
 opacity values for each button. Decorative outlines must not intercept input.
@@ -287,6 +307,9 @@ Compilation is separate from visual and interaction validation. When UI inspecti
 available, review affected components in light and dark appearance, including hover,
 pressed, selected, focused, and disabled states as applicable. Check wrapping, keyboard
 operation, accessible labels, and Reduce Motion when the change affects them.
+For surface changes, also review both app appearances and the system's Clear/Tinted,
+Reduce Transparency, and Increase Contrast settings. Check that switching appearances
+keeps open-window content and keyboard focus intact, and that menus remain readable.
 
 Report which checks were actually performed and any remaining visual or interaction checks.
 Do not describe a layout as visually verified based only on compilation. Documentation-only

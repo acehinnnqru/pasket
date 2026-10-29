@@ -14,7 +14,7 @@ concurrency:
 jobs:
   check:
     name: Build and test
-    runs-on: xcode-27
+    runs-on: self-hosted
     timeout-minutes: 30
     defaults:
       run:

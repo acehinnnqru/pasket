@@ -2,11 +2,8 @@
 set -euo pipefail
 umask 077
 
-# Never import distribution credentials or change a developer's local keychain.
-if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted || "${RUNNER_OS:-}" != macOS ]]; then
-  echo 'This script must run on a GitHub-hosted macOS Actions runner.' >&2
-  exit 1
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/signing-keychain.sh"
+signing_require_runner
 
 # Build distributable files with public read access without relaxing credential permissions.
 distribution_build() (
@@ -14,8 +11,7 @@ distribution_build() (
   xcodebuild "$@"
 )
 
-for variable in APP_STORE_CERTIFICATES_BASE64 APP_STORE_CERTIFICATES_PASSWORD \
-  APP_STORE_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID APPLE_API_KEY_ID \
+for variable in APP_STORE_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID APPLE_API_KEY_ID \
   APPLE_API_ISSUER_ID APPLE_API_PRIVATE_KEY RELEASE_TAG RUNNER_TEMP GITHUB_STEP_SUMMARY; do
   if [[ -z "${!variable:-}" ]]; then
     echo "::error::Missing required variable: $variable"
@@ -25,72 +21,59 @@ done
 python3 .github/scripts/version.py check "$RELEASE_TAG"
 
 work_directory="$(mktemp -d "$RUNNER_TEMP/pasket-testflight.XXXXXX")"
-keychain_path="$work_directory/signing.keychain-db"
 key_path="$work_directory/AuthKey.p8"
 archive_path="$work_directory/pasket.xcarchive"
 profile_paths=()
-original_keychains=()
-while IFS= read -r keychain; do
-  original_keychains+=("$keychain")
-done < <(security list-keychains -d user | sed 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
-
 cleanup() {
+  local result=$?
+  local cleanup_failed=0
   local profile_path
+  trap - EXIT
   # macOS Bash 3.2 treats an empty array expansion as unset under nounset.
   if [[ ${#profile_paths[@]} -gt 0 ]]; then
     for profile_path in "${profile_paths[@]}"; do
-      rm -f "$profile_path"
+      rm -f "$profile_path" || cleanup_failed=1
     done
   fi
-  if [[ -f "$keychain_path" ]]; then
-    if [[ ${#original_keychains[@]} -gt 0 ]]; then
-      security list-keychains -d user -s "${original_keychains[@]}" || true
-    fi
-    security delete-keychain "$keychain_path" || true
+  signing_keychain_cleanup || cleanup_failed=1
+  rm -rf "$work_directory" || cleanup_failed=1
+  if [[ "$result" == 0 && "$cleanup_failed" != 0 ]]; then
+    result=1
   fi
-  rm -rf "$work_directory"
+  exit "$result"
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-if [[ ${#original_keychains[@]} -eq 0 ]]; then
-  echo '::error::Could not read the original runner keychain search list.'
-  exit 1
-fi
-
-printf '%s' "$APP_STORE_CERTIFICATES_BASE64" | base64 --decode > "$work_directory/certificates.p12"
+signing_keychain_prepare app-store "$work_directory" \
+  APP_STORE_CERTIFICATES_BASE64 APP_STORE_CERTIFICATES_PASSWORD
 printf '%s' "$APP_STORE_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$work_directory/profile.provisionprofile"
 printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
-keychain_password="$(openssl rand -hex 32)"
-echo "::add-mask::$keychain_password"
-security create-keychain -p "$keychain_password" "$keychain_path"
-security set-keychain-settings -lut 21600 "$keychain_path"
-security unlock-keychain -p "$keychain_password" "$keychain_path"
-security import "$work_directory/certificates.p12" -k "$keychain_path" \
-  -P "$APP_STORE_CERTIFICATES_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/security
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
-  -k "$keychain_password" "$keychain_path" > /dev/null
-security list-keychains -d user -s "$keychain_path" "${original_keychains[@]}"
-rm "$work_directory/certificates.p12"
 
 # Installer identities are not code-signing identities; query the basic policy.
 identities="$(security find-identity -v "$keychain_path")"
-app_identities="$(printf '%s\n' "$identities" | awk '/"(Apple Distribution:|3rd Party Mac Developer Application:)/ { print $2 }')"
-installer_identities="$(printf '%s\n' "$identities" | awk '/"(3rd Party Mac Developer Installer:|Mac Installer Distribution:)/ { print $2 }')"
+app_identities="$(printf '%s\n' "$identities" | awk -v team="$APPLE_TEAM_ID" \
+  '/"(Apple Distribution:|3rd Party Mac Developer Application:)/ && index($0, "(" team ")\"") { print $2 }')"
+installer_identities="$(printf '%s\n' "$identities" | awk -v team="$APPLE_TEAM_ID" \
+  '/"(3rd Party Mac Developer Installer:|Mac Installer Distribution:)/ && index($0, "(" team ")\"") { print $2 }')"
 app_identity_count="$(printf '%s\n' "$app_identities" | awk 'NF { count++ } END { print count+0 }')"
 installer_identity_count="$(printf '%s\n' "$installer_identities" | awk 'NF { count++ } END { print count+0 }')"
 if [[ ! "$app_identities" =~ ^[A-Fa-f0-9]{40}$ || ! "$installer_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
   if [[ ! "$app_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
-    echo "::error::Expected exactly one valid Apple Distribution (or Mac App Distribution) certificate with its matching private key; found $app_identity_count signing identities."
+    echo "::error::Expected exactly one valid Apple Distribution (or Mac App Distribution) certificate with its matching private key for APPLE_TEAM_ID; found $app_identity_count signing identities."
   fi
   if [[ ! "$installer_identities" =~ ^[A-Fa-f0-9]{40}$ ]]; then
-    echo "::error::Expected exactly one valid Mac Installer Distribution certificate with its matching private key; found $installer_identity_count signing identities."
+    echo "::error::Expected exactly one valid Mac Installer Distribution certificate with its matching private key for APPLE_TEAM_ID; found $installer_identity_count signing identities."
   fi
   if printf '%s\n' "$identities" | awk '/"Developer ID (Application|Installer):/ { found=1 } END { exit !found }'; then
     echo '::error::Detected Developer ID signing identities. These sign downloads distributed outside the Mac App Store and cannot replace the App Store distribution identities required for TestFlight. Update APP_STORE_CERTIFICATES_BASE64 with the App Store app and installer identities.'
   fi
-  echo '::error::Zero matches can mean a missing certificate or private key, an invalid certificate, or the wrong certificate type. Multiple matches mean the P12 contains too many identities of that type. See docs/RELEASING.md, Certificates and provisioning profile.'
+  echo '::error::Zero matches can mean a missing certificate or private key, an invalid certificate, the wrong team, or the wrong certificate type. Multiple matches mean the keychain contains too many identities of that type. Check the credentials or deliberately rotate the cached keychain. See docs/RELEASING.md, Certificates and provisioning profile.'
   exit 1
 fi
+signing_keychain_ready
 
 security cms -D -i "$work_directory/profile.provisionprofile" > "$work_directory/profile.plist"
 bundle_id=com.acehinnnqru.pasket
@@ -100,7 +83,13 @@ profile_uuid="$(python3 -B .github/scripts/testflight.py "$work_directory/profil
 for profile_directory in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
   mkdir -p "$profile_directory"
   profile_path="$profile_directory/$profile_uuid.provisionprofile"
-  if [[ -e "$profile_path" ]]; then
+  if [[ -L "$profile_path" ]]; then
+    echo '::error::Refusing to use a symbolic link as a provisioning profile on the runner.'
+    exit 1
+  elif [[ -f "$profile_path" ]] && cmp -s "$work_directory/profile.provisionprofile" "$profile_path"; then
+    # An identical preinstalled profile belongs to the runner; leave it in place.
+    continue
+  elif [[ -e "$profile_path" ]]; then
     echo '::error::Refusing to overwrite an existing provisioning profile on the runner.'
     exit 1
   fi
@@ -113,7 +102,7 @@ distribution_build -project pasket.xcodeproj -scheme pasket -configuration Relea
   -archivePath "$archive_path" ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$app_identities" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE_SPECIFIER="$profile_uuid" \
-  ENABLE_APP_SANDBOX=YES OTHER_CODE_SIGN_FLAGS="--keychain $keychain_path" archive
+  ENABLE_APP_SANDBOX=YES OTHER_CODE_SIGN_FLAGS="--keychain \"$keychain_path\"" archive
 
 app_path="$archive_path/Products/Applications/pasket.app"
 # Copied inputs can retain private modes even when the build uses umask 022.

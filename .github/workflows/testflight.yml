@@ -27,14 +27,13 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: xcode-27
+    runs-on: ${{ vars.MACOS_SIGNING_RUNNER || 'xcode-27' }}
     timeout-minutes: 90
     defaults:
       run:
         shell: bash
     env:
       RELEASE_TAG: ${{ inputs.tag }}
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - name: Check out the release tag
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -42,6 +41,16 @@ jobs:
           ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify the selected Xcode
+        run: |
+          xcode_version="$(xcodebuild -version)"
+          printf '%s\n' "$xcode_version"
+          if [[ "${xcode_version%%$'\n'*}" != "Xcode 27.1" ]]; then
+            echo '::error::Xcode 27.1 is required. Select it on the runner with xcode-select.' >&2
+            exit 1
+          fi
+          xcrun swift --version
 
       - name: Validate the release tag and tooling
         run: |
@@ -52,10 +61,11 @@ jobs:
 
       - name: Run core tests
         if: ${{ !inputs.core_tests_verified }}
-        run: swift test
+        run: xcrun swift test
 
       - name: Archive and upload to App Store Connect
         env:
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
           APP_STORE_CERTIFICATES_BASE64: ${{ secrets.APP_STORE_CERTIFICATES_BASE64 }}
           APP_STORE_CERTIFICATES_PASSWORD: ${{ secrets.APP_STORE_CERTIFICATES_PASSWORD }}
           APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}

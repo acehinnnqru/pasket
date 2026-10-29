@@ -2,57 +2,51 @@
 set -euo pipefail
 umask 077
 
-# Signing credentials and keychain changes belong only on an ephemeral hosted runner.
-if [[ "${GITHUB_ACTIONS:-}" != true || "${RUNNER_ENVIRONMENT:-}" != github-hosted || "${RUNNER_OS:-}" != macOS ]]; then
-  echo 'This script must run on a GitHub-hosted macOS Actions runner.' >&2
-  exit 1
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/signing-keychain.sh"
+signing_require_runner
 
-for variable in DEVELOPER_ID_CERTIFICATE_BASE64 DEVELOPER_ID_CERTIFICATE_PASSWORD \
-  APPLE_TEAM_ID APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_PRIVATE_KEY \
+for variable in APPLE_TEAM_ID APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_PRIVATE_KEY \
   RELEASE_TAG RUNNER_TEMP GITHUB_OUTPUT; do
   if [[ -z "${!variable:-}" ]]; then
     echo "::error::Missing required variable: $variable"
     exit 1
   fi
 done
+python3 -B .github/scripts/version.py check "$RELEASE_TAG"
 
 work_directory="$(mktemp -d "$RUNNER_TEMP/pasket-release.XXXXXX")"
-keychain_path="$work_directory/signing.keychain-db"
 key_path="$work_directory/AuthKey.p8"
 asset_directory="$RUNNER_TEMP/pasket-assets"
 
 cleanup() {
-  if [[ -f "$keychain_path" ]]; then
-    security delete-keychain "$keychain_path" || true
+  local result=$?
+  local cleanup_failed=0
+  trap - EXIT
+  signing_keychain_cleanup || cleanup_failed=1
+  rm -rf "$work_directory" || cleanup_failed=1
+  if [[ "$result" == 0 && "$cleanup_failed" != 0 ]]; then
+    result=1
   fi
-  rm -rf "$work_directory"
+  exit "$result"
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-printf '%s' "$DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > "$work_directory/certificate.p12"
+signing_keychain_prepare developer-id "$work_directory" \
+  DEVELOPER_ID_CERTIFICATE_BASE64 DEVELOPER_ID_CERTIFICATE_PASSWORD
 printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
-keychain_password="$(openssl rand -hex 32)"
-echo "::add-mask::$keychain_password"
-security create-keychain -p "$keychain_password" "$keychain_path"
-security set-keychain-settings -lut 21600 "$keychain_path"
-security unlock-keychain -p "$keychain_password" "$keychain_path"
-security import "$work_directory/certificate.p12" -k "$keychain_path" \
-  -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
-  -k "$keychain_password" "$keychain_path" > /dev/null
-security list-keychains -d user -s "$keychain_path" login.keychain-db
-rm "$work_directory/certificate.p12"
 
 # Select a certificate from this keychain, never an unrelated runner identity.
 identities="$(security find-identity -v -p codesigning "$keychain_path")"
-identity_count="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/ { count++ } END { print count+0 }')"
-if [[ "$identity_count" != 1 ]]; then
-  echo '::error::The P12 must contain exactly one valid Developer ID Application identity and its private key.'
+signing_identity="$(printf '%s\n' "$identities" | awk -v team="$APPLE_TEAM_ID" \
+  '/"Developer ID Application:/ && index($0, "(" team ")\"") { print $2 }')"
+if [[ ! "$signing_identity" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+  echo '::error::The signing keychain must contain exactly one valid Developer ID Application identity and private key for APPLE_TEAM_ID. Check the certificate or deliberately rotate the cached keychain.'
   exit 1
 fi
-signing_identity="$(printf '%s\n' "$identities" | awk '/"Developer ID Application:/ { print $2 }')"
-python3 .github/scripts/version.py check "$RELEASE_TAG"
+signing_keychain_ready
 
 xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
   -destination 'generic/platform=macOS' -derivedDataPath "$work_directory/DerivedData" \
@@ -60,7 +54,7 @@ xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
   CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$signing_identity" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PROVISIONING_PROFILE_SPECIFIER= \
   ENABLE_HARDENED_RUNTIME=YES CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-  OTHER_CODE_SIGN_FLAGS="--timestamp --keychain $keychain_path" build
+  OTHER_CODE_SIGN_FLAGS="--timestamp --keychain \"$keychain_path\"" build
 
 app_path="$work_directory/DerivedData/Build/Products/Release/pasket.app"
 architectures="$(lipo -archs "$app_path/Contents/MacOS/pasket")"

@@ -770,7 +770,7 @@ struct ShortcutRecordingView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 64)
-                .background(.primary.opacity(0.035), in: PasketShape.card)
+                .modifier(SettingsCard())
                 .overlay {
                     PasketShape.card
                         .strokeBorder(.primary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -1277,9 +1277,11 @@ private struct SettingsSectionHeader: View {
 }
 
 private struct SettingsCard: ViewModifier {
+    @Environment(\.pasketAppearance) private var appearance
+
     func body(content: Content) -> some View {
         content
-            .background(.primary.opacity(0.035), in: PasketShape.card)
+            .background(.primary.opacity(appearance == .liquidGlass ? 0.08 : 0.035), in: PasketShape.card)
     }
 }
 

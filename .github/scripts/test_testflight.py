@@ -125,19 +125,29 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
 
     def run_script(self, env):
         script = Path(__file__).with_name("upload-testflight.sh")
-        return subprocess.run(["/bin/bash", str(script)], env=env, capture_output=True, text=True)
+        return subprocess.run(
+            ["/bin/bash", "-c", 'security() { echo "UNEXPECTED_SECURITY_CALL" >&2; return 99; }; source "$1"',
+             "guard-test", str(script)], env=env, capture_output=True, text=True,
+        )
 
-    def test_refuses_local_and_self_hosted_credential_import(self):
-        for env in ({}, {"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "self-hosted"}):
+    def test_refuses_local_and_unknown_runner_contexts(self):
+        for env in ({}, {"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "unknown"}):
             with self.subTest(env=env):
                 result = self.run_script(env)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("GitHub-hosted macOS", result.stderr)
+                self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
+
+    def test_self_hosted_requires_explicit_keychain_password(self):
+        result = self.run_script({"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "self-hosted"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("CI_KEYCHAIN_PASSWORD", result.stderr)
+        self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
 
     def test_missing_credentials_fail_before_any_keychain_changes(self):
         result = self.run_script({"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "github-hosted"})
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Missing required variable: APP_STORE_CERTIFICATES_BASE64", result.stdout)
+        self.assertIn("Missing required variable: APP_STORE_PROVISIONING_PROFILE_BASE64", result.stdout)
+        self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
 
     def test_identity_validation_reports_missing_and_duplicate_identity_types(self):
         script = Path(__file__).with_name("upload-testflight.sh").read_text()
@@ -148,6 +158,7 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
         installer = f'  2) {"C" * 40} "3rd Party Mac Developer Installer: Example (TESTTEAM01)"'
         alternate_installer = f'  2) {"D" * 40} "Mac Installer Distribution: Example (TESTTEAM01)"'
         unrelated = f'  3) {"E" * 40} "Developer ID Application: Example (TESTTEAM01)"'
+        other_team = f'  1) {"F" * 40} "Apple Distribution: Example (OTHERTEAM1)"'
         for identities, expected_errors in (
             (f"{app}\n{installer}\n{unrelated}", ()),
             (f"{legacy_app}\n{alternate_installer}", ()),
@@ -157,15 +168,18 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
             (unrelated, (("Apple Distribution", 0), ("Mac Installer Distribution", 0))),
             (f"{app}\n{legacy_app}\n{installer}", (("Apple Distribution", 2),)),
             (f"{app}\n{installer}\n{alternate_installer}", (("Mac Installer Distribution", 2),)),
+            (f"{other_team}\n{installer}", (("Apple Distribution", 0),)),
         ):
             with self.subTest(identities=identities):
                 # Exercise selection without importing credentials or accessing a keychain.
                 result = subprocess.run(
                     ["/bin/bash", "-euc", 'security() { printf "%s\\n" "$TEST_IDENTITIES"; }\n'
-                     'keychain_path=synthetic-keychain\n' + validation],
+                     'signing_keychain_ready() { echo READY_FOR_REUSE; }\n'
+                     'APPLE_TEAM_ID=TESTTEAM01\nkeychain_path=synthetic-keychain\n' + validation],
                     env={**os.environ, "TEST_IDENTITIES": identities}, capture_output=True, text=True,
                 )
                 self.assertEqual(result.returncode, 1 if expected_errors else 0, result.stderr)
+                self.assertEqual("READY_FOR_REUSE" in result.stdout, not expected_errors)
                 errors = [line for line in result.stdout.splitlines() if "Expected exactly one" in line]
                 self.assertEqual(len(errors), len(expected_errors))
                 for line, (identity_type, count) in zip(errors, expected_errors):
@@ -184,13 +198,93 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
             work.mkdir()
             (work / "AuthKey.p8").write_text("synthetic private key")
             result = subprocess.run(
-                ["/bin/bash", "-uc", cleanup + '\nwork_directory="$1"\n'
-                 'keychain_path="$1/signing.keychain-db"\nprofile_paths=()\n'
-                 'original_keychains=()\ncleanup', "cleanup-test", str(work)],
+                ["/bin/bash", "-uc", cleanup + '\nsigning_keychain_cleanup() { return 0; }\n'
+                 'work_directory="$1"\nprofile_paths=()\ncleanup', "cleanup-test", str(work)],
                 capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(work.exists(), "Decoded credentials must be deleted on early failures.")
+
+    def test_cleanup_reports_failure_and_preserves_original_exit_status(self):
+        for name in ("release-macos.sh", "upload-testflight.sh"):
+            script = Path(__file__).with_name(name).read_text()
+            cleanup = script[script.index("cleanup() {\n"):script.index("\ntrap cleanup EXIT")]
+            for prior_status, expected in ((0, 1), (42, 42)):
+                with self.subTest(script=name, prior_status=prior_status), tempfile.TemporaryDirectory() as directory:
+                    work = Path(directory) / "credentials"
+                    work.mkdir()
+                    (work / "AuthKey.p8").write_text("synthetic private key")
+                    result = subprocess.run(
+                        ["/bin/bash", "-uc", cleanup + '\nsigning_keychain_cleanup() { return 1; }\n'
+                         'work_directory="$1"\nprofile_paths=()\n(exit "$2")\ncleanup',
+                         "cleanup-test", str(work), str(prior_status)], capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertFalse(work.exists())
+
+    def test_developer_id_selection_requires_one_valid_identity_for_the_team(self):
+        script = Path(__file__).with_name("release-macos.sh").read_text()
+        validation = script[script.index("# Select a certificate from this keychain"):
+                            script.index("\nxcodebuild -project")]
+        identity = f'  1) {"A" * 40} "Developer ID Application: Example (TESTTEAM01)"'
+        other_team = f'  2) {"B" * 40} "Developer ID Application: Example (OTHERTEAM1)"'
+        duplicate = f'  3) {"C" * 40} "Developer ID Application: Example (TESTTEAM01)"'
+        for identities, expected in ((identity, 0), (f"{identity}\n{other_team}", 0),
+                                     (other_team, 1), (f"{identity}\n{duplicate}", 1), ("0 valid identities found", 1)):
+            with self.subTest(identities=identities):
+                result = subprocess.run(
+                    ["/bin/bash", "-euc", 'security() { printf "%s\\n" "$TEST_IDENTITIES"; }\n'
+                     'signing_keychain_ready() { echo READY_FOR_REUSE; }\n'
+                     'APPLE_TEAM_ID=TESTTEAM01\nkeychain_path=synthetic-keychain\n' + validation],
+                    env={**os.environ, "TEST_IDENTITIES": identities}, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual("READY_FOR_REUSE" in result.stdout, expected == 0)
+
+    def test_profile_installation_preserves_existing_files_and_cleans_only_its_own_copy(self):
+        script = Path(__file__).with_name("upload-testflight.sh").read_text()
+        installation = script[script.index("# Support both current Xcode"):
+                              script.index("\ndistribution_build -project")]
+        # Redirect only the profile destinations in this isolated code fragment.
+        installation = installation.replace(
+            '"$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"',
+            '"$fixture_directory/profiles"',
+        )
+        self.assertNotIn("$HOME", installation)
+        for existing in ("missing", "identical", "different", "symlink"):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work = root / "work"
+                profiles = root / "profiles"
+                work.mkdir()
+                profiles.mkdir()
+                (work / "profile.provisionprofile").write_text("new profile")
+                destination = profiles / f"{PROFILE_UUID}.provisionprofile"
+                if existing in ("identical", "different"):
+                    destination.write_text("new profile" if existing == "identical" else "existing profile")
+                elif existing == "symlink":
+                    destination.symlink_to(work / "profile.provisionprofile")
+                result = subprocess.run(
+                    ["/bin/bash", "-euc", 'fixture_directory="$1"\nwork_directory="$1/work"\n'
+                     'profile_uuid="$2"\nprofile_paths=()\n' + installation + '''
+printf 'installed=%s\\n' "${#profile_paths[@]}"
+if [[ ${#profile_paths[@]} -gt 0 ]]; then
+  for installed_profile in "${profile_paths[@]}"; do rm "$installed_profile"; done
+fi
+''', "profile-test", str(root), PROFILE_UUID], capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0 if existing in ("missing", "identical") else 1,
+                                 result.stderr)
+                if existing == "missing":
+                    self.assertIn("installed=1", result.stdout)
+                    self.assertFalse(destination.exists())
+                elif existing == "identical":
+                    self.assertIn("installed=0", result.stdout)
+                    self.assertEqual(destination.read_text(), "new profile")
+                elif existing == "different":
+                    self.assertEqual(destination.read_text(), "existing profile")
+                else:
+                    self.assertTrue(destination.is_symlink())
 
 
 if __name__ == "__main__":

@@ -355,6 +355,39 @@ repository permissions and does not require signing credentials. To require a
 passing CI result before merging, select **Build and test** as a required status
 check in the default branch's protection rule or ruleset.
 
+### Runner setup
+
+Unsigned macOS jobs use a runner with the `xcode-27` label. Signing jobs use
+`MACOS_SIGNING_RUNNER` when configured, otherwise `xcode-27`. Install full Xcode 27.1
+and complete its first-launch setup on the runner. Select that installation as
+the machine's default command-line toolchain; for example, if it is installed
+at `/Applications/Xcode.app`:
+
+```sh
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+xcodebuild -version
+xcrun swift --version
+```
+
+Use the actual installation path on that runner. This is a machine setup step,
+not a workflow step. The workflows do not set `DEVELOPER_DIR` or install Xcode;
+they verify that the selected Xcode reports version `27.1` before running tests
+or compiling. Swift tests use `xcrun swift test` to resolve Swift through the
+selected Xcode. If the runner environment already sets `DEVELOPER_DIR`, that
+value overrides the machine's default and must point to the intended Xcode.
+
+When replacing a runner, select Xcode on the new machine and assign the
+appropriate job label. Its installation path can differ without changing the
+workflows. A deliberate Xcode version upgrade also requires updating the
+version checks in all four macOS workflows.
+
+Self-hosted macOS runners can run unsigned checks or use a dedicated persistent
+CI keychain for trusted signing jobs. Keep release runners separate from untrusted
+PR builds. See [self-hosted signing setup](RELEASING.md#persistent-signing-on-self-hosted-runners)
+for runner labels, secrets, reuse, and cleanup behavior.
+
+### Local checks
+
 Run `swift test` for the core suite. Tests use isolated named pasteboards and temporary fixtures;
 they do not read or overwrite the real clipboard. They cover text boundaries, deduplication,
 full-body search and copy, classification, source persistence, pause/resume, restart, deletion,

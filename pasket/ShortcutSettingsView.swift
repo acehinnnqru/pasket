@@ -10,7 +10,7 @@ struct ShortcutSettingsView: View {
     @Bindable var appearance: AppearancePreferences
     @Bindable var loginItem: LoginItemPreferences
     var onClose: () -> Void = {}
-    @FocusState private var focusedHistoryField: HistoryLimitField?
+    @State private var focusedHistoryField: HistoryLimitField?
     @State private var presentedPicker: SettingsPicker?
 
     private enum SettingsPicker: Equatable {
@@ -888,7 +888,7 @@ private struct AccentColorSwatchButtonStyle: ButtonStyle {
 
 private struct HistoryRetentionSettingsView: View {
     @Bindable var store: ClipboardStore
-    var focusedField: FocusState<HistoryLimitField?>.Binding
+    @Binding var focusedField: HistoryLimitField?
     @State private var draft = HistoryRetentionDraft(.default)
     @State private var confirmation: ClipboardRetentionPlan?
     @State private var impactChanged = false
@@ -958,7 +958,7 @@ private struct HistoryRetentionSettingsView: View {
                     }
                     HStack {
                         Button("Restore Defaults") {
-                            focusedField.wrappedValue = nil
+                            focusedField = nil
                             draft = HistoryRetentionDraft(.default)
                         }
                             .buttonStyle(PasketButtonStyle())
@@ -995,19 +995,19 @@ private struct HistoryRetentionSettingsView: View {
 
     private func limitRow(_ title: String, detail: String, value: Binding<HistoryLimitDraft>,
                           unit: String, field: HistoryLimitField) -> some View {
-        let isFocused = focusedField.wrappedValue == field
+        let isFocused = focusedField == field
         return HStack(spacing: 12) {
             SettingsLabel(title: title, detail: detail)
             Spacer(minLength: 4)
             HStack(spacing: 6) {
-                TextField("", text: value.number)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .multilineTextAlignment(.trailing)
-                    .focused(focusedField, equals: field)
-                    .onSubmit { focusedField.wrappedValue = nil }
-                    .accessibilityLabel(title)
-                Button { focusedField.wrappedValue = field } label: {
+                SettingsTextField(text: value.number, isFocused: Binding(
+                    get: { focusedField == field },
+                    set: { focused in
+                        if focused { focusedField = field }
+                        else if focusedField == field { focusedField = nil }
+                    }
+                ), label: title)
+                Button { focusedField = field } label: {
                     Text(unit)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -1022,7 +1022,7 @@ private struct HistoryRetentionSettingsView: View {
             .padding(.horizontal, 8)
             .frame(width: 108, height: 26)
             .background {
-                Button { focusedField.wrappedValue = field } label: {
+                Button { focusedField = field } label: {
                     PasketShape.control.fill(.primary.opacity(0.035))
                 }
                 .buttonStyle(.plain)
@@ -1042,7 +1042,7 @@ private struct HistoryRetentionSettingsView: View {
                 .frame(width: 88, alignment: .leading)
                 .accessibilityLabel("Unlimited \(title.lowercased())")
                 .onChange(of: value.wrappedValue.unlimited) {
-                    if focusedField.wrappedValue == field { focusedField.wrappedValue = nil }
+                    if focusedField == field { focusedField = nil }
                 }
         }
         .padding(.horizontal, 12)
@@ -1088,7 +1088,7 @@ private struct HistoryRetentionSettingsView: View {
 
     private func apply(confirmed: ClipboardRetentionPlan? = nil) {
         guard let settings = draft.settings else { return }
-        focusedField.wrappedValue = nil
+        focusedField = nil
         Task {
             if let plan = await store.applyRetention(settings, confirmed: confirmed) {
                 impactChanged = confirmed != nil

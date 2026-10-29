@@ -30,6 +30,7 @@ when the change belongs to every instance; avoid copying its implementation into
 | `ClipboardMenuSurface` | [ContentView.swift](pasket/ContentView.swift) | Custom menu material, outline, and shadow |
 | `SettingsToggleRow` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings switch size, alignment, title, and explanation |
 | `SettingsControlRow`, `SettingsLabel` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings title and explanation layout for switches, pickers, shortcuts, and limits |
+| `SettingsTextField` | [SettingsTextField.swift](pasket/SettingsTextField.swift) | Native numeric-input editing and focus, using the Settings window's compatible field editor |
 | `SettingsSectionHeader`, `SettingsCard` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Settings grouping and card appearance |
 | `ShortcutKeycap`, `ShortcutKeycaps` | [ShortcutSettingsView.swift](pasket/ShortcutSettingsView.swift) | Individual keycaps and keyboard shortcut groups |
 

@@ -362,9 +362,11 @@ of unloaded bodies, Unicode matching, and stable identities when repeating an un
 Retention coverage includes category-specific eviction, overlapping limits, unlimited settings,
 confirmation previews, changed victims with identical counts and sizes, expiry during confirmation,
 copy renewal, upgrade review, paused maintenance, and rollback that preserves settings and images.
-Settings input tests repeatedly switch and edit four fields in an isolated hidden window. Settings
-uses its own shared TextKit 1 field editor to avoid a main-thread hang observed in TextKit 2 mouse
-selection while switching numeric inputs. Other windows and secure text fields retain their normal editors.
+Settings input tests repeatedly switch and edit four fields in isolated AppKit and SwiftUI-hosted
+windows. History limits use `SettingsTextField`, a native text field bridged into SwiftUI, so the
+Settings window's shared TextKit 1 field editor handles editing. SwiftUI's `TextField` bypasses
+the window's editor delegate and uses TextKit 2, where mouse selection while switching numeric
+inputs has caused a main-thread hang. Other windows and secure text fields retain their normal editors.
 Paste tests inject permissions, target state, keyboard release, and event delivery; they never send
 real keystrokes. They cover dismissal order, held keys, permission denial and revocation, target exit,
 app switches, clipboard changes, reopening, task cancellation, and timeout.

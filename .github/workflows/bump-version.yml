@@ -112,7 +112,7 @@ jobs:
   commit:
     name: Commit and tag the requested version
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     timeout-minutes: 10
     permissions:
       contents: read

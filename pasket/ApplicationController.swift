@@ -98,6 +98,10 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         self.store = store
         pasteController = ClipboardPasteController(toasts: store.toasts, systemAccess: store.systemAccess)
         super.init()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(activeSpaceDidChange(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil
+        )
         dockIcon.onChange = { [weak self] in self?.applyDockPreferences() }
         store.pasteQueue.onActiveChange = { [weak self] active in
             guard let self else { return }
@@ -186,7 +190,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel.backgroundColor = .clear
             panel.hasShadow = true
             panel.level = .floating
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            // Join the invoking desktop without remaining over other Spaces during a switch.
+            panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             panel.isMovableByWindowBackground = false
             panel.hidesOnDeactivate = false
             panel.delegate = self
@@ -505,6 +510,12 @@ final class ApplicationController: NSObject, NSWindowDelegate {
         isRelaunchRequested = false
         if hasStartedHistory { store.resumeMonitoring() }
         shortcuts.start()
+    }
+
+    @objc private func activeSpaceDidChange(_ notification: Notification) {
+        guard let panel, panel.isVisible, !panel.isOnActiveSpace else { return }
+        // Changing Spaces need not resign the panel's borrowed keyboard focus.
+        hidePanel(restorePreviousApplication: false)
     }
 
     func windowDidResignKey(_ notification: Notification) {

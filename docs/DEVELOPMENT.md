@@ -143,6 +143,8 @@ use its close button, Escape, or Command-W to close it. Settings remains a separ
   but the active filter resets when Pasket quits. Search text clears on every open.
 - The history panel borrows keyboard focus without activating Pasket, preserving the previous
   application's input focus and caret when it closes.
+  It opens on the current desktop, including over full-screen apps. Switching away from its Space
+  dismisses history without activating the previous application or following onto the destination desktop.
 - **Return**, double-click, or **Paste** copies the complete item, closes the panel,
   and sends Command-V to the original application. Automatic paste requires event-posting
   permission, shown in **System Settings → Privacy & Security → Accessibility**. If permission
@@ -377,6 +379,14 @@ persistence across relaunch, returning to System, and independence from the Dock
 
 For the desktop smoke test:
 
+- Open history, then switch desktops with a trackpad gesture and Control-Left/Right. The panel
+  must not remain over the destination desktop during the transition, return when switching back,
+  or pull focus back to the previous application. Repeat between desktops showing windows from
+  the same app, with a history menu or sheet open, and with separate Spaces on multiple displays.
+  Switching only another display's desktop must leave history on the unchanged desktop open.
+  Reopen history on each desktop and over a full-screen app; it must appear on the invoking display
+  without switching desktops, accept search input, and preserve normal Escape and paste behavior.
+  Repeat with Reduce Motion enabled. A paste pending during a desktop switch must be cancelled.
 - With at least 600 history entries spanning several date groups, drag the scrollbar directly
   near the bottom before scrolling through earlier pages. Its thumb size and range should already
   reflect all matches; loading summaries or thumbnails must not shorten it or move the visible

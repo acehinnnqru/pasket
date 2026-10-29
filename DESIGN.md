@@ -263,7 +263,12 @@ Its custom menus use `.regularMaterial` without an additional solid color fill o
 with the existing outline and shadow. Both appearances preserve view identity when
 switching, so changing the material does not rebuild content, reset scroll positions,
 or discard input focus. Reserve accent fills for option selection and interaction feedback.
-Settings cards use a primary-color fill at 0.035 opacity through `SettingsCard`.
+Settings and equivalent setup cards use `SettingsCard`. In Liquid Glass, use a
+primary-color fill at 0.08 opacity to separate grouped content from the glass panel.
+Classic keeps the 0.035 primary fill. Both appearances use the same card shape and
+geometry, with fill alone defining the group boundary. The shortcut-recording target
+shares this fill through `SettingsCard` and retains its existing dashed outline as
+a distinct recording affordance.
 Reuse the existing state treatments in `PasketButtonStyle` rather than choosing new
 opacity values for each button. Decorative outlines must not intercept input.
 

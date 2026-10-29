@@ -357,8 +357,8 @@ check in the default branch's protection rule or ruleset.
 
 ### Runner setup
 
-Unsigned macOS jobs use a runner with the `xcode-27` label. Signing jobs use
-`MACOS_SIGNING_RUNNER` when configured, otherwise `xcode-27`. Install full Xcode 27.1
+Unsigned macOS jobs use a runner with the `self-hosted` label. Signing jobs use
+`MACOS_SIGNING_RUNNER` when configured, otherwise `self-hosted`. Install full Xcode 27.1
 and complete its first-launch setup on the runner. Select that installation as
 the machine's default command-line toolchain; for example, if it is installed
 at `/Applications/Xcode.app`:

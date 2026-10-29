@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ${{ vars.MACOS_SIGNING_RUNNER || 'xcode-27' }}
+    runs-on: ${{ vars.MACOS_SIGNING_RUNNER || 'self-hosted' }}
     timeout-minutes: 90
     permissions:
       contents: write

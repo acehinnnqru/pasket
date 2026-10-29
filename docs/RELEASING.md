@@ -79,7 +79,7 @@ preserves its structure, signature, and notarization ticket for downloading.
 Both downloads require macOS 26 or later. The macOS jobs use the runner's selected
 Xcode and verify that it reports version `27.1`. The signing jobs use the
 `MACOS_SIGNING_RUNNER` repository variable as their runner label, falling back
-to `xcode-27` when it is unset. A label routes jobs to a runner; it does not
+to `self-hosted` when it is unset. A label routes jobs to a runner; it does not
 install or select a toolchain. Installation paths
 are configured on the runner, as described in the
 [runner setup guide](DEVELOPMENT.md#runner-setup).
@@ -196,7 +196,7 @@ Use a dedicated macOS release runner that executes trusted release code. Keep
 untrusted pull-request builds in a separate environment; a separate keychain
 file does not isolate jobs running as the same macOS user. Give the release
 runner a distinct label such as `pasket-signing`, set the repository variable
-`MACOS_SIGNING_RUNNER` to that label, and keep the PR CI label `xcode-27` off
+`MACOS_SIGNING_RUNNER` to that label, and keep the PR CI label `self-hosted` off
 that runner. Select Xcode 27.1 as described in the
 [runner setup guide](DEVELOPMENT.md#runner-setup).
 

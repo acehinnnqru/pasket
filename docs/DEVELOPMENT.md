@@ -42,6 +42,13 @@ indicator. Choose System (the default) to follow the macOS accent color, or Blue
 Red, Orange, Yellow, Green, or Graphite. Changes apply immediately to history and Settings and
 save automatically for the next launch.
 
+Settings → Appearance selects Liquid Glass (the default) or Classic. Liquid Glass uses
+the native regular glass material for panels and custom menus and follows the system's
+Liquid Glass look and accessibility preferences. Classic preserves the frosted HUD
+panel background and regular-material menus. Switching applies immediately to existing
+windows and sheets and persists across launches independently of accent and Dock icon colors.
+Neither choice overrides the system's light or dark appearance.
+
 The menu bar's Statistics entry opens a separate window with Copies and History opens pages by local date and 7-, 30-, and 90-day
 charts, daily counts, and previous/next period navigation. Both pages
 include Today, Selected period, and Total summaries. Total covers every recorded date,

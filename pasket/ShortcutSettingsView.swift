@@ -7,10 +7,15 @@ struct ShortcutSettingsView: View {
     @Bindable var store: ClipboardStore
     @Bindable var dockIcon: DockIconPreferences
     @Bindable var accentColor: AccentColorPreferences
+    @Bindable var appearance: AppearancePreferences
     @Bindable var loginItem: LoginItemPreferences
     var onClose: () -> Void = {}
     @FocusState private var focusedHistoryField: HistoryLimitField?
-    @State private var isPickerPresented = false
+    @State private var presentedPicker: SettingsPicker?
+
+    private enum SettingsPicker: Equatable {
+        case typeFilter, appearance
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +36,7 @@ struct ShortcutSettingsView: View {
                             .accessibilityIdentifier("shortcutSettingsError")
                     }
 
+                    appearanceSection
                     accentColorSection
                     dockIconSection
                 }
@@ -66,7 +72,7 @@ struct ShortcutSettingsView: View {
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
                 else { return false }
                 if !event.isARepeat {
-                    if isPickerPresented { isPickerPresented = false }
+                    if presentedPicker != nil { presentedPicker = nil }
                     else { onClose() }
                 }
                 return true
@@ -151,7 +157,7 @@ struct ShortcutSettingsView: View {
                     PasketPicker(title: "Remember type filter", selection: Binding<ClipboardFilterMemory>(
                         get: { store.filterPreferences.memory },
                         set: { store.filterPreferences.select($0) }
-                    ), isPresented: $isPickerPresented, options: ClipboardFilterMemory.allCases) { memory in
+                    ), isPresented: pickerPresentation(.typeFilter), options: ClipboardFilterMemory.allCases) { memory in
                         memory.title
                     }
                     .accessibilityIdentifier("clipboardFilterMemory")
@@ -160,6 +166,33 @@ struct ShortcutSettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .modifier(SettingsCard())
+        }
+    }
+
+    private func pickerPresentation(_ picker: SettingsPicker) -> Binding<Bool> {
+        Binding(
+            get: { presentedPicker == picker },
+            set: { isPresented in
+                if isPresented { presentedPicker = picker }
+                else if presentedPicker == picker { presentedPicker = nil }
+            }
+        )
+    }
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: "Appearance")
+            SettingsControlRow(title: "Style", detail: appearance.appearance.explanation) {
+                PasketPicker(title: "Appearance", selection: Binding<AppearanceOption>(
+                    get: { appearance.appearance },
+                    set: { appearance.select($0) }
+                ), isPresented: pickerPresentation(.appearance), options: AppearanceOption.allCases) { option in
+                    option.title
+                }
+                .accessibilityIdentifier("appearanceStyle")
             }
             .padding(12)
             .modifier(SettingsCard())

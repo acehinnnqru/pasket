@@ -76,6 +76,7 @@ final class ApplicationController: NSObject, NSWindowDelegate {
     let pasteController: ClipboardPasteController
     let dockIcon = DockIconPreferences()
     let accentColor = AccentColorPreferences()
+    let appearance = AppearancePreferences()
     let loginItem = LoginItemPreferences()
     let setup = AppSetup()
     let historyStatistics = HistoryStatistics()
@@ -199,7 +200,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 onStartPasteQueue: { [weak self] items in self?.startPasteQueue(items) },
                 onPasteNext: { [weak self] in self?.pasteNextQueuedItem() },
                 onRelaunch: { [weak self] in self?.requestRelaunch() }
-            ).modifier(PasketAccentColor(preferences: accentColor)))
+            ).modifier(PasketAccentColor(preferences: accentColor))
+                .modifier(PasketAppearance(preferences: appearance)))
             self.panel = panel
         }
         store.prepareForPresentation()
@@ -331,9 +333,11 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 store: store,
                 dockIcon: dockIcon,
                 accentColor: accentColor,
+                appearance: appearance,
                 loginItem: loginItem,
                 onClose: { [weak self] in self?.settingsWindow?.close() }
-            ).modifier(PasketAccentColor(preferences: accentColor)))
+            ).modifier(PasketAccentColor(preferences: accentColor))
+                .modifier(PasketAppearance(preferences: appearance)))
             settingsWindow = window
         }
         if let window = settingsWindow, let visibleFrame = screen?.visibleFrame {
@@ -374,7 +378,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                 statistics: historyStatistics,
                 copyStatistics: store.copyStatistics,
                 onClose: { [weak self] in self?.statisticsWindow?.close() }
-            ).modifier(PasketAccentColor(preferences: accentColor)))
+            ).modifier(PasketAccentColor(preferences: accentColor))
+                .modifier(PasketAppearance(preferences: appearance)))
             if let visibleFrame = screen?.visibleFrame {
                 window.setFrameOrigin(NSPoint(
                     x: visibleFrame.midX - window.frame.width / 2,
@@ -428,7 +433,8 @@ final class ApplicationController: NSObject, NSWindowDelegate {
                         window.setFrame(frame, display: true)
                     }
                 }
-            ).modifier(PasketAccentColor(preferences: accentColor)))
+            ).modifier(PasketAccentColor(preferences: accentColor))
+                .modifier(PasketAppearance(preferences: appearance)))
             window.center()
             setupWindow = window
         }

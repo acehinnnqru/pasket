@@ -63,8 +63,8 @@ and shadow of paste and more-action menus.
 Accent-color swatches remain circular, and status pills may use a capsule. Do not force
 these semantic shapes into the rounded-rectangle scale.
 
-Existing specialized surfaces are outside the shared shape migration: the image preview
-uses a 12-point radius; toast cards use 14 points with a 9-point icon background; chart
+Existing specialized surfaces are outside the shared shape migration:
+toast cards use 14 points with a 9-point icon background; chart
 bars have their own geometry. These are existing local treatments, not additional defaults
 for ordinary controls. Reassess them when changing those components and document any
 new shared role here.
@@ -276,6 +276,12 @@ Keep history selection, focus, and hover distinct: selected rows use an accent f
 the focused row receives an accent outline; hover feedback must not obscure selection.
 Preserve menu checkmarks, selected accessibility traits, and disabled interaction behavior.
 When changing state appearance, review all states of the component together.
+
+History image previews and loaded thumbnails have no added background fill, so image
+transparency and aspect-fit margins reveal the surrounding panel or row surface.
+Keep the preview's 12-point content inset and the thumbnail's 30-point frame for stable
+layout. Icon tiles retain their muted control-shaped fill when no thumbnail is available;
+row selection, hover, and focus treatments remain independent of image presentation.
 
 Custom picker, paste, and more-action menus share `PasketMenuItemStyle`. Grouped menus
 use a primary hover fill at 0.04 opacity and a pressed fill at 0.08; picker

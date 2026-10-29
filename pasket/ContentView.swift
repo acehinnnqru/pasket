@@ -1403,7 +1403,11 @@ private struct HistoryRow: View {
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
                 .frame(width: 30, height: 30)
-                .background(.quaternary.opacity(0.5), in: PasketShape.control)
+                .background {
+                    if thumbnail == nil {
+                        PasketShape.control.fill(.quaternary.opacity(0.5))
+                    }
+                }
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true
@@ -1463,7 +1467,6 @@ private struct ClipboardImagePreview: View {
         }
         .padding(12)
         .foregroundStyle(.secondary)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
         .task(id: isLoading) {
             showsProgress = false
             guard isLoading else { return }

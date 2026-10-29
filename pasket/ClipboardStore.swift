@@ -42,6 +42,9 @@ final class ClipboardStore {
         }
     }
     private(set) var items: [ClipboardItem] = []
+    private(set) var resultReferences: [ClipboardHistoryReference] = []
+    private(set) var historyRevision = UUID()
+    private(set) var failedHistoryIDs: Set<UUID> = []
     private(set) var totalCount = 0
     private(set) var matchingCount = 0
     private(set) var imageStorageBytes = 0
@@ -98,17 +101,22 @@ final class ClipboardStore {
     @ObservationIgnored private var queryTask: Task<Void, Never>?
     @ObservationIgnored private var queryGeneration = 0
     @ObservationIgnored private var selectsFirstResultOnReload = false
-    @ObservationIgnored private var loadedLimit = 50
+    @ObservationIgnored private var loadedLimit = ClipboardHistoryLayout.pageSize
+    @ObservationIgnored private var resetsLoadedResults = false
+    private struct PageRequest: Hashable {
+        let generation: Int
+        let offset: Int
+    }
+    @ObservationIgnored private var pageLoads: [PageRequest: Task<Void, Never>] = [:]
+    @ObservationIgnored private var historyPageError: String?
     @ObservationIgnored private var navigationTask: Task<Void, Never>?
-    @ObservationIgnored private var advanceAfterLoading: UUID?
-    @ObservationIgnored private var advanceExtendsSelection = false
     @ObservationIgnored private var retentionTimer: Timer?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var isPresented = false
     @ObservationIgnored private var lastDismissedAt: Date?
     @ObservationIgnored private var lastAutoRecycleAt: Date?
     private let autoRecycleInterval: TimeInterval = 5 * 60
-    private let pageSize = 50
+    private let pageSize = ClipboardHistoryLayout.pageSize
 
     init(directory: URL = ClipboardPersistence.applicationDirectory(), pasteboard: NSPasteboard = .general,
          filterPreferences: ClipboardFilterPreferences? = nil, statisticsDefaults: UserDefaults = .standard) {
@@ -135,15 +143,28 @@ final class ClipboardStore {
         }.map(\.item)
     }
 
+    var historyReferences: [ClipboardHistoryReference] {
+        isDebugMode ? filteredItems.map { ClipboardHistoryReference(id: $0.id, copiedAt: $0.copiedAt) }
+            : resultReferences
+    }
+
+    private var selectionOrder: [UUID] {
+        if isDebugMode { return filteredItems.map(\.id) }
+        let indexed = Set(resultReferences.map(\.id))
+        // Keep optimistic captures selectable until their write publishes the new index.
+        return items.filter { !indexed.contains($0.id) }.map(\.id) + resultReferences.map(\.id)
+    }
+
     var selectedItem: ClipboardItem? {
         guard let item = filteredItems.first(where: { $0.id == selectedID }) else { return nil }
         return !isDebugMode && selectedDetail?.id == item.id ? selectedDetail : item
     }
     var isStorageBlocked: Bool { storageBlocked }
     var canCopySelection: Bool {
-        !isDebugMode && !selectedIDs.isEmpty && selectedIDs.isDisjoint(with: unavailableItems) && !isLoading && !isCopying
+        !isDebugMode && !selectedIDs.isEmpty && selectedItems.count == selectedIDs.count
+            && selectedIDs.isDisjoint(with: unavailableItems) && !isLoading && !isCopying
     }
-    var canCombineSelection: Bool { ClipboardBatch.canCombine(selectedItems) }
+    var canCombineSelection: Bool { selectedItems.count == selectedIDs.count && ClipboardBatch.canCombine(selectedItems) }
     var hasMoreItems: Bool { !isDebugMode && items.count < matchingCount }
 
     func start() async {
@@ -333,12 +354,13 @@ final class ClipboardStore {
 
     func reconcileSelection() {
         copyError = nil
-        selection.reconcile(with: filteredItems.map(\.id), fallback: filteredItems.first?.id)
+        selection.reconcile(with: selectionOrder, fallback: filteredItems.first?.id)
     }
 
     func select(_ id: UUID, command: Bool = false, shift: Bool = false) {
         selectsFirstResultOnReload = false
-        selection.select(id, in: filteredItems.map(\.id), command: command, shift: shift)
+        selection.select(id, in: selectionOrder, command: command, shift: shift)
+        hydrateSelection()
         copyError = nil
     }
 
@@ -389,23 +411,27 @@ final class ClipboardStore {
 
     private func moveSelection(to id: UUID, extending: Bool) {
         selectsFirstResultOnReload = false
-        selection.move(to: id, in: filteredItems.map(\.id), extending: extending)
+        selection.move(to: id, in: selectionOrder, extending: extending)
+        hydrateSelection()
         copyError = nil
     }
 
     func moveSelection(by offset: Int, extending: Bool = false) {
-        let visibleItems = filteredItems
-        guard !visibleItems.isEmpty else { return }
+        let order = selectionOrder
+        guard !order.isEmpty else { return }
         selectsFirstResultOnReload = false
-        let current = visibleItems.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : visibleItems.count)
-        if offset > 0, current == visibleItems.count - 1, hasMoreItems {
-            advanceAfterLoading = selectedID
-            advanceExtendsSelection = extending
-            navigationTask = Task { await loadMore() }
-            return
-        }
-        moveSelection(to: visibleItems[min(max(current + offset, 0), visibleItems.count - 1)].id, extending: extending)
+        let current = order.firstIndex { $0 == selectedID } ?? (offset > 0 ? -1 : order.count)
+        moveSelection(to: order[min(max(current + offset, 0), order.count - 1)], extending: extending)
         copyError = nil
+    }
+
+    private func hydrateSelection() {
+        guard !isDebugMode else { return }
+        let loaded = Set(items.map(\.id))
+        let missing = resultReferences.indices.filter { selectedIDs.contains(resultReferences[$0].id)
+            && !loaded.contains(resultReferences[$0].id) }
+        guard let first = missing.first, let last = missing.last else { return }
+        navigationTask = Task { await loadHistory(in: first..<(last + 1)) }
     }
 
     func delete(_ id: UUID) {
@@ -414,6 +440,18 @@ final class ClipboardStore {
 
     func deleteItems(_ ids: Set<UUID>) {
         guard !isDebugMode, !storageBlocked, !isLoading, !isCopying else { return }
+        let loaded = Set(items.map(\.id))
+        if !ids.isSubset(of: loaded) {
+            let indices = resultReferences.indices.filter { ids.contains(resultReferences[$0].id) }
+            guard let first = indices.first, let last = indices.last else { return }
+            let generation = queryGeneration
+            navigationTask = Task {
+                await loadHistory(in: first..<(last + 1))
+                guard generation == queryGeneration, ids.isSubset(of: Set(items.map(\.id))) else { return }
+                deleteItems(ids)
+            }
+            return
+        }
         let deleted = items.filter { ids.contains($0.id) }
         guard !deleted.isEmpty else { return }
         if pasteQueue.entries.contains(where: { ids.contains($0.id) }) { pasteQueue.cancel() }
@@ -428,6 +466,7 @@ final class ClipboardStore {
             }
         }
         items.removeAll { ids.contains($0.id) }
+        resultReferences.removeAll { ids.contains($0.id) }
         let fallback = items.isEmpty ? nil : items[min(index, items.count - 1)].id
         selection.reconcile(with: items.map(\.id), fallback: fallback)
         for item in deleted {
@@ -467,6 +506,9 @@ final class ClipboardStore {
         deletionCutoffs = [:]
         monitor.checkpoint()
         items = []
+        resultReferences = []
+        failedHistoryIDs = []
+        historyRevision = UUID()
         totalCount = 0
         matchingCount = 0
         imageStorageBytes = 0
@@ -513,7 +555,7 @@ final class ClipboardStore {
         }
         guard !Task.isCancelled, presentationID == presentation, !isDebugMode else { return false }
         let selectionSnapshot = selectedIDs
-        var ids = requestedIDs ?? selectedItems.map(\.id)
+        var ids = requestedIDs ?? selectionOrder.filter { selectedIDs.contains($0) }
         if reversed { ids.reverse() }
         guard !ids.isEmpty else { return false }
         let generation = queryGeneration
@@ -869,7 +911,7 @@ final class ClipboardStore {
     private func scheduleReload() {
         guard hasStarted, !isLoading, !storageBlocked, !isDebugMode else { return }
         loadedLimit = pageSize
-        advanceAfterLoading = nil
+        resetsLoadedResults = true
         queryGeneration += 1
         let generation = queryGeneration
         queryTask?.cancel()
@@ -890,7 +932,10 @@ final class ClipboardStore {
 
     private func refreshResults() async throws {
         let generation = queryGeneration
-        let page = try await persistence.page(query: query, filter: filter, limit: loadedLimit)
+        let resets = resetsLoadedResults
+        let snapshot = try await persistence.resultSnapshot(query: query, filter: filter, limit: loadedLimit,
+            retainingIDs: resets ? [] : Set(items.map(\.id)))
+        let page = snapshot.page
         guard generation == queryGeneration, !isDebugMode else { return }
         // Publish the selected item's full metadata together with the result summaries.
         // If navigation changes during the read, resolve the latest selection first.
@@ -898,8 +943,9 @@ final class ClipboardStore {
         while true {
             let previousSelection = selectedID
             let selectsFirst = selectsFirstResultOnReload
+            let candidates = resets ? page.items.map(\.id) : snapshot.references.map(\.id)
             let nextSelection = selectsFirst ? page.items.first?.id
-                : (page.items.first(where: { $0.id == previousSelection })?.id ?? page.items.first?.id)
+                : (candidates.first(where: { $0 == previousSelection }) ?? page.items.first?.id)
             if let nextSelection {
                 detail = try await persistence.item(nextSelection)
             } else {
@@ -909,40 +955,84 @@ final class ClipboardStore {
             if selectedID == previousSelection, selectsFirstResultOnReload == selectsFirst { break }
         }
         items = page.items
+        resultReferences = snapshot.references
+        failedHistoryIDs = []
+        clearHistoryPageError()
+        resetsLoadedResults = false
+        historyRevision = UUID()
         totalCount = page.totalCount
         matchingCount = page.matchingCount
         imageStorageBytes = page.imageBytes
         textStorageBytes = page.textBytes
         pruneCaches()
         if selectsFirstResultOnReload { selectedID = page.items.first?.id }
+        if resets { selection.reconcile(with: page.items.map(\.id), fallback: page.items.first?.id) }
         reconcileSelection()
         selectedDetail = detail
         isSearching = false
+        hydrateSelection()
     }
 
     func loadMore() async {
         guard hasMoreItems, !isLoadingMore, !isSearching, !storageBlocked else { return }
-        isLoadingMore = true
-        defer { isLoadingMore = false }
+        let loaded = Set(items.map(\.id))
+        guard let index = resultReferences.firstIndex(where: { !loaded.contains($0.id) }) else { return }
+        await loadHistory(in: index..<min(index + pageSize, resultReferences.count))
+    }
+
+    func loadHistory(in range: Range<Int>) async {
+        guard !isDebugMode, !isLoading, !isSearching, !storageBlocked, !range.isEmpty else { return }
         let generation = queryGeneration
         await saveTask?.value
         guard generation == queryGeneration, pendingMutations.isEmpty else { return }
-        do {
-            let page = try await persistence.page(query: query, filter: filter, limit: pageSize, offset: items.count)
-            guard generation == queryGeneration, !isDebugMode else { return }
-            items.append(contentsOf: page.items)
-            loadedLimit = max(pageSize, items.count)
-            totalCount = page.totalCount
-            matchingCount = page.matchingCount
-            imageStorageBytes = page.imageBytes
-            if let id = advanceAfterLoading, selectedID == id,
-               let index = items.firstIndex(where: { $0.id == id }), items.count > index + 1 {
-                moveSelection(to: items[index + 1].id, extending: advanceExtendsSelection)
+        let start = max(0, range.lowerBound) / pageSize * pageSize
+        let end = min(range.upperBound, resultReferences.count)
+        guard start < end else { return }
+        for offset in stride(from: start, to: end, by: pageSize) {
+            guard !Task.isCancelled, generation == queryGeneration else { return }
+            let request = PageRequest(generation: generation, offset: offset)
+            if let task = pageLoads[request] { await task.value; continue }
+            let references = Array(resultReferences[offset..<min(offset + pageSize, resultReferences.count)])
+            let loaded = Set(items.map(\.id))
+            if references.allSatisfy({ loaded.contains($0.id) }) { continue }
+            isLoadingMore = true
+            // The shared request survives a viewport task being cancelled during a fast drag.
+            let task = Task { [self] in
+                defer {
+                    pageLoads[request] = nil
+                    isLoadingMore = !pageLoads.isEmpty
+                }
+                do {
+                    guard generation == queryGeneration else { return }
+                    let page = try await persistence.page(query: query, filter: filter, limit: pageSize, offset: offset)
+                    guard generation == queryGeneration, !isDebugMode else { return }
+                    // Offsets are meaningful only for the index that requested them.
+                    guard page.items.map(\.id) == references.map(\.id) else {
+                        try await refreshResults()
+                        return
+                    }
+                    var loaded = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+                    for item in page.items { loaded[item.id] = item }
+                    items = resultReferences.compactMap { loaded[$0.id] }
+                    loadedLimit = max(pageSize, resultReferences.prefix { loaded[$0.id] != nil }.count)
+                    failedHistoryIDs.subtract(references.map(\.id))
+                    if failedHistoryIDs.isEmpty { clearHistoryPageError() }
+                    await refreshFileAvailability()
+                } catch {
+                    guard generation == queryGeneration else { return }
+                    failedHistoryIDs.formUnion(references.map(\.id))
+                    historyPageError = "Could not load more history. \(error.localizedDescription)"
+                    storageError = historyPageError
+                }
             }
-            advanceAfterLoading = nil
+            pageLoads[request] = task
+            await task.value
         }
-        catch { storageError = "Could not load more history. \(error.localizedDescription)" }
-        await refreshFileAvailability()
+    }
+
+    private func clearHistoryPageError() {
+        if let historyPageError, storageError == historyPageError { storageError = nil }
+        historyPageError = nil
     }
 
     func loadSelection() async {
@@ -972,7 +1062,8 @@ final class ClipboardStore {
             await navigationTask?.value
             await queryTask?.value
             await saveTask?.value
-        } while generation != queryGeneration
+            for task in Array(pageLoads.values) { await task.value }
+        } while generation != queryGeneration || !pageLoads.isEmpty
         await loadSelection()
     }
 

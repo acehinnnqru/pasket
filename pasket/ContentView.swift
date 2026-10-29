@@ -425,71 +425,74 @@ struct ContentView: View {
     }
 
     private func historyList(at date: Date) -> some View {
-        let sections = ClipboardHistorySection.grouping(store.filteredItems, at: date, query: store.query)
-        return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 3) {
-                    ForEach(sections) { section in
-                        Section {
-                            ForEach(section.items) { item in
-                                Button {
-                                    let flags = NSEvent.modifierFlags
-                                    store.select(item.id, command: flags.contains(.command), shift: flags.contains(.shift))
-                                    searchFocused = true
-                                } label: {
-                                    HistoryRow(item: item, isSelected: store.selectedIDs.contains(item.id),
-                                               isFocused: store.selectedID == item.id,
-                                               isMarked: store.markedIDs.contains(item.id)
-                                                   || (store.markedIDs.isEmpty && store.selectedIDs.count > 1
-                                                       && store.selectedIDs.contains(item.id)),
-                                               thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
-                                }
-                                .buttonStyle(HistoryRowButtonStyle())
-                                .focusable(false)
-                                .simultaneousGesture(TapGesture(count: 2).onEnded {
-                                    guard NSEvent.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty else { return }
-                                    store.selectedID = item.id
-                                    searchFocused = true
-                                    copySelection()
-                                })
-                                .id(item.id)
-                                .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
-                                .accessibilityAddTraits(store.selectedIDs.contains(item.id) ? .isSelected : [])
-                                .task(id: item.copiedAt) { await store.loadThumbnail(for: item) }
-                                .contextMenu {
-                                    let ids = store.selectedIDs.contains(item.id) ? store.selectedIDs : [item.id]
-                                    Button(ids.count > 1 ? "Delete \(ids.count) Selected Items…" : "Delete", role: .destructive) {
-                                        if !store.selectedIDs.contains(item.id) { store.selectedID = item.id }
-                                        requestDeletion(ids)
-                                    }
-                                        .disabled(store.isDebugMode || store.isStorageBlocked)
-                                }
-                            }
-                        } header: {
-                            Text(section.period.rawValue)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 9)
-                                .padding(.top, section.id == sections.first?.id ? 4 : 18)
-                                .padding(.bottom, 5)
-                                .accessibilityAddTraits(.isHeader)
-                        }
+        let layout = ClipboardHistoryLayout(store.historyReferences, at: date, query: store.query)
+        let loaded = Dictionary(uniqueKeysWithValues: store.filteredItems.map { ($0.id, $0) })
+        return ClipboardHistoryViewport(layout: layout, selectedID: store.selectedID, revision: store.historyRevision,
+                               load: { await store.loadHistory(in: $0) }) { entry in
+            switch entry.id {
+            case .header(let period):
+                Text(period.rawValue)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.top, entry.y == ClipboardHistoryLayout.inset ? 4 : 18)
+                    .padding(.bottom, 5)
+                    .accessibilityAddTraits(.isHeader)
+            case .item(let id):
+                if let item = loaded[id] {
+                    historyButton(for: item)
+                } else if store.failedHistoryIDs.contains(id), let index = entry.itemIndex {
+                    Button("Retry loading history") {
+                        Task { await store.loadHistory(in: index..<(index + 1)) }
                     }
-                    if store.hasMoreItems && !store.isSearching {
-                        ProgressView("Loading more…")
-                            .frame(maxWidth: .infinity)
-                            .task(id: store.items.last?.id) { await store.loadMore() }
+                    .buttonStyle(PasketButtonStyle())
+                } else {
+                    HStack(spacing: 9) {
+                        ProgressView().controlSize(.small).frame(width: 30, height: 30)
+                        Text("Loading history…").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
                     }
+                    .padding(.horizontal, 9)
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(8)
-            }
-            .focusable(false)
-            .onChange(of: store.selectedID) {
-                if let id = store.selectedID { proxy.scrollTo(id) }
             }
         }
         // Reset scrolling even when reopening keeps the same selected item.
         .id(store.presentationID)
+    }
+
+    private func historyButton(for item: ClipboardItem) -> some View {
+        Button {
+            let flags = NSEvent.modifierFlags
+            store.select(item.id, command: flags.contains(.command), shift: flags.contains(.shift))
+            searchFocused = true
+        } label: {
+            HistoryRow(item: item, isSelected: store.selectedIDs.contains(item.id),
+                       isFocused: store.selectedID == item.id,
+                       isMarked: store.markedIDs.contains(item.id)
+                           || (store.markedIDs.isEmpty && store.selectedIDs.count > 1
+                               && store.selectedIDs.contains(item.id)),
+                       thumbnail: store.thumbnails[item.id], isUnavailable: store.unavailableItems.contains(item.id))
+        }
+        .buttonStyle(HistoryRowButtonStyle())
+        .focusable(false)
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            guard NSEvent.modifierFlags.intersection([.command, .shift, .control, .option]).isEmpty else { return }
+            store.selectedID = item.id
+            searchFocused = true
+            copySelection()
+        })
+        .accessibilityLabel("\(item.title), \(item.kind.title), from \(item.source.name)")
+        .accessibilityAddTraits(store.selectedIDs.contains(item.id) ? .isSelected : [])
+        .task(id: item.copiedAt) { await store.loadThumbnail(for: item) }
+        .contextMenu {
+            let ids = store.selectedIDs.contains(item.id) ? store.selectedIDs : [item.id]
+            Button(ids.count > 1 ? "Delete \(ids.count) Selected Items…" : "Delete", role: .destructive) {
+                if !store.selectedIDs.contains(item.id) { store.selectedID = item.id }
+                requestDeletion(ids)
+            }
+            .disabled(store.isDebugMode || store.isStorageBlocked)
+        }
     }
 
     @ViewBuilder
@@ -1410,6 +1413,7 @@ private struct HistoryRow: View {
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: ClipboardHistoryLayout.rowHeight)
         .background {
             PasketShape.control
                 .fill(Color.primary.opacity(0.055))

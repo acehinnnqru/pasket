@@ -10,17 +10,17 @@ struct ClipboardSearchTests {
         ("hello missing", "hello world", false),
         ("hlo world", "hello world", true),
         ("hlo", "hello", true),
-        ("abc", "axxxbxxxc", true),
-        ("abc", "axxxxbxc", true),
-        ("abc", "axbxxxxc", true),
-        ("abc", "abxxbxxc", true),
+        ("abc", "axxxbxxxc", false),
+        ("abc", "axxxxbxc", false),
+        ("abc", "axbxxxxc", false),
+        ("abc", "abxxbxxc", false),
         ("abc", "axxxxabxc", true),
         ("aab", "ab", false),
         ("abc", "cba", false),
         ("cafe", "CAFÉ", true),
         ("cfe", "CAFE\u{301}", true),
         ("中搜", "中文搜索", true),
-        ("中索", "中甲乙丙丁索", true),
+        ("中索", "中甲乙丙丁索", false),
         ("a👩‍💻b", "A👨‍👩‍👧‍👦👩‍💻xB", true),
         ("ab", "a👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦b", true),
         ("ab", "a👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦b", true),
@@ -32,7 +32,7 @@ struct ClipboardSearchTests {
         ("hello hello", "hello", true),
         ("\t\n ", "anything", true)
     ])
-    func matchesKeywordsAndUnboundedSubsequences(query: String, text: String, expected: Bool) {
+    func matchesKeywordsAndBoundedSubsequences(query: String, text: String, expected: Bool) {
         #expect((ClipboardSearch(query).rank(fields: [text]) > 0) == expected)
     }
 
@@ -46,12 +46,12 @@ struct ClipboardSearchTests {
         let literal = search.rank(fields: ["help"])
         let initials = search.rank(fields: ["**LOKI_PHRASE**"])
         let tight = search.rank(fields: ["lxp"])
-        let wide = search.rank(fields: ["lxxxxp"])
+        let wide = search.rank(fields: ["lxxp"])
         #expect(literal > initials)
         #expect(initials > tight)
         #expect(tight > wide)
         #expect(wide > search.rank(fields: ["l" + String(repeating: "x", count: 2_000) + "p"]))
-        #expect(search.rank(fields: ["l" + String(repeating: "x", count: 2_000) + "p"]) > 0)
+        #expect(search.rank(fields: ["l" + String(repeating: "x", count: 2_000) + "p"]) == 0)
         #expect(search.rank(fields: ["lxxxxpxlxp"]) == tight)
         #expect(search.rank(fields: ["lxxxxp", "lxp"]) == tight)
         #expect(search.rank(fields: ["lxp", "LOKI_PHRASE"]) == initials)
@@ -74,6 +74,34 @@ struct ClipboardSearchTests {
         #expect(ClipboardSearch("rpt safari").rank(fields: ["report", "Safari"]) > 0)
         #expect(ClipboardSearch("abc").rank(fields: ["ab", "c"]) == 0)
         #expect(ClipboardSearch("report missing").rank(fields: ["report", "Safari"]) == 0)
+    }
+
+    @Test func levelsOnlyAdmitTheirOwnOrStrongerMatches() {
+        #expect(ClipboardSearch("lp", level: .literal).rank(fields: ["help"]) == 3)
+        #expect(ClipboardSearch("lp", level: .literal).rank(fields: ["Loki Phrase"]) == 0)
+        #expect(ClipboardSearch("lp", level: .initials).rank(fields: ["Loki Phrase"]) == 1)
+        #expect(ClipboardSearch("lp", level: .initials).rank(fields: ["lxp"]) == 0)
+        #expect(ClipboardSearch("lp", level: .fuzzy).rank(fields: ["lxp"]) > 0)
+    }
+
+    @Test func matchesStayWithinLinesForEveryKindOfField() {
+        for separator in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+            #expect(ClipboardSearch("abc").rank(fields: ["ab" + separator + "c"]) == 0)
+            #expect(ClipboardSearch("lp").rank(fields: ["Loki" + separator + "Phrase"]) == 0)
+            #expect(ClipboardSearch("hello world").rank(fields: ["hello" + separator + "world"]) == 2)
+        }
+        let names = ["01-clipboard-history.png", "02-search.png", "03-image-preview.png",
+                     "04-keyboard-shortcuts.png", "05-appearance.png"]
+        let body = names.map { "/Example/pasket/" + $0 }.joined(separator: "\n")
+        #expect(ClipboardSearch("sk-internal").rank(fields: [body]) == 0)
+    }
+
+    @Test func rejectsSparseInitialsAndLargeIndividualGaps() {
+        #expect(ClipboardSearch("lp").rank(fields: ["L" + String(repeating: "x", count: 100) + " Phrase"]) == 0)
+        #expect(ClipboardSearch("abcde").rank(fields: ["abxxxxcde"]) == 0)
+        #expect(ClipboardSearch("abc").rank(fields: ["axxbxc"]) > 0)
+        #expect(ClipboardSearch("abc").rank(fields: ["axxbxxc"]) == 0)
+        #expect(ClipboardSearch("abc").rank(fields: ["axbxxabxc"]) > 0)
     }
 
     @Test func literalMatchesInLaterFieldsOutrankEarlierFuzzyMatches() {

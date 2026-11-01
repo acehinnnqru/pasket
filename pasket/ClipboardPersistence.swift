@@ -148,9 +148,10 @@ actor ClipboardPersistence {
 
     func item(_ id: UUID) throws -> ClipboardItem? { try item(id, in: openDatabase()) }
 
-    func page(query: String = "", filter: ClipboardFilter = .all, limit: Int = 50, offset: Int = 0) throws -> ClipboardPage {
+    func page(query: String = "", filter: ClipboardFilter = .all, limit: Int = 50, offset: Int = 0,
+              level: ClipboardSearch.Level = .fuzzy) throws -> ClipboardPage {
         let database = try openDatabase()
-        let (clause, values, ordering) = try resultQuery(query, filter: filter, in: database)
+        let (clause, values, ordering) = try resultQuery(query, filter: filter, level: level, in: database)
         var items: [ClipboardItem] = []
         try database.query("SELECT summary FROM items" + clause + " ORDER BY " + ordering + " LIMIT ? OFFSET ?",
                            values + [.integer(max(0, limit)), .integer(max(0, offset))]) {
@@ -164,11 +165,12 @@ actor ClipboardPersistence {
 
     // Index and summaries are read in one actor turn, using exactly the same ranking as pages.
     func resultSnapshot(query: String, filter: ClipboardFilter, limit: Int,
-                        retainingIDs: Set<UUID> = []) throws -> ClipboardResultSnapshot {
+                        retainingIDs: Set<UUID> = [], level: ClipboardSearch.Level = .fuzzy) throws -> ClipboardResultSnapshot {
         let database = try openDatabase()
-        let (clause, values, ordering) = try resultQuery(query, filter: filter, in: database)
+        let (clause, values, ordering) = try resultQuery(query, filter: filter, level: level, in: database)
         var references: [ClipboardHistoryReference] = []
         try database.query("SELECT id, copied_at FROM items" + clause + " ORDER BY " + ordering, values) { row in
+            try Task.checkCancellation()
             guard let id = UUID(uuidString: ClipboardDatabase.text(row, 0)) else {
                 throw ClipboardStorageError.invalidHistory
             }
@@ -195,9 +197,10 @@ actor ClipboardPersistence {
         return ClipboardResultSnapshot(references: references, page: page)
     }
 
-    private func resultQuery(_ query: String, filter: ClipboardFilter, in database: ClipboardDatabase)
+    private func resultQuery(_ query: String, filter: ClipboardFilter, level: ClipboardSearch.Level,
+                             in database: ClipboardDatabase)
         throws -> (String, [ClipboardDatabase.Value], String) {
-        let search = ClipboardSearch(query)
+        let search = ClipboardSearch(query, level: level)
         var predicates: [String] = []
         var values: [ClipboardDatabase.Value] = []
         if filter == .images { predicates.append("has_image_preview = 1") }

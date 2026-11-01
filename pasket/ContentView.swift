@@ -428,7 +428,23 @@ struct ContentView: View {
         let layout = ClipboardHistoryLayout(store.historyReferences, at: date, query: store.query)
         let loaded = Dictionary(uniqueKeysWithValues: store.filteredItems.map { ($0.id, $0) })
         return ClipboardHistoryViewport(layout: layout, selectedID: store.selectedID, revision: store.historyRevision,
-                               load: { await store.loadHistory(in: $0) }) { entry in
+                               load: { await store.loadHistory(in: $0) },
+                               canLoadBroaderMatches: store.canLoadBroaderMatches,
+                               isLoadingBroaderMatches: store.isLoadingBroaderMatches,
+                               loadBroaderMatches: { await store.loadBroaderMatches() },
+                               footer: {
+            Button {
+                Task { await store.loadBroaderMatches() }
+            } label: {
+                HStack {
+                    if store.isLoadingBroaderMatches { ProgressView().controlSize(.small) }
+                    Text(store.isLoadingBroaderMatches ? "Searching…" : "Find broader matches")
+                }
+            }
+            .buttonStyle(PasketButtonStyle())
+            .disabled(store.isLoadingBroaderMatches || store.isSearching)
+            .accessibilityIdentifier("loadBroaderMatches")
+        }) { entry in
             switch entry.id {
             case .header(let period):
                 Text(period.rawValue)

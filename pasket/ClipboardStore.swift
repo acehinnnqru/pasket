@@ -57,6 +57,11 @@ final class ClipboardStore {
     private(set) var isApplyingRetention = false
     private(set) var isSearching = false
     private(set) var isLoadingMore = false
+    private(set) var searchLevel = ClipboardSearch.Level.literal
+    private(set) var isLoadingBroaderMatches = false
+    var canLoadBroaderMatches: Bool {
+        !isDebugMode && !ClipboardSearch(query).isEmpty && searchLevel.next != nil
+    }
     private(set) var isSelectingRecentCopies = false
     private var recentCopies = ClipboardRecentCopies()
     private var recentSelectionIDs: [UUID]?
@@ -421,6 +426,16 @@ final class ClipboardStore {
         guard !order.isEmpty else { return }
         selectsFirstResultOnReload = false
         let current = order.firstIndex { $0 == selectedID } ?? (offset > 0 ? -1 : order.count)
+        if offset > 0, current + offset >= order.count, canLoadBroaderMatches {
+            let generation = queryGeneration
+            navigationTask = Task { [weak self] in
+                guard let self else { return }
+                await loadBroaderMatches()
+                guard generation == queryGeneration, selectionOrder.count > order.count else { return }
+                moveSelection(to: selectionOrder[min(current + offset, selectionOrder.count - 1)], extending: extending)
+            }
+            return
+        }
         moveSelection(to: order[min(max(current + offset, 0), order.count - 1)], extending: extending)
         copyError = nil
     }
@@ -911,6 +926,7 @@ final class ClipboardStore {
     private func scheduleReload() {
         guard hasStarted, !isLoading, !storageBlocked, !isDebugMode else { return }
         loadedLimit = pageSize
+        searchLevel = .literal
         resetsLoadedResults = true
         queryGeneration += 1
         let generation = queryGeneration
@@ -925,16 +941,27 @@ final class ClipboardStore {
                 try await refreshResults()
                 if generation == queryGeneration { await refreshFileAvailability() }
             }
-            catch { storageError = "Could not search history. \(error.localizedDescription)" }
+            catch is CancellationError { }
+            catch { if generation == queryGeneration { storageError = "Could not search history. \(error.localizedDescription)" } }
             if generation == queryGeneration { isSearching = false }
         }
     }
 
-    private func refreshResults() async throws {
+    private func refreshResults(expanding: Bool = false) async throws {
         let generation = queryGeneration
         let resets = resetsLoadedResults
-        let snapshot = try await persistence.resultSnapshot(query: query, filter: filter, limit: loadedLimit,
-            retainingIDs: resets ? [] : Set(items.map(\.id)))
+        var level = resets ? ClipboardSearch.Level.literal : searchLevel
+        if expanding, let next = level.next { level = next }
+        let previousCount = expanding ? resultReferences.count : 0
+        let limit = expanding ? loadedLimit + pageSize : loadedLimit
+        var snapshot: ClipboardResultSnapshot
+        repeat {
+            snapshot = try await persistence.resultSnapshot(query: query, filter: filter, limit: limit,
+                retainingIDs: resets ? [] : Set(items.map(\.id)), level: level)
+            guard generation == queryGeneration, !isDebugMode else { return }
+            if ClipboardSearch(query).isEmpty || snapshot.references.count > previousCount || level.next == nil { break }
+            level = level.next!
+        } while true
         let page = snapshot.page
         guard generation == queryGeneration, !isDebugMode else { return }
         // Publish the selected item's full metadata together with the result summaries.
@@ -955,6 +982,8 @@ final class ClipboardStore {
             if selectedID == previousSelection, selectsFirstResultOnReload == selectsFirst { break }
         }
         items = page.items
+        searchLevel = level
+        loadedLimit = max(loadedLimit, min(limit, snapshot.references.count))
         resultReferences = snapshot.references
         failedHistoryIDs = []
         clearHistoryPageError()
@@ -978,6 +1007,21 @@ final class ClipboardStore {
         let loaded = Set(items.map(\.id))
         guard let index = resultReferences.firstIndex(where: { !loaded.contains($0.id) }) else { return }
         await loadHistory(in: index..<min(index + pageSize, resultReferences.count))
+    }
+
+    func loadBroaderMatches() async {
+        guard canLoadBroaderMatches, !isLoadingBroaderMatches, !isLoadingMore,
+              !isSearching, !isLoading, !storageBlocked else { return }
+        isLoadingBroaderMatches = true
+        defer { isLoadingBroaderMatches = false }
+        let generation = queryGeneration
+        await saveTask?.value
+        guard generation == queryGeneration, pendingMutations.isEmpty else { return }
+        do { try await refreshResults(expanding: true) }
+        catch is CancellationError { }
+        catch {
+            if generation == queryGeneration { storageError = "Could not expand search. \(error.localizedDescription)" }
+        }
     }
 
     func loadHistory(in range: Range<Int>) async {
@@ -1004,7 +1048,8 @@ final class ClipboardStore {
                 }
                 do {
                     guard generation == queryGeneration else { return }
-                    let page = try await persistence.page(query: query, filter: filter, limit: pageSize, offset: offset)
+                    let page = try await persistence.page(query: query, filter: filter, limit: pageSize, offset: offset,
+                                                          level: searchLevel)
                     guard generation == queryGeneration, !isDebugMode else { return }
                     // Offsets are meaningful only for the index that requested them.
                     guard page.items.map(\.id) == references.map(\.id) else {

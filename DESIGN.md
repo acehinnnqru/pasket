@@ -149,7 +149,13 @@ keycaps and numeric history-limit inputs where stable character widths help scan
 | Shortcut keycap | 12, medium, monospaced |
 
 History uses a reserved document height calculated from the complete matching identity/date
-index. `ClipboardHistoryLayout` defines 50-point item rows, a 3-point gap, and an 8-point
+index for the discovered search levels. A search starts with ordinary matches and expands to
+initials and fuzzy results only when requested at the end; an empty level advances automatically.
+A **Find broader matches** footer uses `PasketButtonStyle` and reserves one existing 50-point row
+outside the identity index. It provides a keyboard and accessibility alternative to scrolling past
+the end, shows progress during expansion, and preserves earlier rows and selection when appended.
+The scrollbar grows when a broader level is discovered, while loading summaries within a level
+keeps its range fixed. `ClipboardHistoryLayout` defines 50-point item rows, a 3-point gap, and an 8-point
 outer inset. Date headers reserve 24 points for the first group and 38 for later groups,
 matching their existing top and bottom padding. These fixed roles let the native scrollbar
 represent all matches before summaries or thumbnails load. Loading and retry placeholders

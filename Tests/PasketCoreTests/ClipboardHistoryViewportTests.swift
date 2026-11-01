@@ -47,6 +47,25 @@ struct ClipboardHistoryViewportTests {
         #expect(scroll.documentVisibleRect.maxY >= selected.maxY - 1)
     }
 
+    @Test func layoutAndProgrammaticScrollingDoNotEagerlyExpandSearch() async throws {
+        _ = NSApplication.shared
+        let model = ViewportFixture()
+        model.canExpand = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 292, height: 480),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let hosting = NSHostingView(rootView: ViewportFixtureView(model: model))
+        window.contentView = hosting
+        await settle(hosting)
+        #expect(model.expansions == 0)
+        let scroll = try #require(findScrollView(in: hosting))
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: model.layout.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await settle(hosting)
+        #expect(model.expansions == 0)
+    }
+
     private func findScrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         return view.subviews.lazy.compactMap { findScrollView(in: $0) }.first
@@ -66,6 +85,8 @@ struct ClipboardHistoryViewportTests {
     let revision = UUID()
     var selectedID: UUID?
     var loaded = false
+    var canExpand = false
+    var expansions = 0
     var requests: [Range<Int>] = []
 }
 
@@ -74,7 +95,10 @@ private struct ViewportFixtureView: View {
 
     var body: some View {
         ClipboardHistoryViewport(layout: model.layout, selectedID: model.selectedID, revision: model.revision,
-                                 load: { model.requests.append($0) }) { entry in
+                                 load: { model.requests.append($0) },
+                                 canLoadBroaderMatches: model.canExpand,
+                                 loadBroaderMatches: { model.expansions += 1 },
+                                 footer: { Text("Find broader matches") }) { entry in
             Text(model.loaded ? "Loaded history entry" : "Loading history…")
         }
     }

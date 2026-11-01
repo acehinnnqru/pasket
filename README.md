@@ -25,7 +25,9 @@
 
 Keep text, links, email addresses, images, and file references in one searchable
 history. Search saved text or the source app with keywords, initials, or fuzzy
-matches (`hlo` finds `hello`). Filter by content type, browse entries grouped by
+matches (`hlo` finds `hello`). Ordinary matches appear first; scroll to the end or choose
+**Find broader matches** to expand the search. Empty levels expand automatically, and fuzzy
+matches stay within a line with limited character gaps. Filter by content type, browse entries grouped by
 date, and preview text and images before choosing what to paste.
 
 Open Pasket from the menu bar or your own shortcut. Start typing to search, use

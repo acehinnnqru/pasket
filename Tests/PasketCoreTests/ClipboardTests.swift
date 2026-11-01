@@ -747,10 +747,14 @@ struct ClipboardTests {
         #expect(!fixture.store.items.contains { $0.id == phrase.id })
         fixture.store.query = "hlo world"
         await fixture.store.flush()
-        let expected = [phrase, words] + fuzzy + [distant]
-        #expect(fixture.store.items.map(\.id) == Array(expected.prefix(50)).map(\.id))
-        #expect(fixture.store.matchingCount == 58)
-        #expect(fixture.store.hasMoreItems)
+        let expected = [phrase, words] + fuzzy
+        #expect(fixture.store.items.map(\.id) == [phrase.id, words.id])
+        #expect(fixture.store.searchLevel == .literal)
+        #expect(fixture.store.matchingCount == 2)
+        await fixture.store.loadBroaderMatches()
+        #expect(fixture.store.searchLevel == .fuzzy)
+        #expect(fixture.store.matchingCount == 57)
+        #expect(!fixture.store.resultReferences.contains { $0.id == distant.id })
         await fixture.store.loadMore()
         #expect(fixture.store.items.map(\.id) == expected.map(\.id))
         #expect(!fixture.store.hasMoreItems)
@@ -771,7 +775,7 @@ struct ClipboardTests {
         let fixture = try Fixture()
         let persistence = ClipboardPersistence(directory: fixture.directory)
         let now = Date()
-        let contents = ["lxxxxp", "lxxp", "lxp", "**LOKI_PHRASE**", "help"]
+        let contents = ["lxxp", "lxp", "**LOKI_PHRASE**", "help"]
         let items = contents.enumerated().map { index, content in
             ClipboardItem.text(content, source: .unknown, at: now.addingTimeInterval(-Double(index) * 86_400))
         }
@@ -779,14 +783,81 @@ struct ClipboardTests {
         var loaded: [UUID] = []
         for offset in stride(from: 0, to: items.count, by: 2) {
             let page = try await persistence.page(query: "lp", limit: 2, offset: offset)
-            #expect(page.matchingCount == 5)
+            #expect(page.matchingCount == 4)
             loaded.append(contentsOf: page.items.map(\.id))
         }
         #expect(loaded == items.reversed().map(\.id))
         await fixture.start()
         fixture.store.query = "lp"
         await fixture.store.flush()
+        #expect(fixture.store.filteredItems.map(\.id) == [items[3].id])
+        await fixture.store.loadBroaderMatches()
+        #expect(fixture.store.searchLevel == .initials)
+        #expect(fixture.store.filteredItems.map(\.id) == [items[3].id, items[2].id])
+        await fixture.store.loadBroaderMatches()
         #expect(fixture.store.filteredItems.map(\.id) == loaded)
+        #expect(!fixture.store.canLoadBroaderMatches)
+        fixture.store.query = "lxp"
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .literal)
+        #expect(fixture.store.filteredItems.map(\.id) == [items[1].id])
+        await fixture.cleanUp()
+    }
+
+    @Test func progressiveSearchScansWholeLevelsBeforePagingAndPreservesSelection() async throws {
+        let fixture = try Fixture()
+        let literals = (0..<65).map { ClipboardItem.text("help \($0)", source: .unknown, at: .now) }
+        let initials = ClipboardItem.text("Loki Phrase", source: .unknown, at: .now)
+        let fuzzy = ClipboardItem.text("lxp", source: .unknown, at: .now)
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [fuzzy, initials] + literals))
+        await fixture.start()
+        fixture.store.query = "lp"
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .literal)
+        #expect(fixture.store.resultReferences.count == 65)
+        #expect(fixture.store.items.count == 50)
+        let ordinaryOrder = fixture.store.resultReferences.map(\.id)
+        await fixture.store.loadMore()
+        #expect(fixture.store.items.count == 65)
+        #expect(fixture.store.searchLevel == .literal)
+        fixture.store.selectedID = ordinaryOrder.last
+        fixture.store.moveSelection(by: 1)
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .initials)
+        #expect(fixture.store.selectedID == initials.id)
+        #expect(fixture.store.resultReferences.map(\.id) == ordinaryOrder + [initials.id])
+        await fixture.store.loadBroaderMatches()
+        #expect(fixture.store.selectedID == initials.id)
+        #expect(fixture.store.resultReferences.map(\.id) == ordinaryOrder + [initials.id, fuzzy.id])
+        #expect(Set(fixture.store.resultReferences.map(\.id)).count == 67)
+        await fixture.cleanUp()
+    }
+
+    @Test func emptyLevelsFallThroughAndObsoleteExpansionCannotReplaceANewQuery() async throws {
+        let fixture = try Fixture()
+        let initials = ClipboardItem.text("Loki Phrase", source: .unknown, at: .now)
+        let fuzzy = ClipboardItem.text("hello", source: .unknown, at: .now)
+        try await ClipboardPersistence(directory: fixture.directory).save(ClipboardHistory(items: [initials, fuzzy]))
+        await fixture.start()
+        fixture.store.query = "hlo"
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .fuzzy)
+        #expect(fixture.store.items.map(\.id) == [fuzzy.id])
+        fixture.store.query = "lp"
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .initials)
+        #expect(fixture.store.items.map(\.id) == [initials.id])
+        let expansion = Task { await fixture.store.loadBroaderMatches() }
+        await Task.yield()
+        fixture.store.query = "hello"
+        await expansion.value
+        await fixture.store.flush()
+        #expect(fixture.store.searchLevel == .literal)
+        #expect(fixture.store.items.map(\.id) == [fuzzy.id])
+        fixture.store.filter = .files
+        await fixture.store.flush()
+        #expect(fixture.store.resultReferences.isEmpty)
+        #expect(!fixture.store.canLoadBroaderMatches)
         await fixture.cleanUp()
     }
 

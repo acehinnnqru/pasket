@@ -319,17 +319,32 @@ while a new search, filter, or presentation starts with 50 summaries. Reopening 
 Search runs against all saved records and their complete bodies, including records outside the
 loaded pages. Whitespace separates keywords; every keyword must match, in any order, across the
 title, body, source app name, or bundle identifier. Literal matching remains Unicode-aware and
-ignores case and diacritics. Keywords also support ordered subsequence matching (for example,
-`hlo` matches `hello`) without a hard limit on skipped characters. Word initials recognize
-whitespace, punctuation (including underscores and hyphens), camelCase, and acronym boundaries:
-`lp` matches `LOKI_PHRASE` or `lokiPhrase`, and `xp` matches `XMLParser`. Initials may skip words.
-A subsequence stays within one field; gaps count Unicode grapheme clusters after text folding.
-Whole-query literal matches rank first, followed by records containing every keyword literally,
-then records matching the remaining keywords by word initials. Ordinary subsequences follow,
-ordered by the sum of the smallest gaps for keywords requiring ordinary subsequence matching.
-Each keyword uses its tightest matching span across fields. Equal scores keep newest copies first,
-and ranking happens before pagination. Search adds no persistent index or schema changes; matching runs on
-the existing text, with a query matcher held only for the database connection's lifetime.
+ignores case and diacritics. Fields are split at Unicode newline boundaries before any matching;
+a single keyword cannot combine characters from different fields or lines. Multiple keywords may
+match different lines or fields. This applies equally to text and newline-separated file paths.
+
+Search loads progressively: first literal phrases and keyword matches, then word initials, then
+bounded ordered subsequences (`hlo` matches `hello`). Each level scans the complete filtered history
+before pagination. An empty level automatically falls through to the next nonempty level. Otherwise,
+scrolling to the end, pressing Down past the last result, or choosing **Find broader matches** loads
+the next nonempty level. Earlier identities keep their order and selection, and stronger matches
+are not duplicated. Changing the query, filter, or reopening starts again with literal matches.
+The reserved scrollbar range covers the levels discovered so far, not undiscovered broader matches.
+
+Word initials recognize whitespace, punctuation (including underscores and hyphens), camelCase,
+and acronym boundaries: `lp` matches `LOKI_PHRASE` or `lokiPhrase`, and `xp` matches `XMLParser`.
+Initials may skip words, but total skipped source characters cannot exceed 12 times the keyword
+length, and no step may skip more than 24 source characters. Ordinary subsequences may skip at
+most as many characters as the keyword contains (at least 50% match density), with no individual
+step skipping more than three characters. Counts use Unicode grapheme clusters after folding for
+ordinary subsequences; initials retain their positions in the original line. These limits apply
+to every field and every query, including punctuation, without file-specific matching rules.
+
+Whole-query literal matches rank first, then literal keyword matches, initials, and ordinary
+subsequences ordered by their smallest total skipped-character count. Each keyword uses its best
+match across fields and lines; the weakest keyword determines the record's level. Equal scores
+keep newest copies first. Ranking happens before pagination. Search adds no persistent index or
+schema changes; matching runs on existing text with a matcher held for the connection's lifetime.
 
 Collection, deletion, copy-time updates, and settings changes update individual database records
 in serialized transactions. Retention limits apply to the complete database. File bookmarks are

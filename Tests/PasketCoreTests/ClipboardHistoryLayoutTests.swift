@@ -54,4 +54,38 @@ struct ClipboardHistoryLayoutTests {
         #expect(layout.scrollOffset(revealing: references[0].id, in: entry.y..<(entry.y + 500))
             == layout.entry(for: references[0].id)?.y)
     }
+
+    @Test func cachedLayoutFollowsIndexRevisionAndGrouping() {
+        let now = Date.now
+        let first = ClipboardHistoryReference(id: UUID(), copiedAt: now)
+        let second = ClipboardHistoryReference(id: UUID(), copiedAt: now)
+        let revision = UUID()
+        var cache = ClipboardHistoryLayout.Cache()
+
+        let dated = cache.layout(for: [first], revision: revision, at: now, isSearch: false)
+        #expect(dated.entries.first?.id == .header(.today))
+        let searched = cache.layout(for: [first], revision: revision, at: now, isSearch: true)
+        #expect(searched.entries.first?.id == .header(.searchResults))
+        let replaced = cache.layout(for: [second], revision: UUID(), at: now, isSearch: true)
+        #expect(replaced.entry(for: first.id) == nil)
+        #expect(replaced.entry(for: second.id)?.itemIndex == 0)
+    }
+
+    @Test func cachedDateGroupsFollowLocalDayAndTimeZone() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let beforeMidnight = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 23)))
+        let afterMidnight = beforeMidnight.addingTimeInterval(3_600)
+        let references = [ClipboardHistoryReference(id: UUID(), copiedAt: beforeMidnight)]
+        let revision = UUID()
+        var cache = ClipboardHistoryLayout.Cache()
+
+        let before = cache.layout(for: references, revision: revision, at: beforeMidnight, calendar: calendar, isSearch: false)
+        #expect(before.entries.first?.id == .header(.today))
+        let after = cache.layout(for: references, revision: revision, at: afterMidnight, calendar: calendar, isSearch: false)
+        #expect(after.entries.first?.id == .header(.yesterday))
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: -7 * 3_600))
+        let shifted = cache.layout(for: references, revision: revision, at: afterMidnight, calendar: calendar, isSearch: false)
+        #expect(shifted.entries.first?.id == .header(.today))
+    }
 }

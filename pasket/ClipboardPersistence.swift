@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import OSLog
 import UniformTypeIdentifiers
 
 nonisolated enum ClipboardMutation: Sendable {
@@ -166,9 +167,18 @@ actor ClipboardPersistence {
     // Index and summaries are read in one actor turn, using exactly the same ranking as pages.
     func resultSnapshot(query: String, filter: ClipboardFilter, limit: Int,
                         retainingIDs: Set<UUID> = [], level: ClipboardSearch.Level = .fuzzy) throws -> ClipboardResultSnapshot {
+        let signposter = HistoryPerformance.signposter
+        let interval = signposter.beginInterval("History Result Snapshot", id: signposter.makeSignpostID())
+        var references: [ClipboardHistoryReference] = []
+        var completed = false
+        defer {
+            let failure = Task.isCancelled ? "cancelled" : "failed"
+            let status = completed ? "complete" : failure
+            signposter.endInterval("History Result Snapshot", interval,
+                                   "count=\(references.count, privacy: .public) status=\(status, privacy: .public)")
+        }
         let database = try openDatabase()
         let (clause, values, ordering) = try resultQuery(query, filter: filter, level: level, in: database)
-        var references: [ClipboardHistoryReference] = []
         try database.query("SELECT id, copied_at FROM items" + clause + " ORDER BY " + ordering, values) { row in
             try Task.checkCancellation()
             guard let id = UUID(uuidString: ClipboardDatabase.text(row, 0)) else {
@@ -194,6 +204,7 @@ actor ClipboardPersistence {
                                  totalCount: try database.integer("SELECT COUNT(*) FROM items"),
                                  imageBytes: try database.integer("SELECT COALESCE(SUM(image_bytes), 0) FROM items"),
                                  textBytes: try database.integer("SELECT COALESCE(SUM(text_bytes), 0) FROM items"))
+        completed = true
         return ClipboardResultSnapshot(references: references, page: page)
     }
 

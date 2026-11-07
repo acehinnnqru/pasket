@@ -424,10 +424,16 @@ struct ContentView: View {
     }
 
     private func historyList(at date: Date) -> some View {
-        let layout = ClipboardHistoryLayout(store.historyReferences, at: date, query: store.query)
+        let layout = store.historyLayout(at: date)
         let loaded = Dictionary(uniqueKeysWithValues: store.filteredItems.map { ($0.id, $0) })
-        return ClipboardHistoryViewport(layout: layout, selectedID: store.selectedID, revision: store.historyRevision,
-                               load: { await store.loadHistory(in: $0) },
+        let presentationID = store.presentationID
+        let revision = store.historyRevision
+        let load: (Range<Int>) async -> Void = { range in
+            guard store.presentationID == presentationID, store.historyRevision == revision else { return }
+            await store.loadHistory(in: range)
+        }
+        return ClipboardHistoryViewport(layout: layout, selectedID: store.selectedID, revision: revision,
+                               load: load,
                                canLoadBroaderMatches: store.canLoadBroaderMatches,
                                isLoadingBroaderMatches: store.isLoadingBroaderMatches,
                                loadBroaderMatches: { await store.loadBroaderMatches() },
@@ -458,7 +464,7 @@ struct ContentView: View {
                     historyButton(for: item)
                 } else if store.failedHistoryIDs.contains(id), let index = entry.itemIndex {
                     Button("Retry loading history") {
-                        Task { await store.loadHistory(in: index..<(index + 1)) }
+                        Task { await load(index..<(index + 1)) }
                     }
                     .buttonStyle(PasketButtonStyle())
                 } else {
@@ -473,7 +479,7 @@ struct ContentView: View {
             }
         }
         // Reset scrolling even when reopening keeps the same selected item.
-        .id(store.presentationID)
+        .id(presentationID)
     }
 
     private func historyButton(for item: ClipboardItem) -> some View {

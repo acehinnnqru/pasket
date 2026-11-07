@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import OSLog
 
 @MainActor @Observable
 final class ClipboardStore {
@@ -42,7 +43,10 @@ final class ClipboardStore {
         }
     }
     private(set) var items: [ClipboardItem] = []
-    private(set) var resultReferences: [ClipboardHistoryReference] = []
+    private(set) var resultReferences: [ClipboardHistoryReference] = [] {
+        didSet { if resultReferences != oldValue { layoutRevision = UUID() } }
+    }
+    private var resultsAreSearch = false
     private(set) var historyRevision = UUID()
     private(set) var failedHistoryIDs: Set<UUID> = []
     private(set) var totalCount = 0
@@ -105,6 +109,10 @@ final class ClipboardStore {
     @ObservationIgnored private var pendingMutations: [ClipboardMutation] = []
     @ObservationIgnored private var queryTask: Task<Void, Never>?
     @ObservationIgnored private var queryGeneration = 0
+    @ObservationIgnored private var publishedResult: (generation: Int, filter: ClipboardFilter)?
+    @ObservationIgnored private var layoutRevision = UUID()
+    @ObservationIgnored private var layoutCache = ClipboardHistoryLayout.Cache()
+    @ObservationIgnored private var isPreparingPresentation = false
     @ObservationIgnored private var selectsFirstResultOnReload = false
     @ObservationIgnored private var loadedLimit = ClipboardHistoryLayout.pageSize
     @ObservationIgnored private var resetsLoadedResults = false
@@ -151,6 +159,13 @@ final class ClipboardStore {
     var historyReferences: [ClipboardHistoryReference] {
         isDebugMode ? filteredItems.map { ClipboardHistoryReference(id: $0.id, copiedAt: $0.copiedAt) }
             : resultReferences
+    }
+
+    func historyLayout(at date: Date) -> ClipboardHistoryLayout {
+        if isDebugMode {
+            return ClipboardHistoryLayout(historyReferences, at: date, query: query)
+        }
+        return layoutCache.layout(for: resultReferences, revision: layoutRevision, at: date, isSearch: resultsAreSearch)
     }
 
     private var selectionOrder: [UUID] {
@@ -298,23 +313,49 @@ final class ClipboardStore {
 
     func prepareForPresentation(at date: Date = .now) {
         recentSelectionIDs = nil
+        isPreparingPresentation = true
         query = ""
         if !filterPreferences.memory.retainsFilter(closedAt: lastDismissedAt, reopeningAt: date) {
             filter = .all
         }
+        isPreparingPresentation = false
         lastDismissedAt = nil
         isPresented = true
         selectedID = filteredItems.first?.id
-        // The current items may still belong to the previous search or type filter.
-        selectsFirstResultOnReload = !isDebugMode
         copyError = nil
         if !isDebugMode {
             updateRetentionToast()
             updateStorageToast()
         }
         presentationID = UUID()
-        if !isDebugMode { scheduleReload() }
+        let status: String
+        if reuseResultsForPresentation() {
+            status = "reused"
+        } else if scheduleReload() {
+            // The current items may still belong to the previous search or type filter.
+            selectsFirstResultOnReload = true
+            status = "reload"
+        } else {
+            status = isDebugMode ? "debug" : "unavailable"
+        }
+        HistoryPerformance.signposter.emitEvent("History Presentation Result",
+            "status=\(status, privacy: .public) references=\(self.resultReferences.count, privacy: .public)")
         Task { await refreshFileAvailability() }
+    }
+
+    private func reuseResultsForPresentation() -> Bool {
+        guard !isLoading, !storageBlocked, !isDebugMode, !isSearching, !isApplyingRetention,
+              storageError == nil, pendingMutations.isEmpty, !resultsAreSearch,
+              publishedResult?.generation == queryGeneration, publishedResult?.filter == filter else { return false }
+        // Discard page loads from the previous viewport before reducing the loaded summaries.
+        queryGeneration += 1
+        publishedResult?.generation = queryGeneration
+        loadedLimit = pageSize
+        if items.count > pageSize {
+            items = Array(items.prefix(pageSize))
+            pruneCaches()
+        }
+        return true
     }
 
     func invalidatePresentation(at date: Date = .now) {
@@ -923,8 +964,9 @@ final class ClipboardStore {
         }
     }
 
-    private func scheduleReload() {
-        guard hasStarted, !isLoading, !storageBlocked, !isDebugMode else { return }
+    @discardableResult
+    private func scheduleReload() -> Bool {
+        guard hasStarted, !isLoading, !storageBlocked, !isDebugMode, !isPreparingPresentation else { return false }
         loadedLimit = pageSize
         searchLevel = .literal
         resetsLoadedResults = true
@@ -945,10 +987,14 @@ final class ClipboardStore {
             catch { if generation == queryGeneration { storageError = "Could not search history. \(error.localizedDescription)" } }
             if generation == queryGeneration { isSearching = false }
         }
+        return true
     }
 
     private func refreshResults(expanding: Bool = false) async throws {
         let generation = queryGeneration
+        let requestedQuery = query
+        let requestedFilter = filter
+        let isSearch = !ClipboardSearch(requestedQuery).isEmpty
         let resets = resetsLoadedResults
         var level = resets ? ClipboardSearch.Level.literal : searchLevel
         if expanding, let next = level.next { level = next }
@@ -956,10 +1002,10 @@ final class ClipboardStore {
         let limit = expanding ? loadedLimit + pageSize : loadedLimit
         var snapshot: ClipboardResultSnapshot
         repeat {
-            snapshot = try await persistence.resultSnapshot(query: query, filter: filter, limit: limit,
+            snapshot = try await persistence.resultSnapshot(query: requestedQuery, filter: requestedFilter, limit: limit,
                 retainingIDs: resets ? [] : Set(items.map(\.id)), level: level)
             guard generation == queryGeneration, !isDebugMode else { return }
-            if ClipboardSearch(query).isEmpty || snapshot.references.count > previousCount || level.next == nil { break }
+            if !isSearch || snapshot.references.count > previousCount || level.next == nil { break }
             level = level.next!
         } while true
         let page = snapshot.page
@@ -985,6 +1031,8 @@ final class ClipboardStore {
         searchLevel = level
         loadedLimit = max(loadedLimit, min(limit, snapshot.references.count))
         resultReferences = snapshot.references
+        resultsAreSearch = isSearch
+        publishedResult = (generation, requestedFilter)
         failedHistoryIDs = []
         clearHistoryPageError()
         resetsLoadedResults = false

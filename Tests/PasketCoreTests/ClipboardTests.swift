@@ -15,12 +15,12 @@ struct ClipboardTests {
         await fixture.start()
         #expect(fixture.store.resultReferences.map(\.id) == entries.map(\.id))
         #expect(fixture.store.items.count == 50)
-        let initialLayout = ClipboardHistoryLayout(fixture.store.historyReferences, at: now)
+        let initialLayout = fixture.store.historyLayout(at: now)
         await fixture.store.loadHistory(in: 550..<600)
         #expect(fixture.store.items.count == 100)
         #expect(fixture.store.items.map(\.id) == (Array(entries.prefix(50)) + Array(entries.suffix(50))).map(\.id))
         #expect(fixture.store.selectedID == entries[0].id)
-        let loadedLayout = ClipboardHistoryLayout(fixture.store.historyReferences, at: now)
+        let loadedLayout = fixture.store.historyLayout(at: now)
         #expect(loadedLayout.height == initialLayout.height)
         #expect(loadedLayout.entries.map(\.y) == initialLayout.entries.map(\.y))
 
@@ -34,10 +34,16 @@ struct ClipboardTests {
         await fixture.store.loadMore()
         #expect(fixture.store.items.count == 200)
         #expect(fixture.store.items.prefix(100).map(\.id) == entries.prefix(100).map(\.id))
+        let revision = fixture.store.historyRevision
         fixture.store.prepareForPresentation()
+        #expect(fixture.store.items.count == 50)
         await fixture.store.flush()
         #expect(fixture.store.items.count == 50)
         #expect(fixture.store.selectedID == entries[0].id)
+        #expect(fixture.store.historyRevision == revision)
+        #expect(fixture.store.historyLayout(at: now).height == initialLayout.height)
+        await fixture.store.loadHistory(in: 550..<600)
+        #expect(fixture.store.items.map(\.id) == (Array(entries.prefix(50)) + Array(entries.suffix(50))).map(\.id))
         await fixture.cleanUp()
     }
 
@@ -520,13 +526,17 @@ struct ClipboardTests {
         fixture.store.query = "older"
         await fixture.store.flush()
         let oldSelection = fixture.store.selectedID
+        let date = Date()
+        #expect(fixture.store.historyLayout(at: date).entries.first?.id == .header(.searchResults))
         fixture.store.invalidatePresentation()
 
         fixture.store.prepareForPresentation()
+        #expect(fixture.store.historyLayout(at: date).entries.first?.id == .header(.searchResults))
         // SwiftUI reconciles selection when the query and filter change, before the reload finishes.
         fixture.store.reconcileSelection()
         await fixture.store.flush()
 
+        #expect(fixture.store.historyLayout(at: date).entries.first?.id == .header(.today))
         #expect(fixture.store.selectedID == (retainsFilter ? newestLink : newestID))
         #expect(fixture.store.selectedID != oldSelection)
         #expect(fixture.store.selectedID == fixture.store.filteredItems.first?.id)

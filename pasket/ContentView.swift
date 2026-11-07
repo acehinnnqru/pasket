@@ -22,7 +22,6 @@ struct ContentView: View {
         store.selectedItem.map { PreviewIdentity(id: $0.id, copiedAt: $0.copiedAt) }
     }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var isFilterMenuPresented = false
     @State private var filterControlFrame: CGRect = .zero
@@ -670,19 +669,9 @@ struct ContentView: View {
             store.setPaused(store.clipboardAccessDenied ? false : !store.isPaused)
             searchFocused = true
         } label: {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isCollecting || reduceMotion)) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
-                let intensity = reduceMotion ? 1 : (1 - cos(phase * 2 * .pi)) / 2
-
-                Circle()
-                    .fill(isCollecting ? Color.accentColor : Color.secondary)
-                    .opacity(isCollecting ? 0.4 + 0.6 * intensity : 0.6)
-                    .frame(width: 7, height: 7)
-                    .shadow(color: isCollecting ? Color.accentColor.opacity(0.08 + 0.47 * intensity) : .clear,
-                            radius: 2 + 4 * intensity)
-            }
-            .frame(width: 16, height: 16)
-            .accessibilityHidden(true)
+            ClipboardCollectionIndicator(isCollecting: isCollecting)
+                .frame(width: 16, height: 16)
+                .accessibilityHidden(true)
         }
         .buttonStyle(PasketButtonStyle())
         .focusable(false)

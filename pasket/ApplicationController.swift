@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 @MainActor
@@ -172,6 +173,10 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             panel?.makeKeyAndOrderFront(nil)
             return
         }
+        let signposter = HistoryPerformance.signposter
+        let newPanel = panel == nil
+        let interval = signposter.beginInterval("History Panel Show", id: signposter.makeSignpostID(),
+                                                "newPanel=\(newPanel, privacy: .public)")
         previousApplication = nil
         if let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
@@ -217,8 +222,9 @@ final class ApplicationController: NSObject, NSWindowDelegate {
             }
             // Let the nonactivating panel borrow keyboard focus without deactivating the editor.
             panel.makeKeyAndOrderFront(nil)
-            if panel.isVisible { historyStatistics.recordEvent() }
         }
+        signposter.endInterval("History Panel Show", interval)
+        if panel?.isVisible == true { historyStatistics.recordEvent() }
     }
 
     func hidePanel(restorePreviousApplication: Bool = true) {

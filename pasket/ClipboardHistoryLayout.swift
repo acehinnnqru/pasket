@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 // Only identities and dates are needed to reserve the entire scrollable document.
 nonisolated struct ClipboardHistoryReference: Identifiable, Equatable, Sendable {
@@ -32,11 +33,22 @@ nonisolated struct ClipboardHistoryLayout {
 
     init(_ references: [ClipboardHistoryReference], at date: Date = .now,
          calendar: Calendar = .current, query: String = "") {
+        self.init(references, at: date, calendar: calendar,
+                  isSearch: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    init(_ references: [ClipboardHistoryReference], at date: Date,
+         calendar: Calendar = .current, isSearch: Bool) {
+        let signposter = HistoryPerformance.signposter
+        let mode = isSearch ? "search" : "date"
+        let interval = signposter.beginInterval("History Layout Build", id: signposter.makeSignpostID(),
+                                                "references=\(references.count) mode=\(mode, privacy: .public)")
+        defer { signposter.endInterval("History Layout Build", interval) }
+
         var entries: [Entry] = []
         var itemEntries: [UUID: Int] = [:]
         var y = Self.inset
         var previousPeriod: ClipboardHistoryPeriod?
-        let isSearch = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         for (index, reference) in references.enumerated() {
             let period: ClipboardHistoryPeriod = isSearch ? .searchResults
                 : .period(for: reference.copiedAt, at: date, calendar: calendar)
@@ -53,6 +65,26 @@ nonisolated struct ClipboardHistoryLayout {
         self.entries = entries
         self.itemEntries = itemEntries
         height = y - (entries.isEmpty ? 0 : Self.spacing) + Self.inset
+    }
+
+    struct Cache {
+        private enum Grouping: Equatable {
+            case search
+            case date(day: Date, calendar: Calendar)
+        }
+
+        private var cached: (revision: UUID, grouping: Grouping, layout: ClipboardHistoryLayout)?
+
+        // The revision identifies the ordered references, independently of row summaries.
+        mutating func layout(for references: [ClipboardHistoryReference], revision: UUID, at date: Date,
+                             calendar: Calendar = .current, isSearch: Bool) -> ClipboardHistoryLayout {
+            let grouping: Grouping = isSearch ? .search : .date(day: calendar.startOfDay(for: date), calendar: calendar)
+            if let cached, cached.revision == revision, cached.grouping == grouping { return cached.layout }
+
+            let layout = ClipboardHistoryLayout(references, at: date, calendar: calendar, isSearch: isSearch)
+            cached = (revision, grouping, layout)
+            return layout
+        }
     }
 
     // Binary search avoids walking every reserved row during scrollbar drags.

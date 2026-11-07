@@ -314,8 +314,11 @@ Concurrent requests for the same page share one read, cancelled viewport tasks d
 shared read, and results from obsolete queries or writes are discarded. Failed rows offer Retry.
 Selection uses the full result order, so keyboard navigation and Shift-selection include unloaded
 gaps. Selected ranges load their summaries before batch actions become available; copying resolves
-all selected identities against full saved records. Reloads refresh retained summaries by identity,
-while a new search, filter, or presentation starts with 50 summaries. Reopening resets the viewport.
+all selected identities against full saved records. Reloads refresh retained summaries by identity.
+A new search or filter starts with 50 summaries. Reopening resets the viewport and starts with the
+first page, reusing the current result and its first-page summaries when they already match the
+opening query and filter and are up to date. The layout is reused across view updates while the
+ordered references, grouping mode, and local date boundaries stay the same.
 Search runs against all saved records and their complete bodies, including records outside the
 loaded pages. Whitespace separates keywords; every keyword must match, in any order, across the
 title, body, source app name, or bundle identifier. Literal matching remains Unicode-aware and
@@ -400,6 +403,31 @@ Self-hosted macOS runners can run unsigned checks or use a dedicated persistent
 CI keychain for trusted signing jobs. Keep release runners separate from untrusted
 PR builds. See [self-hosted signing setup](RELEASING.md#persistent-signing-on-self-hosted-runners)
 for runner labels, secrets, reuse, and cleanup behavior.
+
+### Profiling history opens
+
+Record the Pasket process in Instruments with Time Profiler and a Points of Interest track.
+Filter the signposts to subsystem `com.acehinnnqru.pasket`. Open and dismiss the panel one time
+per sample, leaving enough time for background work to settle. Record the first opening separately
+from repeated openings of an existing panel. Keep the history and build configuration consistent
+across runs, and compare reopening unchanged history with reopening after a search, filter change,
+or new copy.
+
+- `History Panel Show` measures the synchronous AppKit opening path through the return of
+  `makeKeyAndOrderFront`. `newPanel` distinguishes construction from reuse of the panel instance.
+  Later SwiftUI rendering and asynchronous store work can continue after this interval.
+- `History Presentation Result` records the store's decision when opening. The status is
+  `reused`, `reload`, `debug`, or `unavailable` while startup or storage prevents a reload.
+- `History Layout Build` measures the construction of scroll geometry and records the reference
+  count. A view update that reuses geometry produces no build interval.
+- `History Result Snapshot` measures one database result read, including its identity/date index,
+  summary reads, and counts. Its end records the number of references read and the outcome.
+  The interval starts when the persistence actor starts executing the read.
+
+For each opening, count layout and snapshot intervals in the same observation window and compare
+their durations alongside the Time Profiler samples. An interval reports elapsed time. CPU time and
+first visible frame latency require separate measurements. Signpost details contain counts and
+operational status fields.
 
 ### Local checks
 

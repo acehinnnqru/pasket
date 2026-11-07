@@ -313,6 +313,11 @@ Use the existing short button transitions (0.12 seconds for interaction and 0.08
 for press feedback). Respect Reduce Motion. Visual changes must preserve keyboard focus,
 menu navigation and dismissal, and the ability to select text inside inputs.
 
+The history collection button uses a 7-point status dot in a 16-point label. While
+collecting, Core Animation pulses the dot and its fixed-radius glow without scheduling
+SwiftUI layout on each frame. The accent dot is steady with Reduce Motion or when the
+window is hidden or fully covered. An inactive dot is secondary gray without a glow.
+
 ## Accessibility and validation
 
 Preserve accessible names, values, hints, and stable identifiers when extracting controls.

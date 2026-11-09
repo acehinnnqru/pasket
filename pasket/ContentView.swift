@@ -606,10 +606,11 @@ struct ContentView: View {
 
     private func imagePreview(for item: ClipboardItem) -> some View {
         let isMissing = store.missingPreviews.contains(item.id)
-        let image = store.previewID == item.id ? store.previewImage : nil
+        let showsPreview = !isMissing && store.previewID == item.id
         let unavailableMessage = store.unavailableItems.contains(item.id)
             ? (item.kind == .file ? "File unavailable" : "Image unavailable") : "Preview unavailable"
-        return ClipboardImagePreview(image: isMissing ? nil : image,
+        return ClipboardImagePreview(image: showsPreview ? store.previewImage : nil,
+                                     animatedImage: showsPreview ? store.previewAnimatedImage : nil,
                                      unavailableMessage: isMissing ? unavailableMessage : nil)
             .id(PreviewIdentity(id: item.id, copiedAt: item.copiedAt))
     }
@@ -1457,7 +1458,9 @@ private struct HistoryRow: View {
 
 private struct ClipboardImagePreview: View {
     var image: NSImage?
+    var animatedImage: NSImage?
     var unavailableMessage: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsProgress = false
 
     private var isLoading: Bool { image == nil && unavailableMessage == nil }
@@ -1465,7 +1468,13 @@ private struct ClipboardImagePreview: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                ClipboardImageCanvas(image: image)
+                if let animatedImage, !reduceMotion {
+                    ClipboardAnimatedImageCanvas(image: animatedImage)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                } else {
+                    ClipboardImageCanvas(image: image)
+                }
                 if image == nil {
                     if let unavailableMessage {
                         Label(unavailableMessage, systemImage: "photo")

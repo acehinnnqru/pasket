@@ -1,6 +1,8 @@
 import AppKit
+import ImageIO
 import Observation
 import Testing
+import UniformTypeIdentifiers
 @testable import PasketCore
 
 @Suite(.serialized) @MainActor
@@ -1368,6 +1370,76 @@ struct ClipboardTests {
     }
 
     @Test(arguments: [false, true])
+    func animatedGIFKeepsItsOriginalDataAfterRestart(hasPNGRepresentation: Bool) async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let gif = try Self.animatedGIF()
+        let gifSource = try #require(CGImageSourceCreateWithData(gif as CFData, nil))
+        try #require(CGImageSourceGetCount(gifSource) == 2)
+        let gifType = NSPasteboard.PasteboardType(UTType.gif.identifier)
+        let clipboardItem = NSPasteboardItem()
+        try #require(clipboardItem.setData(gif, forType: gifType))
+        if hasPNGRepresentation {
+            let png = try Self.smallPNG()
+            try #require(clipboardItem.setData(png, forType: .png))
+        }
+        fixture.pasteboard.clearContents()
+        try #require(fixture.pasteboard.writeObjects([clipboardItem]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let captured = try #require(fixture.store.selectedItem)
+        #expect(captured.kind == .image)
+
+        fixture.pasteboard.clearContents()
+        await fixture.restart()
+        let restored = try #require(fixture.store.selectedItem)
+        #expect(restored.id == captured.id)
+        let image = try #require(restored.image)
+        let persistence = ClipboardPersistence(directory: fixture.directory)
+        let thumbnail = try await persistence.imageData(image, thumbnail: true)
+        let thumbnailSource = try #require(CGImageSourceCreateWithData(thumbnail as CFData, nil))
+        #expect(CGImageSourceGetCount(thumbnailSource) == 1)
+        await fixture.store.loadPreview(for: restored)
+        #expect(fixture.store.previewImage != nil)
+        let animation = try #require(fixture.store.previewAnimatedImage)
+        let bitmap = try #require(animation.representations.first as? NSBitmapImageRep)
+        #expect(bitmap.value(forProperty: .frameCount) as? Int == 2)
+        await fixture.store.loadPreview(for: nil)
+        #expect(fixture.store.previewAnimatedImage == nil)
+        #expect(await fixture.store.copySelection())
+        #expect(fixture.pasteboard.data(forType: gifType) == gif)
+
+        fixture.store.clearHistory()
+        await fixture.store.flush()
+        let images = try FileManager.default.contentsOfDirectory(atPath: fixture.directory.appendingPathComponent("Images").path)
+        #expect(images.isEmpty)
+        await fixture.cleanUp()
+    }
+
+    @Test func gifFileReferenceSupportsAnimatedPreview() async throws {
+        let fixture = try Fixture()
+        await fixture.start()
+        let url = fixture.directory.appendingPathComponent("Animated.GIF")
+        try Self.animatedGIF().write(to: url)
+        fixture.pasteboard.clearContents()
+        try #require(fixture.pasteboard.writeObjects([url as NSURL]))
+        fixture.store.pollClipboard()
+        await fixture.store.flush()
+        let item = try #require(fixture.store.selectedItem)
+        #expect(item.kind == .file)
+        await fixture.store.loadThumbnail(for: item)
+        #expect(fixture.store.thumbnails[item.id] != nil)
+        #expect(fixture.store.previewAnimatedImage == nil)
+        await fixture.store.loadPreview(for: item)
+        #expect(fixture.store.previewAnimatedImage != nil)
+        #expect(await fixture.store.copySelection())
+        let copied = fixture.pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        #expect(copied?.first?.resolvingSymlinksInPath() == url.resolvingSymlinksInPath())
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Images").path))
+        await fixture.cleanUp()
+    }
+
+    @Test(arguments: [false, true])
     func screenshotFileHasPreviewsWithoutSavingACopy(hasImageRepresentation: Bool) async throws {
         let fixture = try Fixture()
         await fixture.start()
@@ -1889,6 +1961,13 @@ struct ClipboardTests {
         #expect(fixture.store.items.first?.files.first?.isSecurityScoped == true)
         #expect(await fixture.store.copySelection())
         await fixture.cleanUp()
+    }
+
+    static func animatedGIF() throws -> Data {
+        // A looping 1 × 1 GIF with one black frame and one white frame.
+        let base64 = "R0lGODlhAQABAIAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAA"
+            + "AQABAAACAkQBACH5BAAKAAAALAAAAAABAAEAAAICTAEAOw=="
+        return try #require(Data(base64Encoded: base64))
     }
 
     private static func smallPNG(width: Int = 8, height: Int = 6) throws -> Data {

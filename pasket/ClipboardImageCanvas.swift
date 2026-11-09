@@ -55,3 +55,49 @@ final class ClipboardImageCanvasView: NSView {
         context.draw(bitmap, in: rect)
     }
 }
+
+struct ClipboardAnimatedImageCanvas: NSViewRepresentable {
+    let image: NSImage
+
+    func makeNSView(context: Context) -> ImageView {
+        let view = ImageView()
+        view.animates = false
+        view.imageScaling = .scaleProportionallyUpOrDown
+        return view
+    }
+
+    func updateNSView(_ nsView: ImageView, context: Context) {
+        if nsView.image !== image { nsView.image = image }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ImageView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
+    static func dismantleNSView(_ nsView: ImageView, coordinator: ()) {
+        nsView.animates = false
+        nsView.image = nil
+    }
+
+    final class ImageView: NSImageView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+            if let window {
+                center.addObserver(self, selector: #selector(windowOcclusionDidChange(_:)),
+                                   name: NSWindow.didChangeOcclusionStateNotification, object: window)
+            }
+            updatePlayback()
+        }
+
+        @objc private func windowOcclusionDidChange(_ notification: Notification) {
+            updatePlayback()
+        }
+
+        private func updatePlayback() {
+            let shouldAnimate = window.map { $0.isVisible && $0.occlusionState.contains(.visible) } ?? false
+            if animates != shouldAnimate { animates = shouldAnimate }
+        }
+    }
+}

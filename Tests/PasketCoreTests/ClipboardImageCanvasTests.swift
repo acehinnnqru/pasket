@@ -1,9 +1,54 @@
 import AppKit
+import SwiftUI
 import Testing
 @testable import PasketCore
 
 @Suite(.serialized) @MainActor
 struct ClipboardImageCanvasTests {
+    @Test func hostedGIFPreviewChangesFramesWhenThePanelAppears() async throws {
+        _ = NSApplication.shared
+        let image = try #require(NSImage(data: ClipboardTests.animatedGIF()))
+        let panel = PreviewPanel(contentRect: NSRect(x: 0, y: 0, width: 80, height: 80),
+                                 styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+                                 backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        defer { panel.close() }
+        let hosting = NSHostingView(rootView: ClipboardAnimatedImageCanvas(image: image))
+        panel.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        let view = try #require(imageView(in: hosting))
+        let bitmap = try #require(view.image?.representations.first as? NSBitmapImageRep)
+        let first = try #require(bitmap.value(forProperty: .currentFrame) as? Int)
+        let firstColor = try centerBrightness(of: view)
+        #expect(!view.animates)
+
+        panel.setShowing(true)
+        #expect(view.animates)
+        for _ in 0..<30 {
+            try await Task.sleep(for: .milliseconds(20))
+            if bitmap.value(forProperty: .currentFrame) as? Int != first { break }
+        }
+        #expect(bitmap.value(forProperty: .currentFrame) as? Int != first)
+        #expect(abs(try centerBrightness(of: view) - firstColor) > 0.5)
+
+        panel.setShowing(false)
+        #expect(!view.animates)
+    }
+
+    private func imageView(in view: NSView) -> NSImageView? {
+        if let imageView = view as? NSImageView { return imageView }
+        return view.subviews.lazy.compactMap { imageView(in: $0) }.first
+    }
+
+    private func centerBrightness(of view: NSView) throws -> CGFloat {
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)
+        return try #require(color?.usingColorSpace(.deviceRGB)).redComponent
+    }
+
     @Test func thinLinesArePresentOnTheFirstDrawAndStableAcrossRedraws() throws {
         let view = ClipboardImageCanvasView(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
         let image = try linedImage()
@@ -94,5 +139,16 @@ struct ClipboardImageCanvasTests {
 
     private func pixels(_ bitmap: NSBitmapImageRep) throws -> Data {
         Data(bytes: try #require(bitmap.bitmapData), count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+    }
+}
+
+private final class PreviewPanel: NSPanel {
+    private var showing = false
+    override var isVisible: Bool { showing }
+    override var occlusionState: NSWindow.OcclusionState { showing ? [.visible] : [] }
+
+    func setShowing(_ showing: Bool) {
+        self.showing = showing
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: self)
     }
 }

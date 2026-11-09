@@ -73,6 +73,7 @@ final class ClipboardStore {
     private(set) var thumbnails: [UUID: NSImage] = [:]
     private(set) var previewID: UUID?
     private(set) var previewImage: NSImage?
+    private(set) var previewAnimatedImage: NSImage?
     private(set) var missingPreviews: Set<UUID> = []
     private(set) var unavailableItems: Set<UUID> = []
 
@@ -651,7 +652,8 @@ final class ClipboardStore {
                     let data = try await persistence.imageData(image)
                     guard isCurrent() else { return false }
                     let representation = NSPasteboardItem()
-                    guard representation.setData(data, forType: .png) else { throw CocoaError(.fileWriteUnknown) }
+                    let type: NSPasteboard.PasteboardType = image.isGIF ? .gifImage : .png
+                    guard representation.setData(data, forType: type) else { throw CocoaError(.fileWriteUnknown) }
                     images.append(representation)
                 }
                 guard isCurrent() else { return false }
@@ -788,18 +790,29 @@ final class ClipboardStore {
         let requestID = previewRequestID
         do {
             let preview: CGImage
+            var animatedData: Data?
             if let image = item.image {
                 preview = try await persistence.previewImage(image)
+                if image.isGIF, !Task.isCancelled, previewRequestID == requestID {
+                    animatedData = try? await persistence.imageData(image)
+                }
             } else if let file = item.imageFile {
                 let result = try await persistence.previewImageFile(file)
                 guard previewRequestID == requestID else { return }
                 updateFiles([result.file], for: item.id, replacing: item.files)
                 preview = result.image
+                animatedData = result.animatedData
             } else {
                 return
             }
             guard !Task.isCancelled, previewRequestID == requestID, selectedItem?.id == item.id else { return }
             previewImage = NSImage(cgImage: preview, size: NSSize(width: preview.width, height: preview.height))
+            if let animatedData, let image = NSImage(data: animatedData), image.representations.contains(where: {
+                guard let bitmap = $0 as? NSBitmapImageRep else { return false }
+                return (bitmap.value(forProperty: .frameCount) as? Int ?? 0) > 1
+            }) {
+                previewAnimatedImage = image
+            }
         } catch {
             let available = await isImageAvailable(item)
             guard !Task.isCancelled, previewRequestID == requestID, selectedItem?.id == item.id else { return }
@@ -818,6 +831,7 @@ final class ClipboardStore {
         previewRequestID = UUID()
         previewID = nil
         previewImage = nil
+        previewAnimatedImage = nil
     }
 
     func refreshFileAvailability() async {

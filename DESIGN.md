@@ -288,6 +288,9 @@ transparency and aspect-fit margins reveal the surrounding panel or row surface.
 Keep the preview's 12-point content inset and the thumbnail's 30-point frame for stable
 layout. Icon tiles retain their muted control-shaped fill when no thumbnail is available;
 row selection, hover, and focus treatments remain independent of image presentation.
+Animated GIFs play in the selected item's visible preview. Row thumbnails use the first
+frame, and Reduce Motion shows that frame in the preview as well. Playback stops when
+the preview is removed or its window is hidden or fully covered.
 
 Custom picker, paste, and more-action menus share `PasketMenuItemStyle`. Grouped menus
 use a primary hover fill at 0.04 opacity and a pressed fill at 0.08; picker
@@ -330,6 +333,8 @@ Compilation is separate from visual and interaction validation. When UI inspecti
 available, review affected components in light and dark appearance, including hover,
 pressed, selected, focused, and disabled states as applicable. Check wrapping, keyboard
 operation, accessible labels, and Reduce Motion when the change affects them.
+For animated image previews, verify playback, transparency, and aspect-fit resizing.
+Check static thumbnails, selection changes, window dismissal, and the Reduce Motion fallback.
 For surface changes, also review both app appearances and the system's Clear/Tinted,
 Reduce Transparency, and Increase Contrast settings. Check that switching appearances
 keeps open-window content and keyboard focus intact, and that menus remain readable.

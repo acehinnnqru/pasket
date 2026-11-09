@@ -1,4 +1,9 @@
 import AppKit
+import UniformTypeIdentifiers
+
+extension NSPasteboard.PasteboardType {
+    static let gifImage = Self(UTType.gif.identifier)
+}
 
 enum ClipboardCapture {
     case text(String, ClipboardSource, Date)
@@ -79,8 +84,7 @@ final class ClipboardMonitor {
                 return
             }
             capture = .files(urls.map(ClipboardFileAccess.capture), source, date)
-        } else if let type = pasteboard.availableType(from: [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")]),
-                  let data = pasteboard.data(forType: type) {
+        } else if let data = imageData() {
             guard data.count <= ClipboardLimits.imageBytes else {
                 onNotice?("Image not saved: the limit is 20 MB.")
                 return
@@ -100,6 +104,16 @@ final class ClipboardMonitor {
         // A writer may change the pasteboard while its representations are being read.
         guard pasteboard.changeCount == observedCount else { return }
         onCapture?(capture)
+    }
+
+    private func imageData() -> Data? {
+        if pasteboard.types?.contains(.gifImage) == true,
+           let data = pasteboard.data(forType: .gifImage), !data.isEmpty {
+            return data
+        }
+        let types: [NSPasteboard.PasteboardType] = [.png, .tiff, .init(UTType.jpeg.identifier)]
+        guard let type = pasteboard.availableType(from: types) else { return nil }
+        return pasteboard.data(forType: type)
     }
 
     private func updateSource(_ application: NSRunningApplication?) {

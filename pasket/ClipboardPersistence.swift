@@ -473,10 +473,7 @@ actor ClipboardPersistence {
     func importImage(_ data: Data, source: ClipboardSource, at date: Date) throws -> ClipboardItem {
         guard data.count <= ClipboardLimits.imageBytes else { throw ClipboardStorageError.largeImage }
         guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else { throw ClipboardStorageError.invalidImage }
+              let (width, height) = imageDimensions(imageSource) else { throw ClipboardStorageError.invalidImage }
         guard width <= ClipboardLimits.imagePixels / height else { throw ClipboardStorageError.largeImage }
         let fullSizeOptions: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                               kCGImageSourceThumbnailMaxPixelSize: max(width, height),
@@ -484,27 +481,20 @@ actor ClipboardPersistence {
                                               kCGImageSourceShouldCache: false]
         guard let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, fullSizeOptions as CFDictionary)
         else { throw ClipboardStorageError.invalidImage }
-        let png = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil)
-        else { throw ClipboardStorageError.invalidImage }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { throw ClipboardStorageError.invalidImage }
-        guard png.length <= ClipboardLimits.imageBytes else { throw ClipboardStorageError.largeImage }
+        let isGIF = CGImageSourceGetType(imageSource) as String? == UTType.gif.identifier
+        let original = isGIF ? data : try encodePNG(image)
+        guard original.count <= ClipboardLimits.imageBytes else { throw ClipboardStorageError.largeImage }
 
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                       kCGImageSourceThumbnailMaxPixelSize: 480,
                                       kCGImageSourceCreateThumbnailWithTransform: true]
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary)
         else { throw ClipboardStorageError.invalidImage }
-        let thumbnailData = NSMutableData()
-        guard let thumbnailDestination = CGImageDestinationCreateWithData(thumbnailData, UTType.png.identifier as CFString, 1, nil)
-        else { throw ClipboardStorageError.invalidImage }
-        CGImageDestinationAddImage(thumbnailDestination, thumbnail, nil)
-        guard CGImageDestinationFinalize(thumbnailDestination) else { throw ClipboardStorageError.invalidImage }
+        let thumbnailData = try encodePNG(thumbnail)
 
-        let hash = ClipboardItem.digest(png as Data)
-        let payload = ClipboardImage(fileName: hash + ".png", thumbnailName: hash + ".thumb.png",
-                                     byteCount: png.length, thumbnailByteCount: thumbnailData.length, width: image.width, height: image.height)
+        let hash = ClipboardItem.digest(original)
+        let payload = ClipboardImage(fileName: hash + (isGIF ? ".gif" : ".png"), thumbnailName: hash + ".thumb.png",
+                                     byteCount: original.count, thumbnailByteCount: thumbnailData.count, width: image.width, height: image.height)
         if FileManager.default.fileExists(atPath: databaseURL.path),
            let budget = try settings(in: openDatabase()).retention?.maximumImageBytes,
            payload.byteCount + payload.thumbnailByteCount > budget {
@@ -513,10 +503,19 @@ actor ClipboardPersistence {
         let item = ClipboardItem(kind: .image, title: "Image · \(image.width) × \(image.height)", content: "\(image.width) × \(image.height)",
                                  source: source, copiedAt: date, fingerprint: "image:" + hash, image: payload)
         try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+        try original.write(to: mediaDirectory.appendingPathComponent(payload.fileName), options: .atomic)
+        try thumbnailData.write(to: mediaDirectory.appendingPathComponent(payload.thumbnailName), options: .atomic)
         pendingImages[item.id] = [payload.fileName, payload.thumbnailName]
-        try (png as Data).write(to: mediaDirectory.appendingPathComponent(payload.fileName), options: .atomic)
-        try (thumbnailData as Data).write(to: mediaDirectory.appendingPathComponent(payload.thumbnailName), options: .atomic)
         return item
+    }
+
+    private func encodePNG(_ image: CGImage) throws -> Data {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
+        else { throw ClipboardStorageError.invalidImage }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw ClipboardStorageError.invalidImage }
+        return data as Data
     }
 
     func imageData(_ image: ClipboardImage, thumbnail: Bool = false) throws -> Data {
@@ -532,10 +531,38 @@ actor ClipboardPersistence {
         return try previewImage(at: url, maxPixelSize: thumbnail ? 480 : 1_600)
     }
 
-    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws -> (image: CGImage, file: ClipboardFile) {
+    func previewImageFile(_ file: ClipboardFile, thumbnail: Bool = false) throws
+        -> (image: CGImage, file: ClipboardFile, animatedData: Data?) {
         try ClipboardFileAccess.withResolvedFiles([file]) { urls, updated in
-            (try previewImage(at: urls[0], maxPixelSize: thumbnail ? 480 : 1_600), updated[0])
+            let url = urls[0]
+            let image = try previewImage(at: url, maxPixelSize: thumbnail ? 480 : 1_600)
+            let animatedData = thumbnail ? nil : (try? animatedGIFData(at: url))
+            return (image, updated[0], animatedData)
         }
+    }
+
+    private func animatedGIFData(at url: URL) throws -> Data? {
+        guard url.pathExtension.lowercased() == "gif" else { return nil }
+        let resources = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard resources.isRegularFile == true, let size = resources.fileSize, size <= ClipboardLimits.imageBytes else { return nil }
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        guard let data = try file.read(upToCount: ClipboardLimits.imageBytes + 1),
+              data.count <= ClipboardLimits.imageBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetType(source) as String? == UTType.gif.identifier,
+              CGImageSourceGetCount(source) > 1,
+              let (width, height) = imageDimensions(source), width <= ClipboardLimits.imagePixels / height
+        else { return nil }
+        return data
+    }
+
+    private func imageDimensions(_ source: CGImageSource) -> (width: Int, height: Int)? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { return nil }
+        return (width, height)
     }
 
     private func previewImage(at url: URL, maxPixelSize: Int) throws -> CGImage {
@@ -572,10 +599,11 @@ actor ClipboardPersistence {
     }
 
     private func validImageNames(_ image: ClipboardImage) -> Bool {
-        isManagedImageName(image.fileName) && image.thumbnailName == image.fileName.replacingOccurrences(of: ".png", with: ".thumb.png")
+        image.fileName.range(of: #"\A[a-f0-9]{64}\.(?:gif|png)\z"#, options: .regularExpression) != nil
+            && image.thumbnailName == image.fileName.dropLast(4) + ".thumb.png"
     }
 
     private func isManagedImageName(_ name: String) -> Bool {
-        name.range(of: #"^[a-f0-9]{64}(?:\.thumb)?\.png$"#, options: .regularExpression) != nil
+        name.range(of: #"\A[a-f0-9]{64}\.(?:gif|png|thumb\.png)\z"#, options: .regularExpression) != nil
     }
 }

@@ -70,6 +70,8 @@ nonisolated struct ClipboardImage: Codable, Sendable {
     var thumbnailByteCount: Int
     var width: Int
     var height: Int
+
+    var isGIF: Bool { fileName.hasSuffix(".gif") }
 }
 
 nonisolated struct ClipboardItem: Identifiable, Codable, Sendable {

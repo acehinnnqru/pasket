@@ -144,6 +144,9 @@ jobs:
           COMMIT_MESSAGE: ${{ needs.prepare.outputs.message }}
           EXPECTED_TREE: ${{ needs.prepare.outputs.tree }}
         run: |
+          checkout_ssh_command=$(git config --local --get core.sshCommand)
+          export GIT_SSH_COMMAND="$checkout_ssh_command -F none -o IdentitiesOnly=yes -o IdentityAgent=none"
+
           python3 .github/scripts/version.py check "$TAG"
           git add pasket.xcodeproj/project.pbxproj
           if [[ "$(git write-tree)" != "$EXPECTED_TREE" ]]; then

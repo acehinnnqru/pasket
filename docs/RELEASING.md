@@ -161,9 +161,10 @@ build files. Credentials are not uploaded as artifacts. The workflow requires
 an `Accepted` result for both the app and DMG, validates stapled tickets, and
 checks Gatekeeper before publishing.
 Notarization rejection or a 30-minute submission timeout fails the job and leaves
-the release unpublished; submission IDs and available Apple diagnostics appear
-in the job log. For signing, notarization, or upload failures, fix the cause and
-rerun the failed jobs in the **Release macOS app** run. To start both distribution
+the release unpublished. Release and TestFlight logs report stages, results, and
+error categories. Use the authenticated Apple tools to inspect any available
+notarization or upload diagnostics. For signing, notarization, or upload failures,
+fix the cause and rerun the failed jobs in the **Release macOS app** run. To start both distribution
 jobs again, use **Actions → Release macOS app → Run workflow**, entering the
 existing tag. This retries that version without another bump or commit. Avoid
 restarting a successful TestFlight upload; use the dedicated TestFlight workflow
@@ -174,7 +175,9 @@ release. For alpha/beta/rc, select the same channel to increment its sequence;
 after stable, select the desired channel and a patch bump. Keep the old tag for
 traceability. Old tags remain retryable after newer releases. A new manual run
 uses the selected branch's workflow and checks out the scripts from the tag.
-Rerunning an old workflow run also uses its original workflow definition.
+The current workflows filter old scripts' output and report an overall result
+when those scripts lack stage reporting. Rerunning an old workflow run uses its
+original workflow definition and logging behavior.
 
 See Apple's [notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 and GitHub's [certificate handling guide](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)

@@ -365,16 +365,22 @@ by a fallback import from JSON.
 
 ## Validation
 
-[CI](../.github/workflows/ci.yml) runs on demand. Open **Actions → CI → Run
-workflow**, select the branch to validate, and start the run. For a pull request
-from a branch in this repository, select its source branch. A new manual run
-cancels any in-progress CI run for the same branch.
+[CI](../.github/workflows/ci.yml) runs **Build and test** when a pull request
+moves from draft to **Ready for review**. Open the PR as a draft and click
+**Ready for review** in its merge box when the changes are ready to test.
+The run tests the proposed merge commit and reports its result under **Checks**.
+
+If a new commit is pushed after marking the PR ready, the required check waits
+for a result on the new commit. To start CI again, select **Convert to draft**,
+then **Ready for review**. Marking a PR ready also requests reviews from any
+code owners. A new run cancels an in-progress check for the same pull request.
+[GitHub's pull request stage guide](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/changing-the-stage-of-a-pull-request)
 
 The workflow uses read-only repository permissions. It checks release tooling,
 runs the core suite, and compiles the complete Debug app without signing using
-Xcode 27.1. Review its result in **Actions**. GitHub excludes manual runs from
-pull request checks and from required status checks in branch rulesets.
-[GitHub's required status check guidance](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated)
+Xcode 27.1. To validate a branch outside a pull request, use **Actions → CI →
+Run workflow** and select the branch. Use the PR's **Ready for review** trigger
+to satisfy its required check.
 
 ### Runner setup
 

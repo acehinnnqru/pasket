@@ -76,18 +76,11 @@ publishes these GitHub Release assets (using `v1.2.4` as an example):
 
 There is no separate `.app` asset: an app is a directory bundle, and the ZIP
 preserves its structure, signature, and notarization ticket for downloading.
-Both downloads require macOS 26 or later. The macOS jobs use the runner's selected
-Xcode and verify that it reports version `27.1`. The signing jobs use the
-`MACOS_SIGNING_RUNNER` repository variable as their runner label, falling back
-to `self-hosted` when it is unset. A label routes jobs to a runner; it does not
-install or select a toolchain. Installation paths
-are configured on the runner, as described in the
-[runner setup guide](DEVELOPMENT.md#runner-setup).
-
-GitHub-hosted runners use a temporary signing keychain. Self-hosted macOS
-Actions runners can reuse a persistent, repository-specific CI keychain with
-the setup described under [Persistent signing on self-hosted runners](#persistent-signing-on-self-hosted-runners).
-Both scripts reject ordinary local execution and unknown runner environments.
+Both downloads require macOS 26 or later. The macOS jobs use the GitHub-hosted
+`xcode-27` image and explicitly select Xcode 27.1, as described in the
+[runner setup guide](DEVELOPMENT.md#runner-setup). Each signing job creates a
+temporary keychain and imports the certificate export for its distribution
+channel on every run.
 
 Add these **repository secrets** under **Settings → Secrets and variables → Actions**:
 
@@ -100,7 +93,6 @@ Add these **repository secrets** under **Settings → Secrets and variables → 
 | `APPLE_API_KEY_ID` | The key ID of an App Store Connect **team API key** for notarization. |
 | `APPLE_API_ISSUER_ID` | The issuer UUID for that team API key. |
 | `APPLE_API_PRIVATE_KEY` | The complete `.p8` private key contents, including the BEGIN/END lines and real line breaks. |
-| `CI_KEYCHAIN_PASSWORD` | Self-hosted runners only: a stable password for the dedicated CI keychains. This is independent of the Mac login password and the P12 export passwords. |
 
 Export the certificate **with its private key** from Keychain Access and encode
 the `.p12` locally with `base64 -i /path/to/DeveloperID.p12 | pbcopy`. Paste the
@@ -163,12 +155,11 @@ release records, so keep unrelated tags outside this namespace. Pre-release
 tags are marked as GitHub prereleases and never become the Latest release.
 Neither route changes project signing settings.
 
-On GitHub-hosted runners, the signing keychain is deleted when the packaging
-script exits. On self-hosted runners, a successfully initialized CI keychain
-is locked and retained for reuse. Both modes restore the original keychain
-search list and remove decoded P12/API-key files and temporary build files.
-Credentials are not uploaded as artifacts. The workflow requires an `Accepted` result for both the
-app and DMG, validates stapled tickets, and checks Gatekeeper before publishing.
+When the packaging script exits, it restores the original keychain search list
+and removes the temporary keychain, decoded P12/API-key files, and temporary
+build files. Credentials are not uploaded as artifacts. The workflow requires
+an `Accepted` result for both the app and DMG, validates stapled tickets, and
+checks Gatekeeper before publishing.
 Notarization rejection or a 30-minute submission timeout fails the job and leaves
 the release unpublished; submission IDs and available Apple diagnostics appear
 in the job log. For signing, notarization, or upload failures, fix the cause and
@@ -181,99 +172,15 @@ can resume while the release is still a draft. Published releases are never
 overwritten. If a failure requires a code change, fix the code and request another
 release. For alpha/beta/rc, select the same channel to increment its sequence;
 after stable, select the desired channel and a patch bump. Keep the old tag for
-traceability. Old tags remain retryable after newer releases. Local changes do
-not affect builds of an existing tag.
+traceability. Old tags remain retryable after newer releases. A new manual run
+uses the selected branch's workflow and checks out the scripts from the tag.
+Rerunning an old workflow run also uses its original workflow definition.
 
 See Apple's [notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 and GitHub's [certificate handling guide](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)
 for the underlying signing and notarization requirements. The first real signed
 release must be verified in Actions after these secrets are configured; local
 unsigned builds do not exercise Apple's notarization service or Gatekeeper.
-
-## Persistent signing on self-hosted runners
-
-Use a dedicated macOS release runner that executes trusted release code. Keep
-untrusted pull-request builds in a separate environment; a separate keychain
-file does not isolate jobs running as the same macOS user. Give the release
-runner a distinct label such as `pasket-signing`, set the repository variable
-`MACOS_SIGNING_RUNNER` to that label, and keep the PR CI label `self-hosted` off
-that runner. Select Xcode 27.1 as described in the
-[runner setup guide](DEVELOPMENT.md#runner-setup).
-
-Run the runner as a macOS user whose Xcode/keychain setup is already initialized:
-`~/Library/Keychains` must exist and the user keychain search list must be readable
-and nonempty. The helper does not create or repair a login keychain. The runner
-also needs Python 3 for validation and the GitHub CLI (`gh`) for publishing release
-assets; Xcode alone does not provide the GitHub CLI.
-
-Set `CI_KEYCHAIN_PASSWORD` as an Actions Secret. On the first run, also supply
-the existing P12 certificate and password secrets for the distribution channel.
-The API-key secrets remain required on every run, and TestFlight still needs
-`APP_STORE_PROVISIONING_PROFILE_BASE64` on every run. An Xcode account login
-does not replace these inputs.
-
-The shared [keychain helper](../.github/scripts/signing-keychain.sh) stores only
-its dedicated keychains and initialization metadata under:
-
-```text
-~/Library/Keychains/pasket-ci/<owner>/<repository>/<APPLE_TEAM_ID>/
-  developer-id.keychain-db
-  app-store.keychain-db
-```
-
-Each keychain has adjacent `.ready` metadata. The helper does not import into
-the login keychain, change the default keychain, or renew certificates in the
-developer portal. It temporarily adds the selected CI keychain to the existing
-search list and restores the original list at exit.
-
-The self-hosted flow is:
-
-1. Validate the Actions runner environment and required settings, then acquire
-   the per-user signing lock before reading or changing the keychain search list.
-2. If the dedicated keychain is missing, create it, import the channel's P12,
-   and configure access for signing tools. If it is already initialized, unlock
-   and reuse it without importing certificates or changing key permissions.
-3. Check for valid certificate/private-key identities of the required types for
-   `APPLE_TEAM_ID`. TestFlight additionally checks the profile's team, platform,
-   bundle identifier, expiration, and certificate membership. File existence
-   alone is not a successful validation.
-4. Build, sign, and notarize or upload using the checked identities. The separate
-   `.p8` API key is still supplied from Secrets as a temporary file.
-5. Remove temporary credentials and any profile copies installed by this run,
-   restore the original search list, lock the persistent keychain, and release
-   the signing lock. An identical preinstalled provisioning profile is reused
-   and left in place; conflicting profiles are rejected.
-
-After initialization, P12 certificate/password secrets may be omitted when
-reusing that keychain. If a P12 is supplied, its fingerprint must match the one
-used at initialization. A changed P12, invalid identity, or wrong keychain
-password stops the job; the script never silently replaces an existing keychain.
-To rotate credentials, stop signing jobs and deliberately retire only the
-affected managed keychain and its `.ready` metadata, then initialize it from the
-new certificate secrets. Changing `CI_KEYCHAIN_PASSWORD` alone does not change
-the password of an existing keychain.
-
-Setup failures delete only a keychain and initialization metadata newly created
-by that run. Existing initialized keychains survive failures; any persistent
-keychain the job attempted to unlock is locked during cleanup. Cleanup
-failure also fails an otherwise successful script. HUP, INT, and TERM trigger
-cleanup, but a forced process kill or host failure can prevent it: inspect and
-recover the managed state before the next release.
-
-One shared lock protects the macOS user's keychain search list across both
-distribution channels and all repositories using this helper. Concurrent jobs
-fail with a clear lock error rather than changing each other's state. Use one
-runner process per release user, or schedule signing jobs sequentially. Release
-packaging and TestFlight are otherwise independent jobs; if multiple runner
-processes share a user, retry a job rejected by the lock after the active one
-finishes. A leftover lock is not automatically broken: confirm that no signing
-job remains active and restore/lock any affected keychains before removing it.
-
-This flow applies only to release tags containing the updated scripts and
-helper. Retrying an older tag uses that tag's original signing behavior. Local
-mock tests exercise lifecycle and failure handling without accessing a real
-keychain; a real signed release still needs separate validation on the configured
-runner.
 
 ## TestFlight uploads
 
@@ -385,13 +292,11 @@ can be reused if it has the required access. The `.p8` value remains the complet
 key with real line breaks, not Base64. No Apple ID password, app-specific password,
 or additional deploy key is needed by this workflow.
 
-The script uses a temporary keychain on GitHub-hosted runners or the dedicated
-persistent CI keychain on configured self-hosted runners. It validates profile
-platform, team, bundle identifier, expiration, and certificate membership and
-uses manual signing without automatic provisioning updates. On exit it removes
-only profile copies installed by that run and decoded credentials, restores the
-original keychain search list, and deletes the temporary keychain or locks the
-persistent one. It does not create or renew certificates or profiles in the developer portal.
+The script uses a temporary keychain. It validates the profile's platform, team,
+bundle identifier, expiration, and certificate membership and uses manual signing
+without automatic provisioning updates. On exit it removes the profile copies
+installed by that run and decoded credentials, restores the original keychain
+search list, and deletes the temporary keychain.
 
 ### App Store Connect setup and upload status
 

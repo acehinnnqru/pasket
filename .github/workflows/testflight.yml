@@ -27,12 +27,13 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: ${{ vars.MACOS_SIGNING_RUNNER || 'self-hosted' }}
+    runs-on: xcode-27
     timeout-minutes: 90
     defaults:
       run:
         shell: bash
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Check out the release tag
@@ -47,7 +48,7 @@ jobs:
           xcode_version="$(xcodebuild -version)"
           printf '%s\n' "$xcode_version"
           if [[ "${xcode_version%%$'\n'*}" != "Xcode 27.1" ]]; then
-            echo '::error::Xcode 27.1 is required. Select it on the runner with xcode-select.' >&2
+            echo '::error::Xcode 27.1 is required. Check DEVELOPER_DIR and the xcode-27 runner image.' >&2
             exit 1
           fi
           xcrun swift --version
@@ -65,7 +66,6 @@ jobs:
 
       - name: Archive and upload to App Store Connect
         env:
-          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
           APP_STORE_CERTIFICATES_BASE64: ${{ secrets.APP_STORE_CERTIFICATES_BASE64 }}
           APP_STORE_CERTIFICATES_PASSWORD: ${{ secrets.APP_STORE_CERTIFICATES_PASSWORD }}
           APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}

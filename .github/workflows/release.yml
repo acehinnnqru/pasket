@@ -23,18 +23,21 @@ concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  release:
+  validate:
+    name: Validate the release commit
     runs-on: xcode-27
-    timeout-minutes: 90
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    timeout-minutes: 30
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
     steps:
       - name: Check out the release tag
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -44,15 +47,18 @@ jobs:
           persist-credentials: false
 
       - name: Validate the release tag
+        id: tag
         run: |
           trap 'echo "::error::Release tag validation failed (configuration)"' ERR
           python3 .github/scripts/version.py check "$RELEASE_TAG" >/dev/null 2>&1
+          commit="$(git rev-parse --verify HEAD)"
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
           echo 'Release tag validation succeeded.'
 
       - name: Check version tooling
         run: |
           trap 'echo "::error::Version tooling checks failed (tests)"' ERR
-          python3 .github/scripts/test_version.py >/dev/null 2>&1
+          python3 -B .github/scripts/test_version.py >/dev/null 2>&1
           echo 'Version tooling checks succeeded.'
 
       - name: Verify the selected Xcode
@@ -68,6 +74,37 @@ jobs:
           trap 'echo "::error::Core tests failed (tests)"' ERR
           xcrun swift test >/dev/null 2>&1
           echo 'Core tests succeeded.'
+
+  release:
+    needs: validate
+    runs-on: xcode-27
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the tested commit
+        env:
+          VERIFIED_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          commit="$(git rev-parse --verify HEAD)"
+          if [[ "$commit" != "$VERIFIED_COMMIT" ]]; then
+            echo '::error::The release tag no longer points to the tested commit.'
+            exit 1
+          fi
+
+      - name: Verify the selected Xcode
+        run: |
+          trap 'echo "::error::Toolchain validation failed (toolchain)"' ERR
+          xcode_version="$(xcodebuild -version 2>/dev/null)"
+          [[ "${xcode_version%%$'\n'*}" == "Xcode 27.1" ]]
+          echo 'Toolchain validation succeeded.'
 
       - name: Build, sign, notarize, and package
         env:
@@ -128,7 +165,9 @@ jobs:
           echo 'GitHub publication succeeded.'
 
   testflight:
+    needs: validate
     uses: ./.github/workflows/testflight.yml
     with:
       tag: ${{ inputs.tag || github.ref_name }}
+      verified_commit: ${{ needs.validate.outputs.commit }}
     secrets: inherit

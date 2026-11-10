@@ -12,11 +12,11 @@ on:
       tag:
         type: string
         required: true
-      core_tests_verified:
-        description: The caller has passed core tests for the exact release content
-        type: boolean
+      verified_commit:
+        description: Commit SHA that passed release validation and core tests
+        type: string
         required: false
-        default: false
+        default: ''
 
 permissions:
   contents: read
@@ -52,19 +52,27 @@ jobs:
           echo 'Toolchain validation succeeded.'
 
       - name: Validate the release tag and tooling
+        env:
+          VERIFIED_COMMIT: ${{ inputs.verified_commit }}
         run: |
           trap 'echo "::error::Release tag validation failed (configuration)"' ERR
+          if [[ -n "$VERIFIED_COMMIT" && "$(git rev-parse --verify HEAD)" != "$VERIFIED_COMMIT" ]]; then
+            echo '::error::The release tag no longer points to the tested commit.'
+            exit 1
+          fi
           python3 .github/scripts/version.py check "$RELEASE_TAG" >/dev/null 2>&1
           echo 'Release tag validation succeeded.'
 
           trap 'echo "::error::Release tooling checks failed (tests)"' ERR
-          python3 .github/scripts/test_version.py >/dev/null 2>&1
+          if [[ -z "$VERIFIED_COMMIT" ]]; then
+            python3 -B .github/scripts/test_version.py >/dev/null 2>&1
+          fi
           python3 -B .github/scripts/test_testflight.py >/dev/null 2>&1
           bash -n .github/scripts/upload-testflight.sh >/dev/null 2>&1
           echo 'Release tooling checks succeeded.'
 
       - name: Run core tests
-        if: ${{ !inputs.core_tests_verified }}
+        if: ${{ !inputs.verified_commit }}
         run: |
           trap 'echo "::error::Core tests failed (tests)"' ERR
           xcrun swift test >/dev/null 2>&1

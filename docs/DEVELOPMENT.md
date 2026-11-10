@@ -365,13 +365,16 @@ by a fallback import from JSON.
 
 ## Validation
 
-[CI](../.github/workflows/ci.yml) runs on every pull request and can also be
-started manually. It checks release tooling, runs the core suite,
-and compiles the complete Debug app without signing using Xcode 27.1. New commits
-cancel older runs for the same pull request or branch. The workflow uses read-only
-repository permissions and does not require signing credentials. To require a
-passing CI result before merging, select **Build and test** as a required status
-check in the default branch's protection rule or ruleset.
+[CI](../.github/workflows/ci.yml) runs on demand. Open **Actions → CI → Run
+workflow**, select the branch to validate, and start the run. For a pull request
+from a branch in this repository, select its source branch. A new manual run
+cancels any in-progress CI run for the same branch.
+
+The workflow uses read-only repository permissions. It checks release tooling,
+runs the core suite, and compiles the complete Debug app without signing using
+Xcode 27.1. Review its result in **Actions**. GitHub excludes manual runs from
+pull request checks and from required status checks in branch rulesets.
+[GitHub's required status check guidance](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated)
 
 ### Runner setup
 

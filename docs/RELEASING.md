@@ -49,26 +49,27 @@ or inconsistent release history stops the workflow. Tags reserve versions even
 if signing or publication failed; retry the reserved tag rather than deleting it.
 
 Clicking **Run workflow** authorizes that one predictable CI version commit and
-its tag. The workflow displays the exact diff and commit message, runs version
-tooling tests and core tests, and compiles the complete universal app without
-signing. If validation fails, it creates neither a commit nor a tag. After
-validation, it creates an unsigned commit such as
+its tag. On Ubuntu, the workflow checks the proposed version against the
+release history, displays the exact diff and commit message, and tests the
+version tooling. If version validation fails, it creates neither a commit nor
+a tag. After validation, it creates an unsigned commit such as
 `chore(release): bump version to 1.0.1-alpha.1` and the corresponding lightweight
-tag `v1.0.1-alpha.1`, then pushes the default branch and tag atomically. If the default branch
-has moved since the run started, the job stops; start a new run on the latest
-code. It never force-pushes or moves existing tags. This unsigned-commit exception
-applies only to this manually requested CI version update.
+tag `v1.0.1-alpha.1`, then pushes the default branch and tag atomically. If the
+default branch has moved since the run started, the job stops; start a new run
+on the latest code. It never force-pushes or moves existing tags. This
+unsigned-commit exception applies only to this manually requested CI version update.
 
 [Bump version and release](../.github/workflows/bump-version.yml) pushes over SSH
 using a dedicated writable deploy key. Its tag push automatically starts
 [Release macOS app](../.github/workflows/release.yml) as a separate workflow run.
-That run starts GitHub packaging and the reusable TestFlight workflow in parallel,
-using the same tag for both. The bump workflow does not upload separately, so each
-bump starts one GitHub release and one TestFlight upload.
-The release workflow checks that the tag matches the version stored in the project, runs
-tests, builds a universal Release app for Apple Silicon and Intel, signs with
-Developer ID, submits it to Apple's notary service, staples the ticket, and
-publishes these GitHub Release assets (using `v1.2.4` as an example):
+That run validates the tag against the project and runs the Swift core suite
+once on the tagged commit. If validation fails, the tag stays reserved and both
+distribution jobs stop. After validation, GitHub packaging and the reusable
+TestFlight workflow run in parallel. Each verifies that the tag still resolves
+to the tested commit before building. The GitHub job builds a universal Release
+app for Apple Silicon and Intel, signs with Developer ID, submits it to Apple's
+notary service, staples the ticket, and publishes these GitHub Release assets
+(using `v1.2.4` as an example):
 
 - `pasket-v1.2.4-universal.zip`: contains the signed, notarized `pasket.app`.
 - `pasket-v1.2.4-universal.dmg`: contains the same app and an Applications shortcut
@@ -205,12 +206,11 @@ Run workflow**, select the default branch, and enter an existing version tag.
 This dedicated workflow uploads only the selected tag to TestFlight, without
 rebuilding GitHub Release assets. Merge the workflow and scripts before creating
 the release tag: the selected tag must contain them.
-The workflow validates the tag and tooling before importing credentials. Core
-tests also run unless a reusable-workflow caller sets `core_tests_verified: true`
-after validating the exact release content. This input defaults to false and is
-not exposed by the manual entry point, so standalone manual uploads always run
-core tests. Calls from the release workflow also retain core tests. The workflow
-never creates a version commit or tag itself.
+The workflow validates the tag and TestFlight tooling before importing
+credentials. Standalone manual uploads also run version tooling and core tests.
+The release workflow passes the tested commit SHA to the reusable workflow, which
+checks it against the tag and uses the shared version tooling and core test
+results. The workflow never creates a version commit or tag itself.
 
 ### Certificates and provisioning profile
 

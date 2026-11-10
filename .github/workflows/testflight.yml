@@ -12,11 +12,11 @@ on:
       tag:
         type: string
         required: true
-      core_tests_verified:
-        description: The caller has passed core tests for the exact release content
-        type: boolean
+      verified_commit:
+        description: Commit SHA that passed release validation and core tests
+        type: string
         required: false
-        default: false
+        default: ''
 
 permissions:
   contents: read
@@ -27,12 +27,13 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: ${{ vars.MACOS_SIGNING_RUNNER || 'self-hosted' }}
+    runs-on: xcode-27
     timeout-minutes: 90
     defaults:
       run:
         shell: bash
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Check out the release tag
@@ -44,28 +45,41 @@ jobs:
 
       - name: Verify the selected Xcode
         run: |
-          xcode_version="$(xcodebuild -version)"
-          printf '%s\n' "$xcode_version"
-          if [[ "${xcode_version%%$'\n'*}" != "Xcode 27.1" ]]; then
-            echo '::error::Xcode 27.1 is required. Select it on the runner with xcode-select.' >&2
-            exit 1
-          fi
-          xcrun swift --version
+          trap 'echo "::error::Toolchain validation failed (toolchain)"' ERR
+          xcode_version="$(xcodebuild -version 2>/dev/null)"
+          [[ "${xcode_version%%$'\n'*}" == "Xcode 27.1" ]]
+          xcrun swift --version >/dev/null 2>&1
+          echo 'Toolchain validation succeeded.'
 
       - name: Validate the release tag and tooling
+        env:
+          VERIFIED_COMMIT: ${{ inputs.verified_commit }}
         run: |
-          python3 .github/scripts/version.py check "$RELEASE_TAG"
-          python3 .github/scripts/test_version.py
-          python3 -B .github/scripts/test_testflight.py
-          bash -n .github/scripts/upload-testflight.sh
+          trap 'echo "::error::Release tag validation failed (configuration)"' ERR
+          if [[ -n "$VERIFIED_COMMIT" && "$(git rev-parse --verify HEAD)" != "$VERIFIED_COMMIT" ]]; then
+            echo '::error::The release tag no longer points to the tested commit.'
+            exit 1
+          fi
+          python3 .github/scripts/version.py check "$RELEASE_TAG" >/dev/null 2>&1
+          echo 'Release tag validation succeeded.'
+
+          trap 'echo "::error::Release tooling checks failed (tests)"' ERR
+          if [[ -z "$VERIFIED_COMMIT" ]]; then
+            python3 -B .github/scripts/test_version.py >/dev/null 2>&1
+          fi
+          python3 -B .github/scripts/test_testflight.py >/dev/null 2>&1
+          bash -n .github/scripts/upload-testflight.sh >/dev/null 2>&1
+          echo 'Release tooling checks succeeded.'
 
       - name: Run core tests
-        if: ${{ !inputs.core_tests_verified }}
-        run: xcrun swift test
+        if: ${{ !inputs.verified_commit }}
+        run: |
+          trap 'echo "::error::Core tests failed (tests)"' ERR
+          xcrun swift test >/dev/null 2>&1
+          echo 'Core tests succeeded.'
 
       - name: Archive and upload to App Store Connect
         env:
-          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
           APP_STORE_CERTIFICATES_BASE64: ${{ secrets.APP_STORE_CERTIFICATES_BASE64 }}
           APP_STORE_CERTIFICATES_PASSWORD: ${{ secrets.APP_STORE_CERTIFICATES_PASSWORD }}
           APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APP_STORE_PROVISIONING_PROFILE_BASE64 }}
@@ -73,4 +87,26 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
-        run: bash .github/scripts/upload-testflight.sh
+        run: |
+          echo 'TestFlight distribution started.'
+          # Older tags can still write raw diagnostics and workflow command files.
+          if GITHUB_OUTPUT=/dev/null GITHUB_STEP_SUMMARY=/dev/null GITHUB_ENV=/dev/null \
+              GITHUB_PATH=/dev/null GITHUB_STATE=/dev/null \
+              bash .github/scripts/upload-testflight.sh 2>&1 |
+              awk -v stages='preflight|signing|provisioning|archive|verification|upload|cleanup' \
+                  -v errors='configuration|signing|identity|provisioning|archive|verification|upload|cleanup' \
+                  '$0 ~ ("^Distribution (" stages "): (started|succeeded|failed [(](" errors ")[)])$") { print; fflush() }'; then
+            {
+              echo '## TestFlight upload'
+              echo 'App Store Connect accepted the upload request.'
+            } 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || {
+              status=$?
+              echo '::error::TestFlight summary failed (summary)'
+              exit "$status"
+            }
+            echo 'TestFlight distribution succeeded.'
+          else
+            status=$?
+            echo '::error::TestFlight distribution failed (distribution)'
+            exit "$status"
+          fi

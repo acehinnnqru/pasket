@@ -39,8 +39,8 @@ env:
 jobs:
   prepare:
     name: Prepare and validate the version change
-    runs-on: self-hosted
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       message: ${{ steps.version.outputs.message }}
@@ -59,21 +59,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify the selected Xcode
-        run: |
-          xcode_version="$(xcodebuild -version)"
-          printf '%s\n' "$xcode_version"
-          if [[ "${xcode_version%%$'\n'*}" != "Xcode 27.1" ]]; then
-            echo '::error::Xcode 27.1 is required. Select it on the runner with xcode-select.' >&2
-            exit 1
-          fi
-          xcrun swift --version
-
       - name: Calculate and apply the version bump
         id: version
         run: python3 .github/scripts/version.py bump "$BUMP" --channel "$CHANNEL" --github-output "$GITHUB_OUTPUT"
 
-      - name: Preview the exact commit
+      - name: Validate and preview the exact commit
         id: preview
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -83,6 +73,7 @@ jobs:
             echo "::error::Tag $TAG already exists."
             exit 1
           fi
+          python3 .github/scripts/version.py check "$TAG"
           git add pasket.xcodeproj/project.pbxproj
           echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
           {
@@ -98,21 +89,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check version tooling
-        run: python3 .github/scripts/test_version.py
-
-      - name: Run core tests
-        run: xcrun swift test
-
-      - name: Compile the complete universal app without signing
-        run: |
-          xcodebuild -project pasket.xcodeproj -scheme pasket -configuration Release \
-            -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+        run: python3 -B .github/scripts/test_version.py
 
   commit:
     name: Commit and tag the requested version
     needs: prepare
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -171,5 +153,5 @@ jobs:
           {
             printf '## Version pushed: %s\n\n' "$TAG"
             printf 'The SSH tag push automatically starts **Release macOS app** as a separate workflow run.\n'
-            printf 'That run publishes the GitHub Release assets and uploads the same tag to TestFlight.\n'
+            printf 'That run tests the tagged commit before publishing GitHub Release assets and uploading to TestFlight.\n'
           } >> "$GITHUB_STEP_SUMMARY"

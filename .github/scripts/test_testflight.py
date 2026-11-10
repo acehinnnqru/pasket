@@ -126,7 +126,7 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
     def run_script(self, env):
         script = Path(__file__).with_name("upload-testflight.sh")
         return subprocess.run(
-            ["/bin/bash", "-c", 'security() { echo "UNEXPECTED_SECURITY_CALL" >&2; return 99; }; source "$1"',
+            ["/bin/bash", "-c", 'security() { echo "UNEXPECTED_SECURITY_CALL" >&3; return 99; }; source "$1"',
              "guard-test", str(script)], env=env, capture_output=True, text=True,
         )
 
@@ -135,40 +135,45 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
             with self.subTest(env=env):
                 result = self.run_script(env)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
+                self.assert_preflight_failure(result)
 
     def test_self_hosted_requires_explicit_keychain_password(self):
         result = self.run_script({"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "self-hosted"})
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("CI_KEYCHAIN_PASSWORD", result.stderr)
-        self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
+        self.assert_preflight_failure(result)
 
     def test_missing_credentials_fail_before_any_keychain_changes(self):
         result = self.run_script({"GITHUB_ACTIONS": "true", "RUNNER_OS": "macOS", "RUNNER_ENVIRONMENT": "github-hosted"})
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Missing required variable: APP_STORE_PROVISIONING_PROFILE_BASE64", result.stdout)
-        self.assertNotIn("UNEXPECTED_SECURITY_CALL", result.stderr)
+        self.assert_preflight_failure(result)
 
-    def test_identity_validation_reports_missing_and_duplicate_identity_types(self):
+    def assert_preflight_failure(self, result):
+        self.assertEqual(result.stdout.splitlines(), [
+            "Distribution preflight: started",
+            "Distribution preflight: failed (configuration)",
+        ])
+        self.assertEqual(result.stderr, "")
+
+    def test_identity_validation_rejects_missing_and_duplicate_identity_types(self):
         script = Path(__file__).with_name("upload-testflight.sh").read_text()
         validation = script[script.index("# Installer identities are not code-signing identities;"):
-                            script.index("\nsecurity cms -D")]
+                            script.index("\ndistribution_stage provisioning")]
         app = f'  1) {"A" * 40} "Apple Distribution: Example (TESTTEAM01)"'
         legacy_app = f'  1) {"B" * 40} "3rd Party Mac Developer Application: Example (TESTTEAM01)"'
         installer = f'  2) {"C" * 40} "3rd Party Mac Developer Installer: Example (TESTTEAM01)"'
         alternate_installer = f'  2) {"D" * 40} "Mac Installer Distribution: Example (TESTTEAM01)"'
         unrelated = f'  3) {"E" * 40} "Developer ID Application: Example (TESTTEAM01)"'
         other_team = f'  1) {"F" * 40} "Apple Distribution: Example (OTHERTEAM1)"'
-        for identities, expected_errors in (
-            (f"{app}\n{installer}\n{unrelated}", ()),
-            (f"{legacy_app}\n{alternate_installer}", ()),
-            (installer, (("Apple Distribution", 0),)),
-            (app, (("Mac Installer Distribution", 0),)),
-            ("0 valid identities found", (("Apple Distribution", 0), ("Mac Installer Distribution", 0))),
-            (unrelated, (("Apple Distribution", 0), ("Mac Installer Distribution", 0))),
-            (f"{app}\n{legacy_app}\n{installer}", (("Apple Distribution", 2),)),
-            (f"{app}\n{installer}\n{alternate_installer}", (("Mac Installer Distribution", 2),)),
-            (f"{other_team}\n{installer}", (("Apple Distribution", 0),)),
+        for identities, expected in (
+            (f"{app}\n{installer}\n{unrelated}", 0),
+            (f"{legacy_app}\n{alternate_installer}", 0),
+            (installer, 1),
+            (app, 1),
+            ("0 valid identities found", 1),
+            (unrelated, 1),
+            (f"{app}\n{legacy_app}\n{installer}", 1),
+            (f"{app}\n{installer}\n{alternate_installer}", 1),
+            (f"{other_team}\n{installer}", 1),
         ):
             with self.subTest(identities=identities):
                 # Exercise selection without importing credentials or accessing a keychain.
@@ -178,17 +183,8 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
                      'APPLE_TEAM_ID=TESTTEAM01\nkeychain_path=synthetic-keychain\n' + validation],
                     env={**os.environ, "TEST_IDENTITIES": identities}, capture_output=True, text=True,
                 )
-                self.assertEqual(result.returncode, 1 if expected_errors else 0, result.stderr)
-                self.assertEqual("READY_FOR_REUSE" in result.stdout, not expected_errors)
-                errors = [line for line in result.stdout.splitlines() if "Expected exactly one" in line]
-                self.assertEqual(len(errors), len(expected_errors))
-                for line, (identity_type, count) in zip(errors, expected_errors):
-                    self.assertIn(identity_type, line)
-                    self.assertIn(f"found {count} signing identities", line)
-                if expected_errors:
-                    self.assertIn("Zero matches can mean", result.stdout)
-                self.assertEqual("Detected Developer ID signing identities" in result.stdout,
-                                 bool(expected_errors) and unrelated in identities)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(result.stdout, "READY_FOR_REUSE\n" if expected == 0 else "")
 
     def test_cleanup_before_profile_installation_works_in_macos_bash(self):
         script = Path(__file__).with_name("upload-testflight.sh").read_text()
@@ -199,6 +195,7 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
             (work / "AuthKey.p8").write_text("synthetic private key")
             result = subprocess.run(
                 ["/bin/bash", "-uc", cleanup + '\nsigning_keychain_cleanup() { return 0; }\n'
+                 'distribution_finish() { :; }\ndistribution_stage() { :; }\n'
                  'work_directory="$1"\nprofile_paths=()\ncleanup', "cleanup-test", str(work)],
                 capture_output=True, text=True,
             )
@@ -216,6 +213,7 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
                     (work / "AuthKey.p8").write_text("synthetic private key")
                     result = subprocess.run(
                         ["/bin/bash", "-uc", cleanup + '\nsigning_keychain_cleanup() { return 1; }\n'
+                         'distribution_finish() { :; }\ndistribution_stage() { :; }\n'
                          'work_directory="$1"\nprofile_paths=()\n(exit "$2")\ncleanup',
                          "cleanup-test", str(work), str(prior_status)], capture_output=True, text=True,
                     )
@@ -225,7 +223,7 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
     def test_developer_id_selection_requires_one_valid_identity_for_the_team(self):
         script = Path(__file__).with_name("release-macos.sh").read_text()
         validation = script[script.index("# Select a certificate from this keychain"):
-                            script.index("\nxcodebuild -project")]
+                            script.index("\ndistribution_stage build")]
         identity = f'  1) {"A" * 40} "Developer ID Application: Example (TESTTEAM01)"'
         other_team = f'  2) {"B" * 40} "Developer ID Application: Example (OTHERTEAM1)"'
         duplicate = f'  3) {"C" * 40} "Developer ID Application: Example (TESTTEAM01)"'
@@ -241,10 +239,47 @@ printf 'synthetic credential' > "$work_directory/credential-after-build"
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual("READY_FOR_REUSE" in result.stdout, expected == 0)
 
+    def test_notarization_reports_status_without_apple_diagnostics(self):
+        script = Path(__file__).with_name("release-macos.sh").read_text()
+        notarize = script[script.index("notarize() {"):script.index("# ZIP files cannot carry")]
+        logger = Path(__file__).with_name("distribution-log.sh")
+        for status, tool_exit, expected, report in (
+            ("Accepted", "0", 0, "succeeded"),
+            ("Invalid", "0", 1, "failed (notarization-result)"),
+            ("", "1", 1, "failed (notarization-request)"),
+        ):
+            with self.subTest(status=status, tool_exit=tool_exit), tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run(
+                    ["/bin/bash", "-euc", '''
+source "$1"
+work_directory="$2"
+key_path=synthetic-key-path
+APPLE_API_KEY_ID=synthetic-key-id
+APPLE_API_ISSUER_ID=synthetic-issuer
+xcrun() {
+  printf 'Apple diagnostic: synthetic identity and submission ID\\n' >&2
+  printf '{"id":"synthetic-submission","status":"%s"}\\n' "$NOTARY_STATUS"
+  return "$NOTARY_EXIT"
+}
+plutil() { printf '%s\\n' "$NOTARY_STATUS"; }
+''' + notarize + '''
+distribution_stage app-notarization packaging
+notarize synthetic.zip app
+''', "notarization-test", str(logger), directory],
+                    env={**os.environ, "NOTARY_STATUS": status, "NOTARY_EXIT": tool_exit},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), [
+                    "Distribution app-notarization: started",
+                    f"Distribution app-notarization: {report}",
+                ])
+                self.assertEqual(result.stderr, "")
+
     def test_profile_installation_preserves_existing_files_and_cleans_only_its_own_copy(self):
         script = Path(__file__).with_name("upload-testflight.sh").read_text()
         installation = script[script.index("# Support both current Xcode"):
-                              script.index("\ndistribution_build -project")]
+                              script.index("\ndistribution_stage archive")]
         # Redirect only the profile destinations in this isolated code fragment.
         installation = installation.replace(
             '"$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"',

@@ -365,44 +365,33 @@ by a fallback import from JSON.
 
 ## Validation
 
-[CI](../.github/workflows/ci.yml) runs on every pull request and can also be
-started manually. It checks release tooling, runs the core suite,
-and compiles the complete Debug app without signing using Xcode 27.1. New commits
-cancel older runs for the same pull request or branch. The workflow uses read-only
-repository permissions and does not require signing credentials. To require a
-passing CI result before merging, select **Build and test** as a required status
-check in the default branch's protection rule or ruleset.
+[CI](../.github/workflows/ci.yml) runs **Build and test** when a pull request
+moves from draft to **Ready for review**. Open the PR as a draft and click
+**Ready for review** in its merge box when the changes are ready to test.
+The run tests the proposed merge commit and reports its result under **Checks**.
+
+If a new commit is pushed after marking the PR ready, the required check waits
+for a result on the new commit. To start CI again, select **Convert to draft**,
+then **Ready for review**. Marking a PR ready also requests reviews from any
+code owners. A new run cancels an in-progress check for the same pull request.
+[GitHub's pull request stage guide](https://docs.github.com/en/pull-requests/how-tos/create-pull-requests/changing-the-stage-of-a-pull-request)
+
+The workflow uses read-only repository permissions. It checks release tooling,
+runs the core suite, and compiles the complete Debug app without signing using
+Xcode 27.1. To validate a branch outside a pull request, use **Actions → CI →
+Run workflow** and select the branch. Use the PR's **Ready for review** trigger
+to satisfy its required check.
 
 ### Runner setup
 
-Unsigned macOS jobs use a runner with the `self-hosted` label. Signing jobs use
-`MACOS_SIGNING_RUNNER` when configured, otherwise `self-hosted`. Install full Xcode 27.1
-and complete its first-launch setup on the runner. Select that installation as
-the machine's default command-line toolchain; for example, if it is installed
-at `/Applications/Xcode.app`:
+The macOS workflows run on the GitHub-hosted `xcode-27` image. Jobs that use
+Xcode set `DEVELOPER_DIR` to `/Applications/Xcode_27.1.app/Contents/Developer`
+and check the version before testing or building. `xcrun swift test` uses the
+Swift toolchain from that installation. When upgrading Xcode, update the
+selected path and version checks together.
 
-```sh
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-xcodebuild -version
-xcrun swift --version
-```
-
-Use the actual installation path on that runner. This is a machine setup step,
-not a workflow step. The workflows do not set `DEVELOPER_DIR` or install Xcode;
-they verify that the selected Xcode reports version `27.1` before running tests
-or compiling. Swift tests use `xcrun swift test` to resolve Swift through the
-selected Xcode. If the runner environment already sets `DEVELOPER_DIR`, that
-value overrides the machine's default and must point to the intended Xcode.
-
-When replacing a runner, select Xcode on the new machine and assign the
-appropriate job label. Its installation path can differ without changing the
-workflows. A deliberate Xcode version upgrade also requires updating the
-version checks in all four macOS workflows.
-
-Self-hosted macOS runners can run unsigned checks or use a dedicated persistent
-CI keychain for trusted signing jobs. Keep release runners separate from untrusted
-PR builds. See [self-hosted signing setup](RELEASING.md#persistent-signing-on-self-hosted-runners)
-for runner labels, secrets, reuse, and cleanup behavior.
+Each signing job runs in its own hosted environment and uses a temporary
+keychain. See the [release guide](RELEASING.md) for the required signing secrets.
 
 ### Profiling history opens
 

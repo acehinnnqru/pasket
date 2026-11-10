@@ -49,26 +49,27 @@ or inconsistent release history stops the workflow. Tags reserve versions even
 if signing or publication failed; retry the reserved tag rather than deleting it.
 
 Clicking **Run workflow** authorizes that one predictable CI version commit and
-its tag. The workflow displays the exact diff and commit message, runs version
-tooling tests and core tests, and compiles the complete universal app without
-signing. If validation fails, it creates neither a commit nor a tag. After
-validation, it creates an unsigned commit such as
+its tag. On Ubuntu, the workflow checks the proposed version against the
+release history, displays the exact diff and commit message, and tests the
+version tooling. If version validation fails, it creates neither a commit nor
+a tag. After validation, it creates an unsigned commit such as
 `chore(release): bump version to 1.0.1-alpha.1` and the corresponding lightweight
-tag `v1.0.1-alpha.1`, then pushes the default branch and tag atomically. If the default branch
-has moved since the run started, the job stops; start a new run on the latest
-code. It never force-pushes or moves existing tags. This unsigned-commit exception
-applies only to this manually requested CI version update.
+tag `v1.0.1-alpha.1`, then pushes the default branch and tag atomically. If the
+default branch has moved since the run started, the job stops; start a new run
+on the latest code. It never force-pushes or moves existing tags. This
+unsigned-commit exception applies only to this manually requested CI version update.
 
 [Bump version and release](../.github/workflows/bump-version.yml) pushes over SSH
 using a dedicated writable deploy key. Its tag push automatically starts
 [Release macOS app](../.github/workflows/release.yml) as a separate workflow run.
-That run starts GitHub packaging and the reusable TestFlight workflow in parallel,
-using the same tag for both. The bump workflow does not upload separately, so each
-bump starts one GitHub release and one TestFlight upload.
-The release workflow checks that the tag matches the version stored in the project, runs
-tests, builds a universal Release app for Apple Silicon and Intel, signs with
-Developer ID, submits it to Apple's notary service, staples the ticket, and
-publishes these GitHub Release assets (using `v1.2.4` as an example):
+That run validates the tag against the project and runs the Swift core suite
+once on the tagged commit. If validation fails, the tag stays reserved and both
+distribution jobs stop. After validation, GitHub packaging and the reusable
+TestFlight workflow run in parallel. Each verifies that the tag still resolves
+to the tested commit before building. The GitHub job builds a universal Release
+app for Apple Silicon and Intel, signs with Developer ID, submits it to Apple's
+notary service, staples the ticket, and publishes these GitHub Release assets
+(using `v1.2.4` as an example):
 
 - `pasket-v1.2.4-universal.zip`: contains the signed, notarized `pasket.app`.
 - `pasket-v1.2.4-universal.dmg`: contains the same app and an Applications shortcut
@@ -76,18 +77,11 @@ publishes these GitHub Release assets (using `v1.2.4` as an example):
 
 There is no separate `.app` asset: an app is a directory bundle, and the ZIP
 preserves its structure, signature, and notarization ticket for downloading.
-Both downloads require macOS 26 or later. The macOS jobs use the runner's selected
-Xcode and verify that it reports version `27.1`. The signing jobs use the
-`MACOS_SIGNING_RUNNER` repository variable as their runner label, falling back
-to `self-hosted` when it is unset. A label routes jobs to a runner; it does not
-install or select a toolchain. Installation paths
-are configured on the runner, as described in the
-[runner setup guide](DEVELOPMENT.md#runner-setup).
-
-GitHub-hosted runners use a temporary signing keychain. Self-hosted macOS
-Actions runners can reuse a persistent, repository-specific CI keychain with
-the setup described under [Persistent signing on self-hosted runners](#persistent-signing-on-self-hosted-runners).
-Both scripts reject ordinary local execution and unknown runner environments.
+Both downloads require macOS 26 or later. The macOS jobs use the GitHub-hosted
+`xcode-27` image and explicitly select Xcode 27.1, as described in the
+[runner setup guide](DEVELOPMENT.md#runner-setup). Each signing job creates a
+temporary keychain and imports the certificate export for its distribution
+channel on every run.
 
 Add these **repository secrets** under **Settings → Secrets and variables → Actions**:
 
@@ -100,7 +94,6 @@ Add these **repository secrets** under **Settings → Secrets and variables → 
 | `APPLE_API_KEY_ID` | The key ID of an App Store Connect **team API key** for notarization. |
 | `APPLE_API_ISSUER_ID` | The issuer UUID for that team API key. |
 | `APPLE_API_PRIVATE_KEY` | The complete `.p8` private key contents, including the BEGIN/END lines and real line breaks. |
-| `CI_KEYCHAIN_PASSWORD` | Self-hosted runners only: a stable password for the dedicated CI keychains. This is independent of the Mac login password and the P12 export passwords. |
 
 Export the certificate **with its private key** from Keychain Access and encode
 the `.p12` locally with `base64 -i /path/to/DeveloperID.p12 | pbcopy`. Paste the
@@ -163,16 +156,16 @@ release records, so keep unrelated tags outside this namespace. Pre-release
 tags are marked as GitHub prereleases and never become the Latest release.
 Neither route changes project signing settings.
 
-On GitHub-hosted runners, the signing keychain is deleted when the packaging
-script exits. On self-hosted runners, a successfully initialized CI keychain
-is locked and retained for reuse. Both modes restore the original keychain
-search list and remove decoded P12/API-key files and temporary build files.
-Credentials are not uploaded as artifacts. The workflow requires an `Accepted` result for both the
-app and DMG, validates stapled tickets, and checks Gatekeeper before publishing.
+When the packaging script exits, it restores the original keychain search list
+and removes the temporary keychain, decoded P12/API-key files, and temporary
+build files. Credentials are not uploaded as artifacts. The workflow requires
+an `Accepted` result for both the app and DMG, validates stapled tickets, and
+checks Gatekeeper before publishing.
 Notarization rejection or a 30-minute submission timeout fails the job and leaves
-the release unpublished; submission IDs and available Apple diagnostics appear
-in the job log. For signing, notarization, or upload failures, fix the cause and
-rerun the failed jobs in the **Release macOS app** run. To start both distribution
+the release unpublished. Release and TestFlight logs report stages, results, and
+error categories. Use the authenticated Apple tools to inspect any available
+notarization or upload diagnostics. For signing, notarization, or upload failures,
+fix the cause and rerun the failed jobs in the **Release macOS app** run. To start both distribution
 jobs again, use **Actions → Release macOS app → Run workflow**, entering the
 existing tag. This retries that version without another bump or commit. Avoid
 restarting a successful TestFlight upload; use the dedicated TestFlight workflow
@@ -181,99 +174,17 @@ can resume while the release is still a draft. Published releases are never
 overwritten. If a failure requires a code change, fix the code and request another
 release. For alpha/beta/rc, select the same channel to increment its sequence;
 after stable, select the desired channel and a patch bump. Keep the old tag for
-traceability. Old tags remain retryable after newer releases. Local changes do
-not affect builds of an existing tag.
+traceability. Old tags remain retryable after newer releases. A new manual run
+uses the selected branch's workflow and checks out the scripts from the tag.
+The current workflows filter old scripts' output and report an overall result
+when those scripts lack stage reporting. Rerunning an old workflow run uses its
+original workflow definition and logging behavior.
 
 See Apple's [notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 and GitHub's [certificate handling guide](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)
 for the underlying signing and notarization requirements. The first real signed
 release must be verified in Actions after these secrets are configured; local
 unsigned builds do not exercise Apple's notarization service or Gatekeeper.
-
-## Persistent signing on self-hosted runners
-
-Use a dedicated macOS release runner that executes trusted release code. Keep
-untrusted pull-request builds in a separate environment; a separate keychain
-file does not isolate jobs running as the same macOS user. Give the release
-runner a distinct label such as `pasket-signing`, set the repository variable
-`MACOS_SIGNING_RUNNER` to that label, and keep the PR CI label `self-hosted` off
-that runner. Select Xcode 27.1 as described in the
-[runner setup guide](DEVELOPMENT.md#runner-setup).
-
-Run the runner as a macOS user whose Xcode/keychain setup is already initialized:
-`~/Library/Keychains` must exist and the user keychain search list must be readable
-and nonempty. The helper does not create or repair a login keychain. The runner
-also needs Python 3 for validation and the GitHub CLI (`gh`) for publishing release
-assets; Xcode alone does not provide the GitHub CLI.
-
-Set `CI_KEYCHAIN_PASSWORD` as an Actions Secret. On the first run, also supply
-the existing P12 certificate and password secrets for the distribution channel.
-The API-key secrets remain required on every run, and TestFlight still needs
-`APP_STORE_PROVISIONING_PROFILE_BASE64` on every run. An Xcode account login
-does not replace these inputs.
-
-The shared [keychain helper](../.github/scripts/signing-keychain.sh) stores only
-its dedicated keychains and initialization metadata under:
-
-```text
-~/Library/Keychains/pasket-ci/<owner>/<repository>/<APPLE_TEAM_ID>/
-  developer-id.keychain-db
-  app-store.keychain-db
-```
-
-Each keychain has adjacent `.ready` metadata. The helper does not import into
-the login keychain, change the default keychain, or renew certificates in the
-developer portal. It temporarily adds the selected CI keychain to the existing
-search list and restores the original list at exit.
-
-The self-hosted flow is:
-
-1. Validate the Actions runner environment and required settings, then acquire
-   the per-user signing lock before reading or changing the keychain search list.
-2. If the dedicated keychain is missing, create it, import the channel's P12,
-   and configure access for signing tools. If it is already initialized, unlock
-   and reuse it without importing certificates or changing key permissions.
-3. Check for valid certificate/private-key identities of the required types for
-   `APPLE_TEAM_ID`. TestFlight additionally checks the profile's team, platform,
-   bundle identifier, expiration, and certificate membership. File existence
-   alone is not a successful validation.
-4. Build, sign, and notarize or upload using the checked identities. The separate
-   `.p8` API key is still supplied from Secrets as a temporary file.
-5. Remove temporary credentials and any profile copies installed by this run,
-   restore the original search list, lock the persistent keychain, and release
-   the signing lock. An identical preinstalled provisioning profile is reused
-   and left in place; conflicting profiles are rejected.
-
-After initialization, P12 certificate/password secrets may be omitted when
-reusing that keychain. If a P12 is supplied, its fingerprint must match the one
-used at initialization. A changed P12, invalid identity, or wrong keychain
-password stops the job; the script never silently replaces an existing keychain.
-To rotate credentials, stop signing jobs and deliberately retire only the
-affected managed keychain and its `.ready` metadata, then initialize it from the
-new certificate secrets. Changing `CI_KEYCHAIN_PASSWORD` alone does not change
-the password of an existing keychain.
-
-Setup failures delete only a keychain and initialization metadata newly created
-by that run. Existing initialized keychains survive failures; any persistent
-keychain the job attempted to unlock is locked during cleanup. Cleanup
-failure also fails an otherwise successful script. HUP, INT, and TERM trigger
-cleanup, but a forced process kill or host failure can prevent it: inspect and
-recover the managed state before the next release.
-
-One shared lock protects the macOS user's keychain search list across both
-distribution channels and all repositories using this helper. Concurrent jobs
-fail with a clear lock error rather than changing each other's state. Use one
-runner process per release user, or schedule signing jobs sequentially. Release
-packaging and TestFlight are otherwise independent jobs; if multiple runner
-processes share a user, retry a job rejected by the lock after the active one
-finishes. A leftover lock is not automatically broken: confirm that no signing
-job remains active and restore/lock any affected keychains before removing it.
-
-This flow applies only to release tags containing the updated scripts and
-helper. Retrying an older tag uses that tag's original signing behavior. Local
-mock tests exercise lifecycle and failure handling without accessing a real
-keychain; a real signed release still needs separate validation on the configured
-runner.
 
 ## TestFlight uploads
 
@@ -295,12 +206,11 @@ Run workflow**, select the default branch, and enter an existing version tag.
 This dedicated workflow uploads only the selected tag to TestFlight, without
 rebuilding GitHub Release assets. Merge the workflow and scripts before creating
 the release tag: the selected tag must contain them.
-The workflow validates the tag and tooling before importing credentials. Core
-tests also run unless a reusable-workflow caller sets `core_tests_verified: true`
-after validating the exact release content. This input defaults to false and is
-not exposed by the manual entry point, so standalone manual uploads always run
-core tests. Calls from the release workflow also retain core tests. The workflow
-never creates a version commit or tag itself.
+The workflow validates the tag and TestFlight tooling before importing
+credentials. Standalone manual uploads also run version tooling and core tests.
+The release workflow passes the tested commit SHA to the reusable workflow, which
+checks it against the tag and uses the shared version tooling and core test
+results. The workflow never creates a version commit or tag itself.
 
 ### Certificates and provisioning profile
 
@@ -385,13 +295,11 @@ can be reused if it has the required access. The `.p8` value remains the complet
 key with real line breaks, not Base64. No Apple ID password, app-specific password,
 or additional deploy key is needed by this workflow.
 
-The script uses a temporary keychain on GitHub-hosted runners or the dedicated
-persistent CI keychain on configured self-hosted runners. It validates profile
-platform, team, bundle identifier, expiration, and certificate membership and
-uses manual signing without automatic provisioning updates. On exit it removes
-only profile copies installed by that run and decoded credentials, restores the
-original keychain search list, and deletes the temporary keychain or locks the
-persistent one. It does not create or renew certificates or profiles in the developer portal.
+The script uses a temporary keychain. It validates the profile's platform, team,
+bundle identifier, expiration, and certificate membership and uses manual signing
+without automatic provisioning updates. On exit it removes the profile copies
+installed by that run and decoded credentials, restores the original keychain
+search list, and deletes the temporary keychain.
 
 ### App Store Connect setup and upload status
 
